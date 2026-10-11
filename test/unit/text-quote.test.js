@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 process.env.SPECREVIEW_HOME ??= mkdtempSync(path.join(tmpdir(), 'sr-home-'));
 
-const { findQuote, sourceToPlainText, similarity, normalizeWs, balanceMarkdown } = await import('../../src/core/text/quote.js');
+const { findQuote, sourceToPlainText, similarity, normalizeWs, balanceMarkdown, toWordBounds } = await import('../../src/core/text/quote.js');
 const { toPlain } = await import('../../src/core/text/plain.js');
 const { decodeEntities } = await import('../../src/core/text/entities.js');
 
@@ -152,3 +152,15 @@ test('similarity is 1 for equal strings and decreases with edits', () => {
   // only the first 64 chars count
   assert.equal(similarity('a'.repeat(64) + 'x', 'a'.repeat(64) + 'y'), 1);
 });
+
+test('toWordBounds: a selection cut mid-word is widened to whole words for display', () => {
+  assert.equal(toWordBounds('eploy to stagin', '1. **Week 1:** D', 'g; route'), 'Deploy to staging');
+  assert.equal(toWordBounds('st, validates it', 'accepts the reque', ''), 'request, validates it');
+  // already on word boundaries (or punctuation at the edges): unchanged
+  assert.equal(toWordBounds('all channels.', 'One API for ', ' Next'), 'all channels.');
+  assert.equal(toWordBounds('`x`', 'a', 'b'), '`x`');
+  assert.equal(toWordBounds('über', 'gr', 'ß'), 'grüberß');
+  assert.equal(toWordBounds('abc', null, undefined), 'abc');
+  assert.equal(toWordBounds('', 'a', 'b'), '');
+});
+

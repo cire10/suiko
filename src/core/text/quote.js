@@ -391,3 +391,35 @@ function plainContext(ctx, a, b, lineStart) {
   const text = ctx.format === 'text' ? raw : toPlain(ctx.format, raw, { lineStart, footnotes: ctx.footnotes ?? null }).text;
   return collapseWs(text);
 }
+
+const WORD_TAIL = /[\p{L}\p{N}_]+$/u;
+const WORD_HEAD = /^[\p{L}\p{N}_]+/u;
+const WORD_START = /^[\p{L}\p{N}_]/u;
+const WORD_END = /[\p{L}\p{N}_]$/u;
+
+/**
+ * For display only (`on:` and decisions.md context): extends a selection that starts or ends inside a word to the
+ * whole word, using the text just before (`prefix`) and after (`suffix`) it. 'eploy to stagin' with prefix
+ * '1. D' and suffix 'g; route' reads 'Deploy to staging'. Anchors keep the exact selection.
+ * @param {string} text
+ * @param {string | null | undefined} prefix
+ * @param {string | null | undefined} suffix
+ * @returns {string}
+ */
+export function toWordBounds(text, prefix, suffix) {
+  let out = String(text ?? '');
+  if (!out) return out;
+  if (WORD_START.test(out)) out = (String(prefix ?? '').match(WORD_TAIL)?.[0] ?? '') + out;
+  if (WORD_END.test(out)) out += String(suffix ?? '').match(WORD_HEAD)?.[0] ?? '';
+  return out;
+}
+
+/**
+ * True when `a` ends with a word character and `b` starts with one: text cut between them splits a word. Only
+ * meaningful on source text: rendered text runs blocks together ('Footnotes' + 'Measured').
+ * @param {string | null | undefined} a
+ * @param {string | null | undefined} b
+ */
+export function splitsWord(a, b) {
+  return WORD_END.test(String(a ?? '')) && WORD_START.test(String(b ?? ''));
+}

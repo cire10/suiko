@@ -42,6 +42,17 @@ test('text anchor: full source lines, unique, rendered quote in `on`', () => {
   assert.ok(MD.includes(/** @type {string} */ (d.src)));
 });
 
+test('`on` widens a selection cut mid-word to whole words; the anchor keeps the exact quote', () => {
+  const cut = md({ kind: 'text', startSrid: refreshP, endSrid: refreshP, exact: 'otated on every u', prefix: 'Refresh tokens are r', suffix: 'se, and the previous token is' });
+  assert.equal(cut.quote?.exact, 'otated on every u');
+  assert.equal(describeAnchor(cut, { source: MD }).on, 'rotated on every use');
+});
+
+test('`on` of a stored snip drops zero-width characters', () => {
+  const snip = /** @type {any} */ ({ ...rotated, kind: 'snip', quote: null, snip: { text: 'a\u200b\u2265 b', label: 'x', region: null } });
+  assert.equal(describeAnchor(snip, { source: MD }).on, 'a\u2265 b');
+});
+
 test('src is extended by whole lines until it is unique in the file', () => {
   const src = '# T\n\n- item\n- item\n- other\n\nx\n';
   const a = anchorFromLines({ version: 1, startLine: 4, endLine: 4, source: src, format: 'markdown' });

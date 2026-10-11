@@ -31,7 +31,7 @@
 
 import { LIMITS } from '../../shared/protocol.js';
 import { offsetMapper } from '../diff/index.js';
-import { lineIndex } from '../text/index.js';
+import { lineIndex, splitsWord, toWordBounds } from '../text/index.js';
 import { snipLabel } from './snip.js';
 import { assetPathOf, oneLine } from './util.js';
 
@@ -229,11 +229,12 @@ function onOf(anchor) {
   const snipText = /** @type {any} */ (last).snip?.text;
   switch (/** @type {string} */ (last.kind)) {
     case 'snip':
-      return snipText ? oneLine(snipText, ON_CHARS) : null;
+      // snips made before the guest dropped zero-width characters (KaTeX struts) can still hold them
+      return snipText ? oneLine(snipText.replace(/[\u200b-\u200d\u2060\ufeff]/g, ''), ON_CHARS) : null;
     case 'doc':
       // a GENERAL anchor made from a selection of generated text outside every source element keeps its quote (a
       // snip over nothing stamped keeps the text inside its box)
-      if (last.quote?.exact) return oneLine(last.quote.exact, ON_CHARS);
+      if (last.quote?.exact) return oneLine(quoteText(last), ON_CHARS);
       return snipText ? oneLine(snipText, ON_CHARS) : null;
     case 'section':
       return null;
@@ -245,8 +246,20 @@ function onOf(anchor) {
       return t ? oneLine(t, ON_CHARS) : null;
     }
     default:
-      return last.quote?.exact ? oneLine(last.quote.exact, ON_CHARS) : null;
+      return last.quote?.exact ? oneLine(quoteText(last), ON_CHARS) : null;
   }
+}
+
+/**
+ * The rendered quote, widened to whole words where the source shows the selection cut a word. The rendered context
+ * alone cannot tell: blocks follow each other in it without a separator ('Footnotes' + 'Measured ...').
+ * @param {Anchor} a  an anchor with a quote
+ */
+function quoteText(a) {
+  const q = /** @type {NonNullable<Anchor['quote']>} */ (a.quote);
+  const s = a.src;
+  if (!s?.text) return q.exact;
+  return toWordBounds(q.exact, splitsWord(s.prefix, s.text) ? q.prefix : '', splitsWord(s.text, s.suffix) ? q.suffix : '');
 }
 
 // ------------------------------------------------------------------------------------------- working-copy range

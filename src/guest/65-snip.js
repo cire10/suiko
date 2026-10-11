@@ -19,7 +19,9 @@
 //     DomTarget {kind:'element', srid: containerSrid, region} is drawn exactly where the reviewer dragged.
 //   - text: the visible rendered text inside the box (TEXT_EXCLUDE walk of the container, or of the document; each
 //     character counts when the centre of its Range rect is inside the box), whitespace collapsed, gaps read as one
-//     space, at most SNIP.maxText characters.
+//     space, zero-width characters dropped, at most SNIP.maxText characters. KaTeX math the box touches reads as its
+//     TeX source ($...$, or $$...$$ for display math) from the MathML annotation: the HTML rendering's text is in
+//     layout order (a fraction's denominator before its numerator) and full of zero-width struts.
 //   - label: e.g. 'area in "2. Request flow" (paragraph + figure)' - the heading inside the box ("over"), else the
 //     heading the area sits under ("in"), plus what the box covers: a single block, or the blocks of a single
 //     table / figure / diagram, named by Capture.labelFor; else counts ("2 headings + paragraph").
@@ -53,6 +55,8 @@ const Snip = (() => {
   const MAX_CROP_CHARS = 6500000;
   /** Upper bound of per-character Range probes for text the box cuts through. */
   const MAX_CHAR_PROBES = 40000;
+  /** Zero-width characters (KaTeX struts, joiners, BOM) left out of the snip text. */
+  const ZERO_WIDTH = new Set([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]);
   const EDGE_PX = 28;
   const MAX_AUTOSCROLL = 24;
   const VENDOR_PATH = 'vendor/modern-screenshot/index.mjs';
@@ -215,6 +219,8 @@ const Snip = (() => {
     const range = document.createRange();
     /** @type {Map<Element, boolean>} */
     const shown = new Map();
+    /** @type {Set<Element>} KaTeX elements already read as TeX */
+    const tex = new Set();
     /** @param {Text} t */
     const visible = (t) => {
       const p = t.parentElement;
@@ -254,6 +260,17 @@ const Snip = (() => {
         gap = true;
         continue;
       }
+      const math = node.parentElement?.closest('.katex');
+      const source = math ? texOf(math) : '';
+      if (math && source) {
+        if (!tex.has(math)) {
+          tex.add(math);
+          gap = true;
+          push(math.closest('.katex-display') ? `$$${source}$$` : `$${source}$`);
+          gap = true;
+        }
+        continue;
+      }
       const whole = rects.every((r) => r.left >= box.left - 0.5 && r.right <= box.right + 0.5 &&
         r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5);
       for (let i = 0; i < data.length && len <= SNIP.maxText; i++) {
@@ -262,6 +279,7 @@ const Snip = (() => {
           gap = true;
           continue;
         }
+        if (ZERO_WIDTH.has(c)) continue;
         const n = c >= 0xd800 && c <= 0xdbff && i + 1 < data.length ? 2 : 1;
         let hit = whole;
         if (!whole && probes++ < MAX_CHAR_PROBES) {
@@ -279,6 +297,15 @@ const Snip = (() => {
     }
     range.detach();
     return clip(out.join(''), SNIP.maxText);
+  }
+
+  /**
+   * The TeX source of a rendered KaTeX element (its MathML annotation), whitespace collapsed; '' when it has none.
+   * @param {Element} math  a .katex element
+   */
+  function texOf(math) {
+    const a = math.querySelector('annotation[encoding="application/x-tex"]');
+    return (a?.textContent ?? '').replace(/\s+/g, ' ').trim();
   }
 
   /** What a leaf block counts as in the label: [noun key, unit element]. @param {Element} leaf */

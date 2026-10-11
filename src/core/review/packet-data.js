@@ -369,6 +369,12 @@ function nextStep(doc, latest, actionable) {
   if (latest?.verdict === 'approved' && actionable === 0) {
     return doc.final ? `specreview final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
   }
+  // Approved, but the same submission reopened a thread or answered a question. A revise would make the working copy
+  // differ from the approved (final) version, so the threads get replies only.
+  if (latest?.verdict === 'approved') {
+    const reply = `approved: answer each thread with specreview reply ${doc.id} <tid> -m <md> (no edits, no new version)`;
+    return doc.final ? `${reply} -> specreview final ${doc.id} --decisions   (then stop waiting)` : `${reply}; then stop waiting`;
+  }
   if (actionable === 0) return `nothing to act on; specreview wait ${doc.id} (background)`;
   return `edits -> specreview revise ${doc.id} --replies - -> specreview wait ${doc.id} (background)`;
 }

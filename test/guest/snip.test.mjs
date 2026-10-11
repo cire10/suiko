@@ -385,6 +385,25 @@ describe('snip mode', () => {
     }
   });
 
+  test('KaTeX math reads as its TeX source, not the layout-order HTML text with zero-width struts', async () => {
+    const d = await openDoc(browser, harness, 'math');
+    try {
+      const p2 = await rectOf(d.frame, 'p[data-srid="2"]');
+      const p3 = await rectOf(d.frame, 'p[data-srid="3"]');
+      await send(d.page, 'setTool', { tool: 'snip' });
+      await settle(d.frame);
+      const from = await mark(d.page);
+      await drag(d, 4, Math.round(p2.y - 2), 900, Math.round(p3.y + p3.h - 2));
+      const act = await waitMsg(d.page, 'action', from, null, 10000);
+      const text = act.capture.text;
+      assert.equal(text,
+        '$$A = 1 - \\frac{\\text{failed enqueue requests}}{\\text{total enqueue requests}} \\geq 0.999$$ and inline $x^2$ reads as TeX too.');
+      assert.doesNotMatch(text, /[\u200b\u200c\u200d\u2060\ufeff]/);
+    } finally {
+      await d.close();
+    }
+  });
+
   test('inside a mermaid diagram: anchored to the stamped <pre>; snip and pick regions both paint back in place', async () => {
     const d = await openDoc(browser, harness, 'snip');
     try {

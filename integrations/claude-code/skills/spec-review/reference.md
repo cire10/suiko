@@ -108,7 +108,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 - **Anchor notes:** `(outdated: text changed)` means the quoted text was edited since the comment; `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)` means it could not be found.
 - **Footer:** `LOCKED` ranges, `DECISIONS` to keep true, drafts (only with `--include-drafts`, clearly labelled as not submitted), the protocol reminder and `NEXT`.
 - **Size cap:** 10,000 characters. Threads beyond it are listed one per line; run `specreview show <doc> tN` for each.
-- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: specreview final token-service --decisions   (then stop waiting)`.
+- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: specreview final token-service --decisions   (then stop waiting)`. When the approval also reopened or answered threads, they are listed and NEXT says to answer each with `specreview reply` (no edits, no new version) before `final`.
 
 ### Pictures: snips and screenshots
 
