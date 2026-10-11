@@ -152,6 +152,23 @@ describe('specreview install: detection and dry run', () => {
   });
 });
 
+describe('--only', () => {
+  test('agents left out by --only are not reported as "not detected" (and not listed); JSON says why', async () => {
+    const h = makeHome({ dirs: ['.claude', '.codex', '.cursor'] });
+    const r = await h.run(['install', '--only', 'claude']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^Claude Code: detected/m);
+    assert.doesNotMatch(r.stdout, /^(Codex CLI|Cursor|Kiro CLI): /m, 'only the agent asked for is listed');
+    assert.doesNotMatch(r.stdout, /not detected/);
+    const { j } = await h.json(['install', '--only', 'claude']);
+    const cursor = j.agents.find((/** @type {any} */ a) => a.id === 'cursor');
+    assert.equal(cursor.detected, true, 'installed, yet left out');
+    assert.equal(cursor.status, 'skipped');
+    assert.equal(cursor.reason, 'not named with --only');
+    assert.equal(j.agents.find((/** @type {any} */ a) => a.id === 'kiro').status, 'skipped', 'undetected ones too');
+  });
+});
+
 describe('empty files', () => {
   test('an existing empty AGENTS.md or config.toml is "filled", not reported as a new file', async () => {
     const h = makeHome({ dirs: ['.codex'], files: { '.codex/AGENTS.md': '', '.codex/config.toml': '\n' } });

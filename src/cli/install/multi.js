@@ -151,7 +151,14 @@ export function runInstaller(ctx, o) {
     const r = { id: def.id, name: def.name, detected: det.detected, evidence: det.evidence, selected: false, status: 'not-detected', files: [], notes: [], refusals: [] };
     agents.push(r);
     const wanted = o.only ? o.only.has(def.id) : o.mode === 'uninstall' || det.detected;
-    if (!wanted) continue;
+    if (!wanted) {
+      if (o.only) {
+        // Left out by --only, whether or not it is installed: not "not detected".
+        r.status = 'skipped';
+        r.reason = NOT_IN_ONLY;
+      }
+      continue;
+    }
     if (skip.has(def.id)) {
       r.status = 'skipped';
       r.reason = 'skipped with --skip';
@@ -279,6 +286,9 @@ export function reportExit(report) {
 
 const AGENT_IDS = AGENTS.map((a) => a.id).join(', ');
 
+/** Reason of an agent that --only leaves out (not listed in the text report: the user picked other agents). */
+const NOT_IN_ONLY = 'not named with --only';
+
 /**
  * Human text of a report.
  * @param {Report} report
@@ -301,6 +311,7 @@ export function describeReport(report) {
         if (install) out.push('', `${r.name}: not detected`);
         continue;
       }
+      if (r.reason === NOT_IN_ONLY) continue;
       out.push('', `${r.name}: ${r.detected ? `detected${where}; ` : ''}skipped: ${r.reason}`);
       continue;
     }
