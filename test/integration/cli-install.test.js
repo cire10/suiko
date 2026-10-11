@@ -127,6 +127,30 @@ describe('install claude', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  test('the user scope is <HOME>/.claude of the environment it is given, never the OS home; no HOME is refused', async () => {
+    const home = tempDir('user-home');
+    try {
+      const r = await runCli(['install', 'claude', '--with-plan-gate', '--apply'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME, HOME: home } });
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'spec-review', 'SKILL.md')));
+      assert.ok(readJson(path.join(home, '.claude', 'settings.json')).hooks.PermissionRequest);
+      const viaDir = tempDir('claude-config-dir');
+      try {
+        const c = await runCli(['install', 'claude', '--json'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME, HOME: home, CLAUDE_CONFIG_DIR: viaDir } });
+        assert.ok(JSON.parse(c.stdout).files.every((/** @type {any} */ f) => f.path.startsWith(viaDir)), '$CLAUDE_CONFIG_DIR still wins');
+      } finally {
+        fs.rmSync(viaDir, { recursive: true, force: true });
+      }
+      const none = await runCli(['install', 'claude', '--apply'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME } });
+      assert.equal(none.code, 1);
+      assert.match(none.stderr, /cannot tell your home directory: HOME is not set/);
+      const proj = await runCli(['install', 'claude', '--project'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME } });
+      assert.equal(proj.code, 0, '--project needs no HOME');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test('re-running `install claude` without hook flags re-points the SpecReview hooks already there (none added)', async () => {
     const home = tempDir('claude-repoint');
     try {

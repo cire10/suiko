@@ -89,6 +89,18 @@ export async function parse({ values, positionals }) {
 }
 
 /**
+ * Claude Code's user config dir: $CLAUDE_CONFIG_DIR, else <HOME>/.claude from the runtime's environment, as the agent
+ * installer resolves it (os.homedir() would ignore the HOME the caller set), or undefined when HOME is unknown.
+ * @param {import('../runtime.js').Runtime} rt
+ * @returns {string | undefined}
+ */
+function claudeConfigDir(rt) {
+  if (rt.env.CLAUDE_CONFIG_DIR) return path.resolve(rt.env.CLAUDE_CONFIG_DIR);
+  const home = rt.deps.home ?? rt.env.HOME ?? rt.env.USERPROFILE;
+  return home ? path.join(path.resolve(home), '.claude') : undefined;
+}
+
+/**
  * @param {import('../runtime.js').Runtime} rt
  * @param {any} input
  * @returns {Promise<import('../io.js').CommandResult>}
@@ -100,7 +112,10 @@ export async function execute(rt, input) {
     const refused = report.agents.flatMap((a) => a.refusals.map((x) => `specreview: refused ${x.file}: ${x.message}`));
     return { exit: reportExit(report), text: describeReport(report), json: reportJson(report), stderr: refused };
   }
-  const claudeHome = rt.deps.claudeHome ?? (rt.env.CLAUDE_CONFIG_DIR ? path.resolve(rt.env.CLAUDE_CONFIG_DIR) : undefined);
+  const claudeHome = rt.deps.claudeHome ?? claudeConfigDir(rt);
+  if (input.target === 'claude' && input.scope === 'user' && !claudeHome) {
+    throw new Error('cannot tell your home directory: HOME is not set (or pass --project)');
+  }
   const manifest = manifestPath(rt.env);
   const plan =
     input.target === 'claude'
