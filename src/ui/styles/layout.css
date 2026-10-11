@@ -257,6 +257,11 @@
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
+.frame-wrap.is-snipping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
 .doc-frame {
   flex: 1 1 auto;
   width: 100%;

@@ -2,17 +2,23 @@
 //
 // While focus is inside the document iframe, the reviewer's shortcuts (c s q a e j k n p r f h t v d 1-4 [ ] \ ? ...)
 // would never reach the UI. The guest forwards `key {key, meta, ctrl, shift, alt}` to the UI when:
+//   - the event is trusted (a real keystroke): a script in the reviewed document cannot fake keys, e.g. Shift+B,
+//     which opens the reviewer's native screen picker, or `b`, which enters snip mode;
 //   - the focus is not in an editable element (input, textarea, select, contenteditable) and not composing (IME);
 //   - the page did not call preventDefault() — checked after the event finished dispatching, so handlers registered
 //     after the guest's are respected too;
 //   - the key is a single printable character without Cmd/Ctrl/Alt, Escape, or Enter with Cmd/Ctrl
 //     (Cmd+Enter, Cmd+Shift+Enter); auto-repeat is ignored.
 // The UI only maps forwarded keys to non-mutating actions. Keys consumed by pick mode ('[' ']' Esc and the cell
-// chooser digits) are stopped in 60-picker.js and never forwarded. Esc first closes an open "removed" popover.
+// chooser digits) and snip mode (Esc) are stopped in 60-picker.js / 65-snip.js and never forwarded. Esc first closes
+// an open "removed" popover.
 // Exception: c / s / q / a while the document has a text capture (50-selection.js) are handled here, under the same
 // conditions: the guest posts `action {action, capture, rect}` exactly like the mini-toolbar and dismisses the
 // toolbar, and does NOT forward the key, so the UI opens the composer once (from `action`). Without a capture
 // (nothing selected, readonly mode, pick mode) the key is forwarded as before.
+// Likewise `b` (also 'B' without Shift, i.e. Caps Lock) toggles snip mode in the guest (65-snip.js posts
+// toolChanged {tool:'snip'} / {tool:'select'}) and is not forwarded; it is forwarded only when snips are not allowed
+// (readonly). Shift+B (snip the screen, a daemon job) is always forwarded as a normal key.
 
 const Keys = (() => {
   /** Keys that act on the current text selection like the mini-toolbar buttons (same map as src/ui/keys.js). */
@@ -20,9 +26,14 @@ const Keys = (() => {
     c: 'comment', s: 'suggest', q: 'question', a: 'agree',
   }));
 
+  /** `b` without Shift (Caps Lock reports 'B'): snip the document. @param {{key: string, shift: boolean}} p */
+  function isSnipKey(p) {
+    return p.key === 'b' || (p.key === 'B' && !p.shift);
+  }
+
   /** @param {KeyboardEvent} ev */
   function shouldForward(ev) {
-    if (ev.repeat || ev.isComposing) return false;
+    if (!ev.isTrusted || ev.repeat || ev.isComposing) return false;
     const k = ev.key;
     if (k === 'Escape') return true;
     if (k === 'Enter') return ev.metaKey || ev.ctrlKey;
@@ -47,6 +58,7 @@ const Keys = (() => {
       if (ev.defaultPrevented) return;
       const action = SELECTION_KEYS[payload.key];
       if (action && SelectionCapture.keyAction(action)) return; // posted `action`; the UI must not see the key too
+      if (isSnipKey(payload) && Snip.keyToggle()) return; // posted `toolChanged`; the UI follows it
       Channel.send(MSG.KEY, payload);
     }, 'key-forward'), 0);
   }

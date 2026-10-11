@@ -4,7 +4,8 @@
 //   describeAnchor(anchor, { source, workingSource?, workingMapper?, format?, docPath?, absAttachmentPath?,
 //                            absAssetPath?, attachments?, maxChars? })
 //     -> { lines: [a, b] | null, label, section, on, src, srcUnique, srcWindow, srcEditable, asset, crops,
-//          lastKnown }
+//          cropKind, lastKnown }
+//   attachmentKindOf(anchor) -> 'region' | 'snip' | 'image' (what the thread's attachments are, see below)
 //   anchorLabel(anchor) -> the target label alone (also used for DomTarget labels)
 //   elideDataUris(text) -> { text, elided }
 //
@@ -20,13 +21,18 @@
 // data: URIs with a payload of 64+ chars are elided as `data:image/png;base64,...(512 KB)` (media type and
 // parameters kept; srcEditable: false).
 // The result is capped at `maxChars` (LIMITS.threadSrcChars = 1200) per thread (srcUnique: false when cut).
-// `on` is the rendered quote (<= 120 chars); `asset` is the absolute path (via absAssetPath) of the local file an
-// element anchor references; `crops` are the thread's attachments as absolute paths (via absAttachmentPath).
+// `on` is the rendered quote (<= 120 chars; for snips the visible text inside the box); `asset` is the absolute path
+// (via absAssetPath) of the local file an element anchor references; `crops` are the thread's attachments as
+// absolute paths (via absAttachmentPath), for every kind of anchor (GENERAL ones included). `cropKind` says what
+// they are: 'region' (a crop of an image region: element / cell anchors with a region), 'snip' (the picture of a
+// snipped area: snip anchors, or a GENERAL anchor made from a snip over nothing stamped), else 'image' (a screen
+// snip or a pasted image).
 // Orphaned anchors have no lines/src; `lastKnown` says where they were last found (label = its target label).
 
 import { LIMITS } from '../../shared/protocol.js';
 import { offsetMapper } from '../diff/index.js';
 import { lineIndex } from '../text/index.js';
+import { snipLabel } from './snip.js';
 import { assetPathOf, oneLine } from './util.js';
 
 /**
@@ -43,6 +49,7 @@ import { assetPathOf, oneLine } from './util.js';
  * @property {boolean} srcEditable
  * @property {string|null} asset
  * @property {string[]} crops
+ * @property {'region' | 'snip' | 'image'} cropKind what the attachments are (attachmentKindOf)
  * @property {{ v: number, lines: [number, number], section: string[], text: string } | null} lastKnown orphans only:
  *   where the anchor was last found (for "(orphaned: was "..." in §5 v1 L260)")
  */
@@ -78,6 +85,7 @@ export function describeAnchor(anchor, opts) {
     srcEditable: true,
     asset: assetRel ? (opts?.absAssetPath ? opts.absAssetPath(assetRel) : assetRel) : null,
     crops,
+    cropKind: attachmentKindOf(anchor),
     lastKnown: null,
   };
   if (anchor.state === 'orphaned') {
@@ -120,12 +128,15 @@ export function describeAnchor(anchor, opts) {
 
 /**
  * The target label shown in packets and on DOM targets, e.g. `<img alt="System overview"> region x40-62% y10-30%`,
- * `mermaid node "API Gateway"`, `table cell row "refresh_token" x col "TTL" = "30 d"`, `§3 Tokens`, `GENERAL`.
+ * `mermaid node "API Gateway"`, `table cell row "refresh_token" x col "TTL" = "30 d"`, `§3 Tokens`, `GENERAL`,
+ * `snip (figure + 2 paragraphs)`.
  * @param {Anchor} anchor
  */
 export function anchorLabel(anchor) {
   const q = (/** @type {any} */ s) => JSON.stringify(oneLine(String(s ?? ''), 60));
-  switch (anchor.kind) {
+  switch (/** @type {string} */ (anchor.kind)) {
+    case 'snip':
+      return snipLabel(/** @type {any} */ (anchor));
     case 'doc':
       return 'GENERAL';
     case 'section':
@@ -160,6 +171,21 @@ export function anchorLabel(anchor) {
       }
       return 'text';
   }
+}
+
+/**
+ * What a thread's attachments show, from its anchor: 'region' (element / cell anchors with a region: the crop of
+ * that region), 'snip' (snip anchors, and GENERAL anchors made from a snip: the picture of the snipped area), else
+ * 'image' (a screen snip or a pasted image). Orphans answer for their last known anchor.
+ * @param {Anchor | null | undefined} anchor
+ * @returns {'region' | 'snip' | 'image'}
+ */
+export function attachmentKindOf(anchor) {
+  if (!anchor) return 'image';
+  const a = anchor.state === 'orphaned' && anchor.lastKnown ? anchor.lastKnown : anchor;
+  if (/** @type {string} */ (a.kind) === 'snip' || /** @type {any} */ (a).snip) return 'snip';
+  if ((a.kind === 'element' || a.kind === 'cell') && a.region) return 'region';
+  return 'image';
 }
 
 /**
@@ -200,10 +226,15 @@ function formatBytes(n) {
  */
 function onOf(anchor) {
   const last = anchor.state === 'orphaned' ? (anchor.lastKnown ?? anchor) : anchor;
-  switch (last.kind) {
+  const snipText = /** @type {any} */ (last).snip?.text;
+  switch (/** @type {string} */ (last.kind)) {
+    case 'snip':
+      return snipText ? oneLine(snipText, ON_CHARS) : null;
     case 'doc':
-      // a GENERAL anchor made from a selection of generated text outside every source element keeps its quote
-      return last.quote?.exact ? oneLine(last.quote.exact, ON_CHARS) : null;
+      // a GENERAL anchor made from a selection of generated text outside every source element keeps its quote (a
+      // snip over nothing stamped keeps the text inside its box)
+      if (last.quote?.exact) return oneLine(last.quote.exact, ON_CHARS);
+      return snipText ? oneLine(snipText, ON_CHARS) : null;
     case 'section':
       return null;
     case 'cell':

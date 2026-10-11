@@ -3,8 +3,10 @@
 // Resolution (amendments 3.4), per target:
 //   - kind 'doc': nothing to paint; position {top: 0, height: 0, state: 'ok'}.
 //   - element kinds ('element' | 'cell', or any target with region/svg/cell): the [data-srid] element, outlined;
-//     a region is drawn as a dashed box at fractions of Capture.regionBase(el); a mermaid node (svg {nodeId,label})
-//     is located by data-id, then the id pattern, then label text, and boxed (the whole diagram until it renders).
+//     a region is drawn as a dashed box at fractions of the element's border box (Capture.regionBox), whatever the
+//     element is (an img, a mermaid <pre>, a section or figure a snip was drawn over); a mermaid node
+//     (svg {nodeId,label}) is located by data-id, then the id pattern, then label text, and boxed (the whole diagram
+//     until it renders).
 //   - text kinds: scope = element(srid)..element(endSrid ?? srid); search the whitespace-insensitive quote in the
 //     scope's TEXT_EXCLUDE text with prefix/suffix scoring; else in the whole document (proximity hint = scope
 //     start); else outline the scope element(s) with state 'block'; else 'missing'.
@@ -122,7 +124,7 @@ const Targets = (() => {
         const node = Capture.findMermaidNode(Capture.mermaidRoot(el) || el, t.svg);
         if (node) r.mark = node;
       }
-      if (t.region) r.regionEl = Capture.regionBase(el);
+      if (t.region) r.regionEl = el;
       return r;
     }
     if (t.quote) {
@@ -182,7 +184,7 @@ const Targets = (() => {
 
   /** @param {Resolved} r */
   function regionRect(r) {
-    const base = Capture.contentBox(/** @type {Element} */ (r.regionEl));
+    const base = Capture.regionBox(/** @type {Element} */ (r.regionEl));
     const g = /** @type {NonNullable<DomTarget['region']>} */ (r.t.region);
     return new DOMRect(base.left + g.x * base.width, base.top + g.y * base.height, g.w * base.width, g.h * base.height);
   }
@@ -369,7 +371,7 @@ const Targets = (() => {
 
   /** @param {MouseEvent} ev */
   function onDocClick(ev) {
-    if (hidden || ev.button !== 0 || ev.target === Overlay.host || Picker.active) return;
+    if (hidden || ev.button !== 0 || ev.target === Overlay.host || Picker.active || Snip.active) return;
     const sel = document.getSelection();
     if (sel && !sel.isCollapsed) return;
     const id = hitTest(ev);

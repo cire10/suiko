@@ -9,8 +9,10 @@
 // - Type chips (Comment / Question / Suggestion) and severity chips (Blocking / Normal / Nit, keys 1-3 outside the
 //   textarea).
 // - A Markdown textarea: paste or drop an image to attach it (re-encoded to PNG/JPEG, at most 5 MB).
-// - Add to review (Cmd+Enter) creates a draft. Send now submits a one-item review with verdict `comment`.
-//   Cancel (Esc) closes the composer, with an Undo toast.
+// - Screenshots: the crop of a doc snip (b) or a picked region, and attached images (pasted, a screen snip with
+//   Shift+B), show as thumbnails (TESTID.composerAttachment); a click shows one full size.
+// - Add to review (Cmd/Ctrl+Enter) creates a draft. Send now (Cmd/Ctrl+Shift+Enter) submits a one-item review with
+//   verdict `comment`. Cancel (Esc) closes the composer, with an Undo toast. The buttons show their keys.
 // - Suggestions: text mode (an input prefilled with the exact slice) when the source slice equals the rendered
 //   quote modulo whitespace; otherwise source mode (a monospace textarea with the anchor's whole lines). A live word
 //   diff is shown, plus an optional rendered preview (/fragment, sanitised).
@@ -20,11 +22,12 @@ import { html, useEffect, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { docApi } from '../api.js';
 import {
-  attachImage, cancelComposer, errorText, openComposer, removeAttachment, resolveComposerAnchor, setComposerType,
-  setSuggestionText, submitComposer, toast, updateComposer,
+  attachImage, cancelComposer, errorText, openComposer, openLightbox, removeAttachment, resolveComposerAnchor,
+  setComposerType, setSuggestionText, submitComposer, toast, updateComposer,
 } from '../actions.js';
+import { KEYS, shortcut } from '../keys.js';
 import { SafeHtml } from '../markdown.js';
-import { anchorChipParts, linesLabel } from '../model.js';
+import { anchorChipParts, attachmentName, attachmentUrl, canSendNow, linesLabel } from '../model.js';
 import { store, useStore } from '../state.js';
 import { imageFileToDataUrl, isEditable } from '../util.js';
 import { Spinner, WordDiff } from './common.js';
@@ -42,6 +45,7 @@ const SEVERITIES = /** @type {const} */ ([
 
 export function Composer() {
   const c = useStore((s) => s.composer);
+  const bases = useStore((s) => ({ attachmentBase: s.ds?.attachmentBase, contentBase: s.ds?.contentBase }));
   const taRef = useRef(/** @type {HTMLTextAreaElement|null} */ (null));
   const rootRef = useRef(/** @type {HTMLElement|null} */ (null));
 
@@ -60,6 +64,8 @@ export function Composer() {
   if (!c) return null;
   const chip = anchorChipParts(c.preview, c.anchor);
   const kind = c.capture?.kind || c.anchor?.kind;
+  // Suggestions replace text: not for the whole doc or a section (also a snip or screen snip that resolved to one).
+  const noSuggestion = ['doc', 'section'].includes(kind) || ['doc', 'section'].includes(c.anchor?.kind);
   const widenable = !c.draftId && c.capture?.kind === 'text';
   const title = c.draftId ? `Edit draft ${c.draftId}` : c.type === 'agree' ? 'Mark agreed' : 'New comment';
   const previewText = c.resolving ? 'Locating what the agent will see…'
@@ -68,12 +74,16 @@ export function Composer() {
 
   /** @param {KeyboardEvent} e */
   const onRootKey = (e) => {
+    // A dialog over the composer (a screenshot shown full size) gets its keys first (Esc closes it, not this).
+    if (store.get().dialog) return;
     const el = /** @type {HTMLElement} */ (e.target);
     const typing = el.localName === 'textarea' || (el.localName === 'input' && /** @type {HTMLInputElement} */ (el).type === 'text');
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'Enter') {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      // Cmd+Shift+Enter on a draft being edited or on "Mark agreed" bubbles up to the global Submit review.
+      if (e.shiftKey && !canSendNow(c)) return;
       e.preventDefault();
       e.stopPropagation();
-      submitComposer();
+      submitComposer(e.shiftKey ? { sendNow: true } : {});
       return;
     }
     if (e.key === 'Escape') {
@@ -117,19 +127,26 @@ export function Composer() {
         ? html`<span class="preview-text muted"><${Spinner} label="Locating" /> Locating what the agent will see…</span>`
         : c.resolveError
           ? html`<span class="preview-text error">Could not anchor this: ${c.resolveError}</span>
-              <button type="button" class="link-btn" onClick=${() => { const body = c.body; store.set({ composer: null }); openComposer({ capture: { kind: 'doc' }, body }); }}>Make it a general comment</button>`
+              <button type="button" class="link-btn" onClick=${() => {
+                // Keeps what was written and the screenshots (a snip that could not be anchored still has its crop).
+                const { body, crop, attachments } = c;
+                store.set({ composer: null });
+                openComposer({ capture: { kind: 'doc' }, body, crop, attachments });
+              }}>Make it a general comment</button>`
           : typeof c.preview?.text === 'string' && c.preview.text
             ? html`<span class="preview-text agent-sees" data-anchor-lines=${chip.lines} title=${previewText}>${c.preview.text}</span>`
             : html`<span class="preview-text agent-sees" data-anchor-lines=${chip.lines} title=${previewText}><span class="muted">Agent will see:</span>
               ${chip.lines ? html` <strong>${chip.lines}</strong>` : null}${chip.section ? html` <span>${chip.section}</span>` : null}
               ${chip.label ? html` <q>${chip.label}</q>` : null}</span>`}
     </div>
-    ${c.crop ? html`<img class="crop" src=${c.crop} alt="Crop of the selected region" />` : null}
+    ${c.crop ? html`<button type="button" class="thumb-btn crop-btn" title="Show full size"
+      onClick=${() => openLightbox(/** @type {string} */ (c.crop), cropAlt(c.capture))}>
+      <img class="crop" data-testid=${TESTID.composerAttachment} data-attachment="crop" src=${c.crop} alt=${cropAlt(c.capture)} /></button>` : null}
     ${c.type === 'agree' ? html`<${AgreeForm} c=${c} kind=${kind} />` : html`
       <div class="chip-row" role="radiogroup" aria-label="Type">
         ${TYPES.map((t) => html`<button type="button" role="radio" aria-checked=${c.type === t.key}
           class=${`chip-toggle ${c.type === t.key ? 'on' : ''}`} onClick=${() => setComposerType(t.key)}
-          disabled=${t.key === 'suggestion' && (kind === 'doc' || kind === 'section')}>${t.label}</button>`)}
+          disabled=${t.key === 'suggestion' && noSuggestion}>${t.label}</button>`)}
       </div>
       <div class="chip-row" role="radiogroup" aria-label="Severity">
         ${SEVERITIES.map((sv) => html`<button type="button" role="radio" aria-checked=${c.severity === sv.key}
@@ -139,22 +156,37 @@ export function Composer() {
       ${c.type === 'suggestion' ? html`<${SuggestionEditor} c=${c} />` : null}
       <label class="sr-only" for="sr-composer-body">Comment</label>
       <textarea ref=${taRef} id="sr-composer-body" data-testid=${TESTID.composerTextarea} rows=${c.type === 'suggestion' ? 2 : 4}
-        value=${c.body} placeholder=${c.type === 'suggestion' ? 'Why? (optional, Markdown)' : c.type === 'question' ? 'Ask a question (Markdown)' : 'Leave a comment (Markdown). Paste an image to attach it.'}
+        value=${c.body} placeholder=${c.type === 'suggestion' ? 'Why? (optional, Markdown)' : c.type === 'question' ? 'Ask a question (Markdown)'
+          : c.crop || c.attachments.length ? 'What about this screenshot? (Markdown, optional)' : 'Leave a comment (Markdown). Paste an image to attach it.'}
         onInput=${(/** @type {any} */ e) => updateComposer({ body: e.currentTarget.value })} onPaste=${onPaste} onDrop=${onDrop}></textarea>
-      ${c.attachments.length ? html`<ul class="attach-list">${c.attachments.map((a) => html`<li key=${a.path}>
-        ${a.preview ? html`<img src=${a.preview} alt="" />` : null}<span class="small">${a.path.split('/').pop()}</span>
-        <button type="button" class="link-btn danger" onClick=${() => removeAttachment(a.path)} aria-label=${`Remove ${a.path}`}>Remove</button>
-      </li>`)}</ul>` : null}
+      ${c.attachments.length ? html`<ul class="attach-list">${c.attachments.map((a) => {
+        const src = a.preview || attachmentUrl(bases, a.path);
+        const name = attachmentName(a.path);
+        return html`<li key=${a.path}>
+          ${src ? html`<button type="button" class="thumb-btn" title=${`Show ${name} full size`} onClick=${() => openLightbox(src, name)}>
+            <img data-testid=${TESTID.composerAttachment} data-attachment=${a.path} src=${src} alt=${`Attached screenshot ${name}`} /></button>` : null}
+          <span class="small">${name}</span>
+          <button type="button" class="link-btn danger" onClick=${() => removeAttachment(a.path)} aria-label=${`Remove ${a.path}`}>Remove</button>
+        </li>`;
+      })}</ul>` : null}
       ${c.error ? html`<p class="error small" role="alert">${c.error}</p>` : null}
       <div class="composer-actions">
         <button type="button" class="btn btn-primary" data-testid=${TESTID.composerAdd} disabled=${c.busy || c.resolving}
-          onClick=${() => submitComposer()} title="Add to review (⌘↵)">${c.draftId ? 'Save draft' : 'Add to review'}</button>
+          onClick=${() => submitComposer()} title=${`${c.draftId ? 'Save the draft' : 'Add to the review, send it later with Submit review'} (${shortcut(KEYS.add)})`}
+          aria-keyshortcuts="Meta+Enter Control+Enter">${c.draftId ? 'Save draft' : 'Add to review'}<kbd class="btn-kbd" aria-hidden="true">${shortcut(KEYS.add, { compact: true })}</kbd></button>
         ${c.draftId ? null : html`<button type="button" class="btn" data-testid=${TESTID.composerSendNow} disabled=${c.busy || c.resolving}
-          onClick=${() => submitComposer({ sendNow: true })} title="Submit just this comment now (verdict: comment)">Send now</button>`}
-        <button type="button" class="btn" onClick=${cancelComposer} title="Cancel (Esc)">Cancel</button>
+          onClick=${() => submitComposer({ sendNow: true })} title=${`Send just this comment to the agent now, as a review with verdict comment (${shortcut(KEYS.sendNow)})`}
+          aria-keyshortcuts="Meta+Shift+Enter Control+Shift+Enter">Send now<kbd class="btn-kbd" aria-hidden="true">${shortcut(KEYS.sendNow, { compact: true })}</kbd></button>`}
+        <button type="button" class="btn" onClick=${cancelComposer} title="Cancel (Esc)" aria-keyshortcuts="Escape">Cancel</button>
         ${c.busy ? html`<${Spinner} label="Saving" />` : null}
       </div>`}
   </section>`;
+}
+
+/** Alt text of a crop: what was snipped or picked. @param {any} capture */
+function cropAlt(capture) {
+  if (capture?.kind === 'snip') return `Snip of ${String(capture.label || 'an area of the document')}`;
+  return 'Crop of the selected region';
 }
 
 /** @param {Blob} file */

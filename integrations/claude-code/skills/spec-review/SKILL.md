@@ -27,13 +27,13 @@ It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. 
    - If the tool `mcp__Claude_Browser__navigate` exists, call it with `{"url": "<url>"}`; it opens the browser pane if needed. `mcp__Claude_Browser__preview_start` with `{"url": "<url>"}` works too. If the tool is listed as deferred, load it first.
    - If neither exists, or only a `mcp__remote-devices__…` variant does (that browser runs on another machine and cannot reach this one's 127.0.0.1), give the user the URL. `specreview open <file> --browser system` opens their default browser instead.
 2. **Wait in the background:** run Bash `specreview wait <doc>` with `run_in_background: true`, naming the doc exactly as the `next:` line of `open` prints it (it uses the file path when you run from above the workspace root, e.g. a project without git whose `.specreview/` sits next to the spec).
-3. Tell the user: "v1 is open. Comment on anything, then click **Submit review**. I'll pick it up automatically." Then **end the turn**. Do not poll, sleep or loop on `status`: you are re-invoked when `wait` exits.
+3. Tell the user: "v1 is open. Comment on anything (select text and press c, or press b and drag a box to snip any area), then click **Submit review**. I'll pick it up automatically." Then **end the turn**. Do not poll, sleep or loop on `status`: you are re-invoked when `wait` exits.
 
 ## 3. When `wait` exits
 
 | Exit | Meaning | Do |
 |---|---|---|
-| 0 | A packet was printed (any verdict) | Handle it (section 4), or finish (section 7) if it says APPROVED |
+| 0 | A packet was printed (any verdict) | Handle it (section 4), or finish (section 7) if it says APPROVED. A `COMMENT` packet with one thread is a comment the user sent at once (**Send now**): handle it the same way |
 | 2 | The `--timeout` you passed expired | Start the wait again only if a review is still expected |
 | 3 | The working copy differs from the head version | Unrecorded edits. If yours, record them with `revise` (section 5); if not, ask the user (the UI has **Record as my revision**). Then wait again |
 | 5 | The reviewer closed the session | Stop waiting and tell the user |
@@ -59,7 +59,8 @@ It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. 
    - **comment**: Edit with `old_string` = the `src>` text. Make the smallest local change that resolves it. Keep the formatting; do not re-wrap paragraphs.
    - **question**: answer in the reply (`answered`). Also edit only if the answer belongs in the spec (`addressed`).
    - **disagree**: `declined` with the reason. **Unclear**: `needs_input` with one precise question.
-   - **image or diagram region**: Read the `crop:` PNG, then edit the diagram's source (mermaid fence, inline SVG, or the script that generates the image).
+   - **`image:` and `crop:` lines** are pictures the user attached: a snipped area of the doc, a screenshot of their screen, a pasted image, or a region crop. **Read every one with the Read tool before acting on that thread.** A snip's `src>` covers all blocks under the snipped area: edit only what the comment is about. A `GENERAL` screenshot may show something outside the doc (the running app, a terminal); if you cannot tell which part of the spec it concerns, use `needs_input`.
+   - **image or diagram**: edit the diagram's source (mermaid fence, inline SVG, or the script that generates the image).
    - A `src>` shortened with `...(N more lines)`, or one with an elided `data:` URI, is not a usable `old_string`: Read those lines from the file.
 3. **Order:** do all Edit-tool edits first, then `specreview apply <doc> t3 t5` for the suggestions. `apply` rewrites the file, so re-Read it before any later Edit. If Edit says the file changed since it was read, re-Read and retry. If `apply` reports a conflict, treat that thread as a normal comment.
 4. **Never:**

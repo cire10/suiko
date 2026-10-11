@@ -1,8 +1,13 @@
 // @ts-check
-// Small browser helpers shared by the UI: editable-focus detection, clipboard, image paste handling (re-encoded
-// through a canvas, design 12.9), debouncing, scroll-into-view respecting reduced motion, and word diffs.
+// Small browser helpers shared by the UI: platform (for shortcut labels), editable-focus detection, clipboard, image
+// paste handling (re-encoded through a canvas, design 12.9), debouncing, scroll-into-view respecting reduced motion,
+// and word diffs.
 
 import { diffWordsWithSpace } from 'diff';
+
+/** Apple platforms show ⌘ / ⇧ shortcuts; everything else Ctrl / Shift (Cmd and Ctrl both work everywhere). */
+export const IS_MAC = typeof navigator !== 'undefined'
+  && /mac|iphone|ipad|ipod/i.test(String(/** @type {any} */ (navigator).userAgentData?.platform || navigator.platform || navigator.userAgent || ''));
 
 /** @param {EventTarget|null|undefined} el */
 export function isEditable(el) {

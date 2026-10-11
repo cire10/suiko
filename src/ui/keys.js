@@ -3,44 +3,95 @@
 //
 // Keys come from two places:
 //   - keydown in the UI document (ignored while typing in an input / textarea, except Esc and Cmd+Shift+Enter;
-//     the composer and reply boxes handle their own Cmd+Enter and Esc);
+//     the composer and reply boxes handle their own Cmd+Enter, Cmd+Shift+Enter and Esc);
 //   - `key` messages forwarded by the guest while focus is inside the doc iframe.
 // Forwarded keys may only trigger non-mutating actions (navigation, opening a composer, toggling panels). So x / o /
-// y (resolve, reopen, accept a decline) and Cmd+Enter (add a draft) are honoured only from the UI itself.
+// y (resolve, reopen, accept a decline), Cmd+Enter (add a draft) and Send now are honoured only from the UI itself.
+// b (snip an area of the doc) and Shift+B (snip the screen) work from both: they only start a capture the reviewer
+// completes (dragging a box, or picking an area in the macOS picker) and open a composer; nothing is sent.
+// Cmd/Ctrl+Shift+Enter is Send now (this comment alone, as a one-item review) while a new comment is open in the
+// composer, and Submit review (the whole review) otherwise; f is always Submit review.
 // c / s / q / a typed in the doc with a selection are handled by the guest, which posts `action` (like its toolbar)
 // instead of forwarding the key; a forwarded key that still races such an action for the same selection is dropped
 // by openComposer (same capture and type within DUPLICATE_OPEN_MS), so the composer never opens twice.
 
 import {
   closeDialog, cancelComposer, cancelReply, clearFocus, cycleTheme, navChange, navThread, openComposer, openSubmit,
-  resolveThread, setFilter, setKeyForwarder, setMode, setTool, startReply, stepVersion, submitComposer, toast,
-  toggleBaseKind, toggleHidden, togglePick, toggleSidebar, unresolveThread,
+  resolveThread, setFilter, setKeyForwarder, setMode, setTool, snipScreen, startReply, stepVersion, submitComposer,
+  toast, toggleBaseKind, toggleHidden, togglePick, toggleSidebar, toggleSnip, unresolveThread,
 } from './actions.js';
-import { isComposerDirty, isReplyDirty } from './model.js';
+import { canSendNow, isComposerDirty, isReplyDirty, keyLabel } from './model.js';
 import { store } from './state.js';
-import { isEditable } from './util.js';
+import { IS_MAC, isEditable } from './util.js';
 
-/** Shown by the help overlay (keep in sync with handleKey). */
+/**
+ * A shortcut as this platform shows it ('mod+shift+enter' -> '⌘⇧↵' on a Mac, 'Ctrl+Shift+Enter' elsewhere;
+ * compact: 'Ctrl+⇧+↵', for the small hints inside buttons).
+ * @param {string} combo
+ * @param {{ compact?: boolean }} [opts]
+ */
+export const shortcut = (combo, opts) => keyLabel(combo, IS_MAC, opts);
+
+/** The shortcuts shown on buttons (titles and kbd hints) and in the help; handleKey implements them. */
+export const KEYS = Object.freeze({
+  snip: 'b',
+  snipScreen: 'shift+B',
+  pick: 'e',
+  add: 'mod+enter',
+  sendNow: 'mod+shift+enter',
+  submit: 'f',
+  cancel: 'esc',
+});
+
+/**
+ * @typedef {{ keys: string[], label: string, id?: string }} KeyRow  keys: combos for keyLabel (shown one per <kbd>)
+ * @typedef {{ group: string, rows: KeyRow[] }} KeyGroup
+ */
+
+/** Shown by the help overlay, grouped (keep in sync with handleKey). @type {readonly KeyGroup[]} */
 export const KEYMAP = Object.freeze([
-  { keys: ['c', 's', 'q', 'a'], label: 'Comment, suggest, question, or mark agreed on the selection' },
-  { keys: ['e'], label: 'Pick mode for images, diagrams, tables, code ([ ] parent / child, Esc exits)' },
-  { keys: ['j', 'k'], label: 'Next / previous thread' },
-  { keys: ['n', 'p'], label: 'Next / previous change' },
-  { keys: ['r'], label: 'Reply to the focused thread' },
-  { keys: ['x'], label: 'Resolve / accept the focused thread' },
-  { keys: ['o'], label: 'Reopen the focused thread' },
-  { keys: ['y'], label: 'Accept a decline' },
-  { keys: ['v'], label: 'Verify queue' },
-  { keys: ['f', '⌘⇧↵'], label: 'Submit review' },
-  { keys: ['⌘↵'], label: 'Add the comment to the review' },
-  { keys: ['1', '2', '3', '4'], label: 'Review / Changes / Source / History' },
-  { keys: ['[', ']'], label: 'Previous / next version' },
-  { keys: ['d'], label: 'Toggle the base: your last review / previous version' },
-  { keys: ['h'], label: 'Hide all annotations (clean read)' },
-  { keys: ['\\'], label: 'Toggle the thread panel' },
-  { keys: ['t'], label: 'Cycle theme (system, light, dark)' },
-  { keys: ['?'], label: 'This help' },
-  { keys: ['Esc'], label: 'Close or cancel' },
+  {
+    group: 'Comment',
+    rows: [
+      { keys: ['c', 's', 'q', 'a'], label: 'Comment, suggest, question, or mark agreed on the selected text' },
+      { id: 'snip', keys: [KEYS.snip], label: 'Snip an area of the document: drag a box over text, images or diagrams, then comment (Esc cancels)' },
+      { id: 'snip-screen', keys: [KEYS.snipScreen], label: 'Snip anywhere on your screen (macOS picker), then comment on the screenshot' },
+      { keys: [KEYS.pick], label: 'Pick an image, diagram, table or code block ([ ] parent / child, Shift-drag a region, Esc exits)' },
+      { id: 'add', keys: [KEYS.add], label: 'Add the comment to the review (in the composer)' },
+      { id: 'send-now', keys: [KEYS.sendNow], label: 'Send now: this comment alone, right away (in the composer)' },
+    ],
+  },
+  {
+    group: 'Review',
+    rows: [
+      { id: 'submit', keys: [KEYS.submit, KEYS.sendNow], label: 'Submit review: everything in it (the second key while no new comment is open)' },
+      { keys: ['r'], label: 'Reply to the focused thread' },
+      { keys: ['x'], label: 'Resolve / accept the focused thread' },
+      { keys: ['o'], label: 'Reopen the focused thread' },
+      { keys: ['y'], label: 'Accept a decline' },
+      { keys: ['v'], label: 'Verify queue' },
+    ],
+  },
+  {
+    group: 'Navigate',
+    rows: [
+      { keys: ['j', 'k'], label: 'Next / previous thread' },
+      { keys: ['n', 'p'], label: 'Next / previous change' },
+      { keys: ['1', '2', '3', '4'], label: 'Review / Changes / Source / History' },
+      { keys: ['[', ']'], label: 'Previous / next version' },
+      { keys: ['d'], label: 'Toggle the base: your last review / previous version' },
+    ],
+  },
+  {
+    group: 'View',
+    rows: [
+      { keys: ['h'], label: 'Hide all annotations (clean read)' },
+      { keys: ['\\'], label: 'Toggle the thread panel' },
+      { keys: ['t'], label: 'Cycle theme (system, light, dark)' },
+      { keys: ['?'], label: 'This help' },
+      { keys: [KEYS.cancel], label: 'Close or cancel' },
+    ],
+  },
 ]);
 
 const MODES = /** @type {const} */ (['review', 'changes', 'source', 'history']);
@@ -64,7 +115,7 @@ export function handleKey(k, fromGuest) {
     }
     return false;
   }
-  if (s.dialog === 'submit') {
+  if (s.dialog === 'submit' || s.dialog === 'image') {
     if (key === 'Escape') {
       closeDialog();
       return true;
@@ -73,7 +124,9 @@ export function handleKey(k, fromGuest) {
   }
   if (mod && key === 'Enter') {
     if (k.shift) {
-      openSubmit();
+      // Send now while a new comment is open (from the UI only: it submits); otherwise the whole review.
+      if (!fromGuest && canSendNow(s.composer)) submitComposer({ sendNow: true });
+      else openSubmit();
       return true;
     }
     if (fromGuest || !s.composer) return false;
@@ -96,6 +149,12 @@ export function handleKey(k, fromGuest) {
       return selectionAction(key);
     case 'e':
       togglePick();
+      return true;
+    case 'b':
+    case 'B':
+      // Shift+B snips the screen; b (also with Caps Lock, which reports 'B' without Shift) snips the doc.
+      if (k.shift) snipScreen();
+      else toggleSnip({ fromGuest });
       return true;
     case 'j':
       navThread(1);
@@ -133,11 +192,11 @@ export function handleKey(k, fromGuest) {
       setMode(MODES[Number(key) - 1]);
       return true;
     case '[':
-      if (s.tool === 'pick') return false;
+      if (s.tool !== 'select') return false;
       stepVersion(-1);
       return true;
     case ']':
-      if (s.tool === 'pick') return false;
+      if (s.tool !== 'select') return false;
       stepVersion(1);
       return true;
     case 'd':
@@ -172,7 +231,7 @@ function selectionAction(key) {
   if (s.mode === 'history') return false;
   const capture = s.guest.selection;
   if (!capture) {
-    toast('Select text in the document first, or press E to pick an image, diagram, table or code block.', { timeout: 3500 });
+    toast('Select text in the document first, press b to snip any area of it, or e to pick an image, diagram, table or code block.', { timeout: 3500 });
     return true;
   }
   openComposer({ capture, action });
@@ -207,13 +266,18 @@ function acceptDecline() {
 }
 
 /**
- * Esc: closes the innermost thing that is open. Esc pressed inside the doc (forwarded by the guest) is usually meant
- * for the doc itself (clearing a selection, closing the page's own popup or dialog), so it never discards a composer
- * or reply that holds input (Esc in the UI does, with Undo).
+ * Esc: closes the innermost thing that is open: pick / snip mode first (the crosshair is what the reviewer is
+ * using), then a composer or reply. Esc pressed inside the doc (forwarded by the guest) is usually meant for the doc
+ * itself (clearing a selection, closing the page's own popup or dialog), so it never discards a composer or reply
+ * that holds input (Esc in the UI does, with Undo).
  * @param {boolean} fromGuest
  */
 function escape(fromGuest) {
   const s = store.get();
+  if (s.tool !== 'select') {
+    setTool('select');
+    return true;
+  }
   if (s.composer || s.reply) {
     const keep = fromGuest && (s.composer
       ? isComposerDirty(s.composer) || s.composer.busy
@@ -221,14 +285,8 @@ function escape(fromGuest) {
     if (!keep) {
       if (s.composer) cancelComposer();
       else cancelReply();
-      return true;
     }
-    // Kept: only leave pick mode; closing the drawer (narrow) would hide the input the reviewer is writing.
-    if (s.tool === 'pick') setTool('select');
-    return true;
-  }
-  if (s.tool === 'pick') {
-    setTool('select');
+    // Kept: closing the drawer (narrow) would hide the input the reviewer is writing.
     return true;
   }
   if (s.narrow && (s.drawer || s.nav)) {

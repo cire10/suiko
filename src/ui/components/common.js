@@ -22,6 +22,8 @@ const ICONS = /** @type {Record<string, string>} */ ({
   image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9h.01',
   comment: 'M4 5h16v11H8l-4 4z',
   external: 'M14 4h6v6M20 4L10 14M18 14v6H4V6h6',
+  scissors: 'M9 6a3 3 0 11-6 0 3 3 0 016 0zM9 18a3 3 0 11-6 0 3 3 0 016 0zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12',
+  screen: 'M3 4h18v12H3zM8 20h8M12 16v4M7 8V7h2M17 8V7h-2M7 12v1h2M17 12v1h-2',
 });
 
 /**
@@ -57,9 +59,10 @@ const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), in
 
 /**
  * Modal dialog.
- * @param {{ title: string, onClose: () => void, testid?: string, wide?: boolean, children?: any, initialFocus?: string }} props
+ * @param {{ title: string, onClose: () => void, testid?: string, wide?: boolean, children?: any, initialFocus?: string,
+ *   class?: string }} props
  */
-export function Modal({ title, onClose, testid, wide = false, children, initialFocus }) {
+export function Modal({ title, onClose, testid, wide = false, children, initialFocus, class: cls = '' }) {
   const ref = useRef(/** @type {HTMLDivElement|null} */ (null));
   useEffect(() => {
     const prev = /** @type {HTMLElement|null} */ (document.activeElement);
@@ -87,7 +90,7 @@ export function Modal({ title, onClose, testid, wide = false, children, initialF
     }
   };
   return html`<div class="modal-backdrop" onMouseDown=${(/** @type {MouseEvent} */ e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div ref=${ref} class=${`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-label=${title}
+    <div ref=${ref} class=${`modal ${wide ? 'modal-wide' : ''} ${cls}`.trim()} role="dialog" aria-modal="true" aria-label=${title}
       data-testid=${testid} onKeyDown=${onKeyDown}>
       <header class="modal-head">
         <h2>${title}</h2>

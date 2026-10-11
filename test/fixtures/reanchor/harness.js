@@ -8,7 +8,9 @@
 //               override?: { tN: { lines?: [a, b], quote? } },
 //               expect: { tN: { state? | states?: [..], lines?, text?, textIncludes?, kind?, sridTag?, generated?,
 //                               assetChanged?, svgLabel?, cell?: {..}, code?: {..}, mappedBy?, hostTag?,
-//                               sectionTail? } } }] }
+//                               sectionTail?, covers?, snipContainerTag? (null = none), domKind?, domSridTag? } } }] }
+// (covers / snipContainerTag: a snip anchor's snip.covers / snip.container.tag; domKind / domSridTag: the kind and
+// the srid's tag of its DomTarget at that version.)
 // Captures use the frozen shapes of BUILD_AMENDMENTS 3.3 except that any srid may be written as a selector
 // { "$srid": { tag?, text?, id?, kind?, nth? } } resolved against the v1 render (the first element of that tag
 // whose collapsed rendered text includes `text`, whose id equals `id`, whose kind equals `kind`).
@@ -20,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lineHunks, offsetMapper } from '../../../src/core/diff/index.js';
 import { renderSourceSync } from '../../../src/core/render/index.js';
-import { createAnchor, reanchor } from '../../../src/core/anchor/index.js';
+import { createAnchor, reanchor, toDomTarget } from '../../../src/core/anchor/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.join(HERE, '..', 'docs');
@@ -192,6 +194,16 @@ export function checkExpect(a, exp, render) {
   if (exp.sridTag) {
     const n = a.srid != null ? render.srcmap.nodes[a.srid] : null;
     eq('srid tag', n ? n.t.toLowerCase() : null, exp.sridTag);
+  }
+  if (exp.covers != null) eq('snip.covers', a.snip?.covers ?? null, exp.covers);
+  if (exp.snipContainerTag !== undefined) eq('snip.container.tag', a.snip?.container?.tag ?? null, exp.snipContainerTag);
+  if (exp.domKind || exp.domSridTag) {
+    const dt = toDomTarget(a, render, { id: 'x', num: 1, state: 'open' });
+    if (exp.domKind) eq('DomTarget kind', dt.kind, exp.domKind);
+    if (exp.domSridTag) {
+      const n = dt.srid != null ? render.srcmap.nodes[dt.srid] : null;
+      eq('DomTarget srid tag', n ? n.t.toLowerCase() : null, exp.domSridTag);
+    }
   }
   return errs;
 }

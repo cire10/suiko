@@ -8,7 +8,9 @@
 export { createContext, resolveAgentName } from './context.js';
 
 // docs and reading
-export { openDoc, docState, listDocsAcrossWorkspaces, status, log, sourceLines, closeSession, saveAttachment } from './ops/docs.js';
+export {
+  openDoc, docState, listDocsAcrossWorkspaces, docsByActivity, status, log, sourceLines, closeSession, saveAttachment,
+} from './ops/docs.js';
 export { threads, show } from './ops/threads.js';
 
 // reviewer: drafts, submit, threads, locks, recorded versions

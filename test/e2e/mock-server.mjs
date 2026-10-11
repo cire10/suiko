@@ -8,11 +8,14 @@
 //                   /vendor/*             VENDOR_UI (src/shared/vendor.js)
 //                   /ui-shared/protocol.js
 //                   /api/*                the design 10.2 + amendments 6 routes, backed by the in-memory MockDoc engine
-//                                         (Bearer token, Origin check on non-GET, 401 without a token)
+//                                         (Bearer token, Origin check on non-GET, 401 without a token), plus
+//                                         POST .../snip/screen (a fake macOS picker: setScreenSnip picks its outcome)
 //                   /api/events           SSE (?k= token, Last-Event-ID / ?lastEventId= replay, reset, ping)
 //   content origin  /c/<docKey>/<vN|live>/<doc.path>  the real render (WP2) with the guest bundle (WP6) inserted
 //                                         at guestInsertAt (data-sr-ui = the UI origin)
 //                   /c/<docKey>/<ver>/<asset>         fixture files (or a version's replaced asset bytes)
+//                   /c/<docKey>/__att/<file>          stored attachments (DocState.attachmentBase), not to same-origin
+//                                                     requests (the doc's own script), like the daemon
 //                   /__sr/<RV>/guest.js | static/* | vendor/*   guest, shell CSS / mermaid init, VENDOR_DOC
 //
 // Use in tests:   const mock = await startMockServer({ scenario: 'round2' }); ... mock.doc('kitchen-sink').revise(...)
@@ -32,7 +35,7 @@ import { buildGuestBundle } from '../../src/guest/build.js';
 import { UI_DIR, uiIndex } from '../../src/ui/csp.js';
 import { setUiHeaders } from '../../src/daemon/security.js';
 import { isDocumentType } from '../../src/daemon/mime.js';
-import { FIXTURE_DIR, buildScenario } from './mock-data.mjs';
+import { FIXTURE_DIR, buildScenario, makePng } from './mock-data.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const PROTOCOL_FILE = join(ROOT, 'src', 'shared', 'protocol.js');
@@ -153,6 +156,13 @@ export async function startMockServer(opts = {}) {
   const sseClients = new Set();
   /** @type {Array<{ method: string, re: RegExp, status: number, times: number }>} */
   const failures = [];
+  /**
+   * The fake screen picker behind POST .../snip/screen: 'ok' answers a width x height PNG after delayMs, 'cancelled'
+   * is the reviewer pressing Esc, 'unsupported' is a daemon that is not on macOS (501), 'error' a failed capture.
+   * @type {{ mode: 'ok'|'cancelled'|'unsupported'|'error', delayMs: number, width: number, height: number }}
+   */
+  const screenSnip = { mode: 'ok', delayMs: 0, width: 320, height: 200 };
+  let screenSnipRunning = false;
 
   // ---------------------------------------------------------------------------------------- SSE
 
@@ -289,6 +299,30 @@ export async function startMockServer(opts = {}) {
     throw err;
   }
 
+  /**
+   * POST .../snip/screen like the daemon: one picker at a time (409 busy), 501 unsupported, 200 {cancelled:true}, or
+   * the stored screenshot {path, dataUrl, width, height}.
+   * @param {import('node:http').ServerResponse} res
+   * @param {import('./mock-engine.mjs').MockDoc} d
+   */
+  async function screenSnipRoute(res, d) {
+    if (screenSnipRunning) return sendJson(res, 409, { error: 'a screen snip is already in progress', code: 'busy' });
+    if (screenSnip.mode === 'unsupported') return sendJson(res, 501, { error: 'screen snips need macOS (screencapture)', code: 'unsupported' });
+    screenSnipRunning = true;
+    try {
+      if (screenSnip.delayMs) await new Promise((ok) => setTimeout(ok, screenSnip.delayMs));
+    } finally {
+      screenSnipRunning = false;
+    }
+    if (screenSnip.mode === 'cancelled') return sendJson(res, 200, { cancelled: true });
+    if (screenSnip.mode === 'error') return sendJson(res, 500, { error: 'the screen capture failed', code: 'capture_failed' });
+    const { width, height } = screenSnip;
+    const png = makePng(width, height, (x, y) => [40 + ((x * 3) % 200), 90 + ((y * 2) % 150), 200, 255]);
+    const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
+    const { path } = d.saveAttachment(dataUrl);
+    return sendJson(res, 200, { path, dataUrl, width, height });
+  }
+
   /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {URL} url */
   async function handleApi(req, res, url) {
     const method = String(req.method || 'GET');
@@ -332,8 +366,15 @@ export async function startMockServer(opts = {}) {
     }
     const d = docOf(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     const parts = (m[3] || '').split('/').filter(Boolean).map(decodeURIComponent);
+    if (method === 'POST' && parts.length === 2 && parts[0] === 'snip' && parts[1] === 'screen') {
+      await screenSnipRoute(res, d);
+      return;
+    }
     const out = docRoute(method, parts, d, url, body);
-    if (method === 'GET' && !parts.length) out.contentBase = d.contentBase;
+    if (method === 'GET' && !parts.length) {
+      out.contentBase = d.contentBase;
+      out.attachmentBase = `${d.contentBase}/__att/`;
+    }
     sendJson(res, 200, out);
   }
 
@@ -413,6 +454,20 @@ export async function startMockServer(opts = {}) {
         const file = resolveVendor(VENDOR_DOC, decodeURIComponent(rest.slice(7)));
         return file ? sendFile(res, file) : sendJson(res, 404, { error: 'not found' });
       }
+    }
+    const att = /^\/c\/([0-9a-f]+)\/__att\/([A-Za-z0-9][\w-]*\.(?:png|jpe?g))$/.exec(p);
+    if (att) {
+      const doc = byKey.get(att[1]);
+      const dataUrl = doc?.attachments.get(`attachments/${att[2]}`);
+      const parsed = /^data:(image\/(?:png|jpeg));base64,(.+)$/.exec(dataUrl || '');
+      if (!parsed || String(req.headers['sec-fetch-site'] || '') === 'same-origin') {
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, { 'content-type': parsed[1], 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      res.end(Buffer.from(parsed[2], 'base64'));
+      return;
     }
     const m = /^\/c\/([0-9a-f]+)\/(v\d+|live)\/(.+)$/.exec(p);
     const d = m ? byKey.get(m[1]) : null;
@@ -495,6 +550,13 @@ export async function startMockServer(opts = {}) {
     /** Makes the next `times` matching requests fail with `status`. @param {string} method @param {RegExp} re @param {number} status @param {number} [times] */
     failNext(method, re, status, times = 1) {
       failures.push({ method, re, status, times });
+    },
+    /**
+     * How the fake screen picker (POST .../snip/screen) answers from now on.
+     * @param {Partial<typeof screenSnip>} opts
+     */
+    setScreenSnip(opts) {
+      Object.assign(screenSnip, opts);
     },
     async close() {
       clearInterval(ping);

@@ -46,16 +46,19 @@ const MSG = Object.freeze({
   KEY: 'key',
   SCROLL: 'scroll',
   PAGE_ERROR: 'pageError',
-  TOOL_CHANGED: 'toolChanged',
+  TOOL_CHANGED: 'toolChanged', // {tool}: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip'
   CONNECT: 'connect',
   INIT: 'init',
   SET_TARGETS: 'setTargets',
   SET_CHANGES: 'setChanges',
   FOCUS: 'focus',
   SCROLL_TO: 'scrollTo',
-  SET_TOOL: 'setTool',
+  SET_TOOL: 'setTool',         // {tool: 'select'|'pick'|'snip'}
   SET_THEME: 'setTheme',
   REVEAL: 'reveal',
   CLEAR_SELECTION: 'clearSelection',
   SET_HIDDEN: 'setHidden',
 });
+
+/** Snips: drag a box over any area of the doc (protocol.js SNIP; the SnipCapture shape is documented there). */
+const SNIP = Object.freeze({ minPx: 8, maxSrids: 60, maxText: 2000, maxScreenPx: 2000 });

@@ -4,6 +4,8 @@
 //   docState(ctx, doc)                          -> DocState (without contentBase; the daemon adds it)
 //   listDocsAcrossWorkspaces(ctx?)              -> [{ ws, root, id, path, title, format, head, state, openThreads,
 //                                                    undelivered, listening, final }]
+//   docsByActivity(ctx?, { roots? })            -> [{ ws, root, id, path, title, state, head, activeAt }], most
+//                                                  recently active first (`specreview snip` without a doc)
 //   status(ctx, doc?)                           -> { docs: [...] } (`specreview status`)
 //   log(ctx, doc)                               -> { doc, entries, final } (versions and reviews, newest first)
 //   sourceLines(ctx, doc, { version, from, to }) -> { v, startLine, lines, total } (version number or 'live')
@@ -16,6 +18,7 @@ import { LIMITS, SSE } from '../../../shared/protocol.js';
 import { NotFoundError, RefusedError, UsageError } from '../../store/errors.js';
 import { ALL_DOCS, Store, compareIds } from '../../store/store.js';
 import { listWorkspaces } from '../../store/home.js';
+import { readLastJsonLine } from '../../store/jsonl.js';
 import { renderSource } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { autoCommit } from '../git.js';
@@ -179,6 +182,69 @@ export async function listDocsAcrossWorkspaces(_ctx) {
     }
   }
   return out;
+}
+
+/**
+ * Docs of the registered workspaces (or of `roots` only), most recently active first. A doc's activity is the time
+ * of the latest event in its runtime feed (any review, draft, version, reply or open), else the time of its head
+ * version, else its creation; ties go by workspace root, then doc id. Workspaces that cannot be opened are skipped.
+ * @param {Ctx | null} [_ctx]
+ * @param {{ roots?: string[] | null }} [opts]
+ * @returns {Promise<Array<{ ws: string, root: string, id: string, path: string, title: string, state: string,
+ *   head: number, activeAt: string }>>}
+ */
+export async function docsByActivity(_ctx = null, { roots = null } = {}) {
+  const candidates = roots ? roots.map((root) => ({ root })) : (await listWorkspaces()).filter((w) => w.exists);
+  /** @type {Set<string>} */
+  const seen = new Set();
+  const out = [];
+  for (const { root } of candidates) {
+    let store;
+    try {
+      store = await Store.open(root);
+    } catch {
+      continue;
+    }
+    if (seen.has(store.wsId)) continue;
+    seen.add(store.wsId);
+    for (const doc of await store.listDocs()) {
+      out.push({
+        ws: store.wsId,
+        root: store.root,
+        id: doc.id,
+        path: doc.path,
+        title: doc.title,
+        state: doc.state,
+        head: doc.head,
+        activeAt: await lastActivity(store, doc),
+      });
+    }
+  }
+  return out.sort((a, b) => (a.activeAt > b.activeAt ? -1 : a.activeAt < b.activeAt ? 1 : a.root < b.root ? -1 : a.root > b.root ? 1 : compareIds(a.id, b.id)));
+}
+
+/**
+ * ISO time of a doc's latest activity (see docsByActivity).
+ * @param {Store} store
+ * @param {Doc} doc
+ * @returns {Promise<string>}
+ */
+async function lastActivity(store, doc) {
+  try {
+    const last = await readLastJsonLine(store.eventsFile(doc.id));
+    if (typeof last?.at === 'string' && last.at) return last.at;
+  } catch {
+    // an unreadable feed: fall back to the versions
+  }
+  if (doc.head) {
+    try {
+      const { manifest } = await store.readVersion(doc.id, doc.head);
+      if (manifest.createdAt) return manifest.createdAt;
+    } catch {
+      // a version without a manifest: fall back to the doc itself
+    }
+  }
+  return doc.createdAt ?? '';
 }
 
 /**

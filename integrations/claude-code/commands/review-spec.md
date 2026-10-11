@@ -20,4 +20,4 @@ Follow the spec-review skill. Steps:
 
 4. **Wait.** Run Bash `specreview wait <doc>` with `run_in_background: true`.
 
-5. **Hand over and end the turn.** Tell the user in one or two lines: the doc is open; comment on any part (select text and press C, or press E to pick images, diagrams and table cells), then click **Submit review**; you will pick it up automatically. Do not poll. When the wait exits, handle the packet as the skill describes.
+5. **Hand over and end the turn.** Tell the user in one or two lines: the doc is open; comment on any part (select text and press c, press b and drag a box to snip any area, or press e to pick images, diagrams and table cells), then click **Submit review**, or press Cmd+Shift+Enter in a comment to send just that one now; you will pick it up automatically. Do not poll. When the wait exits, handle the packet as the skill describes.

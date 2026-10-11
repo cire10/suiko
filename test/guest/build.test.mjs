@@ -58,7 +58,7 @@ test('guestParts rejects malformed parts.json', () => {
 
 test('the constants inlined in 00-protocol.js equal src/shared/protocol.js', () => {
   const src = readFileSync(join(GUEST_PARTS_DIR, '00-protocol.js'), 'utf8');
-  const inlined = vm.runInNewContext(`${src}\n;({ CONTEXT_CHARS, TEXT_EXCLUDE, BLOCK_TAGS, PICKABLE_TAGS, MSG })`);
+  const inlined = vm.runInNewContext(`${src}\n;({ CONTEXT_CHARS, TEXT_EXCLUDE, BLOCK_TAGS, PICKABLE_TAGS, MSG, SNIP })`);
   const plain = (/** @type {unknown} */ v) => JSON.parse(JSON.stringify(v));
   assert.deepEqual(plain(inlined), plain({
     CONTEXT_CHARS: protocol.CONTEXT_CHARS,
@@ -66,5 +66,6 @@ test('the constants inlined in 00-protocol.js equal src/shared/protocol.js', () 
     BLOCK_TAGS: protocol.BLOCK_TAGS,
     PICKABLE_TAGS: protocol.PICKABLE_TAGS,
     MSG: protocol.MSG,
+    SNIP: protocol.SNIP,
   }));
 });

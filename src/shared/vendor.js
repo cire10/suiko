@@ -3,7 +3,7 @@
 //
 // A map turns a public path prefix into a directory inside node_modules:
 //   VENDOR_UI  -> served on the UI origin under /vendor/*            (Preact+htm, marked, DOMPurify, jsdiff)
-//   VENDOR_DOC -> served on the content origin under /__sr/<RV>/vendor/* (markdown CSS, hljs themes, KaTeX, mermaid)
+//   VENDOR_DOC -> served on the content origin under /__sr/<RV>/vendor/* (markdown CSS, hljs themes, KaTeX, mermaid, modern-screenshot)
 // `resolveVendor(map, 'htm/preact/standalone.module.js')` returns the absolute file path, or null when the path
 // is not under a mapped directory, contains dot-segments, escapes through a symlink, or is not a regular file.
 // node_modules is located by walking up from this file, per package, so hoisted and nested layouts both work.
@@ -27,6 +27,7 @@ export const VENDOR_DOC = Object.freeze({
   'github-markdown-css/': 'github-markdown-css/',
   'highlight.js/styles/': 'highlight.js/styles/',
   'katex/': 'katex/dist/',
+  'modern-screenshot/': 'modern-screenshot/dist/', // lazy-loaded by the guest for snip crops
   'mermaid/': 'mermaid/dist/',
 });
 

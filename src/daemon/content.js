@@ -3,13 +3,21 @@
 // exactly as authored (plus data-srid attributes and the guest tag) and their assets. It has no API and no
 // state-changing route: only GET/HEAD; everything else is 405.
 //
-//   /__sr/<RENDERER_VERSION>/guest.js        guest bundle (GuestBundleCache)
-//   /__sr/<RENDERER_VERSION>/static/<file>   src/core/render/static/* (shell.css, mermaid-init.js)
-//   /__sr/<RENDERER_VERSION>/vendor/<path>   vendored doc libraries through VENDOR_DOC
+//   /__sr/<TAG>/guest.js        guest bundle (GuestBundleCache)
+//   /__sr/<TAG>/static/<file>   src/core/render/static/* (shell.css, mermaid-init.js)
+//   /__sr/<TAG>/vendor/<path>   vendored doc libraries through VENDOR_DOC
+//   TAG = <RENDERER_VERSION>-<hash of the guest bundle, static files and package/vendor versions> (assetTag()), so the
+//   immutable caching below can never pin a browser to stale assets after an upgrade; the bare <RENDERER_VERSION> is
+//   still accepted for old links.
 //       -> Cache-Control: public, max-age=31536000, immutable (the URL carries the renderer version)
 //   /c/<docKey>/<ver>/<doc.path>             the rendered doc (ver = live | v<N>), guest tag at guestInsertAt,
 //                                            Markdown shell asset base replaced (render finalizeHtml)
 //   /c/<docKey>/<ver>/<other path>           an asset (rules below)
+//   /c/<docKey>/__att/<file>                 a stored review attachment (screenshot, crop, pasted image) of the doc:
+//                                            images only, from .specreview/docs/<doc>/attachments/, for the UI's
+//                                            thumbnails (DocState.attachmentBase). Refused to same-origin requests
+//                                            (Sec-Fetch-Site: same-origin), so the doc's own (untrusted) script cannot
+//                                            read the reviewer's screenshots; the UI origin loads them as same-site.
 //   /<anything else>                         root-absolute URL used by a doc ('/img/a.png'): 307 to the same path
 //                                            under the Referer's /c/<docKey>/<ver>/ prefix; 404 without one
 //
@@ -25,14 +33,16 @@
 // Every response: X-Content-Type-Options: nosniff and Content-Security-Policy frame-ancestors <UI origins>
 // (+ default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval' when render.network is "block").
 
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LIMITS, RENDERER_VERSION } from '../shared/protocol.js';
-import { VENDOR_DOC, resolveVendor } from '../shared/vendor.js';
+import { VENDOR_DOC, resolveVendor, vendorDir } from '../shared/vendor.js';
 import { finalizeHtml, getRender } from '../core/render/index.js';
 import { extOf, isDeniedPath, realpathWithin, toPosix } from '../core/util/paths.js';
 import { createLogger } from '../core/util/log.js';
+import { sha256 } from '../core/util/hash.js';
 import { HttpError, notFound, sendFile, sendText } from './http-util.js';
 import { contentTypeOf } from './mime.js';
 import { encodeRelPath, encodeSegments, isAllowedHost, isSafeMethod, loopbackOrigins, parseTarget, setBaseHeaders } from './security.js';
@@ -50,7 +60,64 @@ export const LIVE_ASSET_EXTS = Object.freeze(new Set([
 ]));
 
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+
+/** @type {string | null} */
+let staticSignatureMemo = null;
+
+/**
+ * Fingerprint of what /__sr/ serves besides the guest bundle: SpecReview's package.json, the render static files, and
+ * the versions of the vendored doc libraries. Computed once per daemon process.
+ * @returns {string}
+ */
+function staticSignature() {
+  if (staticSignatureMemo !== null) return staticSignatureMemo;
+  const parts = [];
+  const read = (/** @type {string} */ f) => {
+    try {
+      return fs.readFileSync(f, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  parts.push(read(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')));
+  try {
+    for (const f of fs.readdirSync(RENDER_STATIC_DIR).sort()) parts.push(f, read(path.join(RENDER_STATIC_DIR, f)));
+  } catch {
+    // no static dir: nothing to fingerprint
+  }
+  for (const target of Object.values(VENDOR_DOC)) {
+    // walk up from the mapped dir (e.g. katex/dist) to the package's own package.json
+    let dir = vendorDir(target);
+    for (let i = 0; dir && i < 4; i++, dir = path.dirname(dir)) {
+      const pj = read(path.join(dir, 'package.json'));
+      if (pj) {
+        let version = '';
+        try {
+          version = String(JSON.parse(pj).version ?? '');
+        } catch {
+          version = pj;
+        }
+        parts.push(target, version);
+        break;
+      }
+    }
+  }
+  staticSignatureMemo = sha256(parts.join('\u0000'));
+  return staticSignatureMemo;
+}
+
+/**
+ * Whether a /__sr/ path segment names this renderer: the bare RENDERER_VERSION or RENDERER_VERSION-<hash>.
+ * @param {string | undefined} seg
+ */
+function isAssetTag(seg) {
+  return seg === RENDERER_VERSION || (typeof seg === 'string' && seg.startsWith(`${RENDERER_VERSION}-`) && /^[0-9a-f]{12}$/.test(seg.slice(RENDERER_VERSION.length + 1)));
+}
 const VER_RE = /^(live|v[1-9]\d{0,8})$/;
+/** Path segment of the attachment route under /c/<docKey>/ (never a version: those are live / v<N>). */
+export const ATTACHMENT_SEGMENT = '__att';
+/** Attachment file names the content origin serves (the store's names, image extensions only; never SVG). */
+const ATTACHMENT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(png|jpe?g|gif|webp)$/i;
 const MANIFEST_CACHE_MAX = 512;
 
 /** @typedef {import('../core/store/store.js').Store} Store */
@@ -129,14 +196,29 @@ export class ContentOrigin {
   }
 
   /**
-   * /__sr/<RV>/...
+   * The /__sr/ path segment for the assets of the current build: RENDERER_VERSION-<12 hex>. It changes whenever the
+   * guest bundle (re-built in dev mode), the static files or the package/vendor versions change.
+   * @returns {Promise<string>}
+   */
+  async assetTag() {
+    let etag = '';
+    try {
+      etag = (await this.deps.guest.get()).etag;
+    } catch {
+      // guest unavailable: the guest.js route reports it; the tag still covers the static assets
+    }
+    return `${RENDERER_VERSION}-${sha256(`${staticSignature()}|${etag}`).slice(0, 12)}`;
+  }
+
+  /**
+   * /__sr/<TAG>/...  (TAG: see assetTag(); the bare RENDERER_VERSION is accepted too)
    * @param {Req} req
    * @param {Res} res
    * @param {string[]} segs
    */
   async #serveSr(req, res, segs) {
     const [rv, kind, ...rest] = segs;
-    if (rv !== RENDERER_VERSION) throw notFound();
+    if (!isAssetTag(rv)) throw notFound();
     const headers = { 'Content-Security-Policy': await this.#csp(null) };
     if (kind === 'guest.js' && rest.length === 0) {
       const bundle = await this.deps.guest.get();
@@ -180,6 +262,10 @@ export class ContentOrigin {
    */
   async #serveCapability(req, res, target) {
     const [, key, ver, ...rest] = target.segments;
+    if (key && DOC_KEY_RE.test(key) && ver === ATTACHMENT_SEGMENT) {
+      await this.#serveAttachment(req, res, key, rest);
+      return;
+    }
     if (!key || !DOC_KEY_RE.test(key) || !ver || !VER_RE.test(ver)) throw notFound();
     const ref = await this.deps.index.resolveDocKey(key);
     if (!ref) throw notFound();
@@ -193,6 +279,33 @@ export class ContentOrigin {
     const policy = await this.#csp(ref.wsId);
     if (rel === doc.path) await this.#serveDoc(req, res, { store, doc, wsId: ref.wsId, ver, policy });
     else await this.#serveAsset(req, res, { store, doc, wsId: ref.wsId, ver, rel, policy });
+  }
+
+  /**
+   * /c/<docKey>/__att/<file>: a stored attachment of the doc (see the header). 404 for anything else: another
+   * doc's key, a name that is not a plain image file name, a file outside the doc's attachments directory (also
+   * through a symlink), or a same-origin request (a doc page).
+   * @param {Req} req
+   * @param {Res} res
+   * @param {string} key
+   * @param {string[]} rest
+   */
+  async #serveAttachment(req, res, key, rest) {
+    if (rest.length !== 1 || !ATTACHMENT_FILE_RE.test(rest[0])) throw notFound();
+    if (String(req.headers['sec-fetch-site'] ?? '').toLowerCase() === 'same-origin') throw notFound();
+    const ref = await this.deps.index.resolveDocKey(key);
+    if (!ref) throw notFound();
+    const { store, doc } = await this.deps.index.doc(ref.wsId, ref.docId);
+    const dir = path.join(store.docDir(doc.id), 'attachments');
+    const abs = realpathWithin(dir, rest[0]);
+    // a symlink inside the directory must also land on an attachment-like image name (never e.g. an .svg)
+    if (!abs || !ATTACHMENT_FILE_RE.test(path.basename(abs))) throw notFound();
+    await sendFile(req, res, abs, {
+      contentType: contentTypeOf(rest[0]),
+      cacheControl: 'private, no-cache',
+      headers: { 'Content-Security-Policy': await this.#csp(ref.wsId) },
+      maxBytes: LIMITS.maxAttachmentBytes,
+    });
   }
 
   /**
@@ -210,9 +323,10 @@ export class ContentOrigin {
       if (/** @type {any} */ (err)?.code === 'NOT_FOUND') throw notFound();
       throw err;
     }
+    const assetTag = await this.assetTag();
     const html = finalizeHtml(render, {
-      assetBase: `http://127.0.0.1:${contentPort}/__sr/${RENDERER_VERSION}`,
-      guestTag: guestTag({ contentPort, uiPort, wsId, docId: doc.id, ver }),
+      assetBase: `http://127.0.0.1:${contentPort}/__sr/${assetTag}`,
+      guestTag: guestTag({ contentPort, uiPort, wsId, docId: doc.id, ver, assetTag }),
     });
     const body = Buffer.from(html, 'utf8');
     res.writeHead(200, {
@@ -303,11 +417,11 @@ export async function liveAllowed(store, doc, rel) {
 
 /**
  * The guest <script> tag inserted at guestInsertAt (classic, synchronous, absolute URL; amendments 6).
- * @param {{ contentPort: number, uiPort: number, wsId: string, docId: string, ver: string }} o
+ * @param {{ contentPort: number, uiPort: number, wsId: string, docId: string, ver: string, assetTag?: string }} o
  * @returns {string}
  */
-export function guestTag({ contentPort, uiPort, wsId, docId, ver }) {
-  const src = `http://127.0.0.1:${contentPort}/__sr/${RENDERER_VERSION}/guest.js`;
+export function guestTag({ contentPort, uiPort, wsId, docId, ver, assetTag = RENDERER_VERSION }) {
+  const src = `http://127.0.0.1:${contentPort}/__sr/${assetTag}/guest.js`;
   const ui = loopbackOrigins(uiPort).join(' ');
   return `<script src="${src}" data-sr-ui="${ui}" data-sr-target="${wsId}/${docId}/${ver}" data-sr-ignore></script>`;
 }

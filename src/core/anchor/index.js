@@ -4,8 +4,9 @@
 //   reanchor                                                         Anchor on a -> on b      (reanchor.js)
 //   fuzzyFind / exactFind                                            text relocation          (fuzzy.js)
 //   elementFingerprint / fingerprintScore / FINGERPRINT_ACCEPT        element identity        (fingerprint.js)
-//   describeAnchor / anchorLabel / elideDataUris                     packet presentation      (describe.js)
+//   describeAnchor / anchorLabel / elideDataUris / attachmentKindOf  packet presentation      (describe.js)
 //   toDomTarget / mapAnchorToWorking                                 guest targets, live view (targets.js)
+//   snipCovers / snipLabel / snipContainerOf                         snip anchors (key `b`)    (snip.js)
 
 export { createAnchor, anchorFromLines, anchorFromQuote, sectionRange, codeTargetOf } from './create.js';
 export { reanchor } from './reanchor.js';
@@ -14,8 +15,9 @@ export {
   elementFingerprint, fingerprintScore, fingerprintOfElement, bestFingerprintMatch, anchorElement, ordinalOf,
   FINGERPRINT_ACCEPT,
 } from './fingerprint.js';
-export { describeAnchor, anchorLabel, regionLabel, elideDataUris } from './describe.js';
+export { describeAnchor, anchorLabel, regionLabel, elideDataUris, attachmentKindOf } from './describe.js';
 export { toDomTarget, mapAnchorToWorking } from './targets.js';
+export { snipCovers, snipLabel, snipContainerOf } from './snip.js';
 export { narrowMermaid, mermaidLabelIn } from './mermaid.js';
 export { tableGrid, tableOf, findCell, cellInfoOf } from './table.js';
 export { sridSpan, plainQuote, anchoringConfig, DEFAULT_ANCHORING, ELEMENT_ANCHOR_KINDS } from './util.js';

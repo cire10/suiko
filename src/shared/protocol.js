@@ -58,7 +58,7 @@ export const SEVERITIES = Object.freeze(['blocking', 'normal', 'nit']);
 export const THREAD_STATUS = Object.freeze(['open', 'addressed', 'answered', 'declined', 'needs_input', 'resolved']);
 export const AGENT_REPLY_STATUS = Object.freeze(['addressed', 'answered', 'declined', 'needs_input']);
 export const VERDICTS = Object.freeze(['comment', 'changes_requested', 'approved']);
-export const ANCHOR_KINDS = Object.freeze(['text', 'element', 'cell', 'code', 'section', 'source', 'doc']);
+export const ANCHOR_KINDS = Object.freeze(['text', 'element', 'cell', 'code', 'section', 'source', 'doc', 'snip']);
 export const ANCHOR_STATES = Object.freeze(['exact', 'moved', 'edited', 'changed', 'orphaned']);
 
 /** Server-sent event names (UI origin, GET /api/events). Payloads are hints; clients refetch DocState. */
@@ -98,7 +98,7 @@ export const MSG = Object.freeze({
   KEY: 'key',                 // {key, meta, ctrl, shift, alt}  (only non-editable focus, not defaultPrevented)
   SCROLL: 'scroll',           // {topSrid}
   PAGE_ERROR: 'pageError',    // {count, last}
-  TOOL_CHANGED: 'toolChanged',// {tool}  (guest exited pick mode via Esc)
+  TOOL_CHANGED: 'toolChanged',// {tool}  (guest changed tool itself: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip')
   // UI -> guest
   CONNECT: 'connect',         // carries the MessagePort (window message, not port)
   INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId, hidden}
@@ -106,7 +106,7 @@ export const MSG = Object.freeze({
   SET_CHANGES: 'setChanges',  // {changes:Changes|null}
   FOCUS: 'focus',             // {id}   highlight as active + scroll into view + pulse
   SCROLL_TO: 'scrollTo',      // {srid?|id?|hunk?}
-  SET_TOOL: 'setTool',        // {tool:'select'|'pick'}
+  SET_TOOL: 'setTool',        // {tool:'select'|'pick'|'snip'}  (snip: drag a box over ANY area of the doc, see SNIP below)
   SET_THEME: 'setTheme',      // {theme:'light'|'dark'|'system'}
   REVEAL: 'reveal',           // {id}   open <details>/tabs hiding the target
   CLEAR_SELECTION: 'clearSelection',
@@ -136,6 +136,9 @@ export const TESTID = Object.freeze({
   replyAdd: 'reply-add',
   toast: 'toast',
   pickTool: 'pick-tool',
+  snipTool: 'snip-tool',               // snip an area of the doc (key b)
+  snipScreen: 'snip-screen',           // snip anywhere on screen via macOS screencapture (key B)
+  composerAttachment: 'composer-attachment', // thumbnail of an attached screenshot in the composer
   changeItem: 'change-item',           // plus data-hunk-id
   historyRow: 'history-row',           // plus data-version
   docList: 'doc-list',
@@ -147,3 +150,24 @@ export const LIMITS = Object.freeze({
   maxAttachmentBytes: 5 * 1024 * 1024,
   maxServeBytes: 200 * 1024 * 1024,
 });
+
+/**
+ * Snips (hotkey `b` in the review UI or the doc): the reviewer drags a box over ANY area of the rendered doc (text,
+ * images, diagrams, mixed). The guest sends MSG.ACTION {action:'comment', capture: SnipCapture, rect, crop?} where crop
+ * is a PNG data URL of exactly the boxed area (rasterised in the doc with the vendored modern-screenshot library;
+ * omitted when rasterising fails or is blocked).
+ *
+ * SnipCapture = { kind: 'snip',
+ *   srids: number[],          // stamped LEAF block elements (see BLOCK_TAGS) that intersect the box, document order, max SNIP.maxSrids
+ *   startSrid, endSrid,       // first / last of srids (null when the box covers no stamped block)
+ *   containerSrid,            // deepest stamped element whose box contains the whole snip box (null -> none)
+ *   region: {x,y,w,h},        // the box as fractions of containerSrid's border box (or of the document when containerSrid is null)
+ *   text: string,             // visible text inside the box, whitespace-collapsed, max SNIP.maxText chars
+ *   label: string }           // short human label, e.g. 'area over "2. Request flow" (figure + 2 paragraphs)'
+ *
+ * Screen snips (hotkey `B`, the UI's snip-screen button, or `specreview snip` from a terminal / macOS Shortcut) use the
+ * macOS `screencapture -i` region picker on the reviewer's machine; the PNG becomes a composer/draft attachment on a
+ * general (kind 'doc') comment, or on the current selection when there is one.
+ */
+export const SNIP = Object.freeze({ minPx: 8, maxSrids: 60, maxText: 2000, maxScreenPx: 2000 });
+

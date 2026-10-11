@@ -938,7 +938,9 @@ Special cases:
 |---|---|---|---|
 | Text, including across blocks | Select, then `c`, `s` or `q` | `text:{startSrid,startOffset,endSrid,endOffset,exact,prefix,suffix}` (offsets relative to each srid's text span) | `L42-43 §3.2` plus `on:` and `src>` lines |
 | Image or picture (whole) | `e`, then click | `element:{srid,tag,attrs,label}` | `L88 <img alt="System overview">` plus the source line |
-| Region of an image, SVG, canvas, video or iframe | `e`, then shift-drag | element plus `region:{x,y,w,h}` (fractions of the content box), plus a crop PNG where possible | `region x40-62% y10-30%` and `crop: <path>` |
+| Region of an image, SVG, canvas, video or iframe | `e`, then shift-drag | element plus `region:{x,y,w,h}` (fractions of the stamped element's border box), plus a crop PNG where possible | `region x40-62% y10-30%` and `crop: <path>` |
+| Any area of the doc (text, images, diagrams, a mix) | `b`, then drag a box | `snip:{srids,startSrid,endSrid,containerSrid,region,text,label}` (protocol.js SNIP) plus a PNG of exactly the boxed area; stored as anchor kind `snip` | `snip (figure + 2 paragraphs)`, the covered blocks' `src>` lines and `image: <path>` |
+| Anything on the reviewer's screen | `B` (macOS `screencapture -i`), or `specreview snip` | the current selection's capture, else `doc` | `GENERAL` (or the selection's anchor) and `image: <path>` |
 | Inline SVG child (authored) | `e`, hover; `[` and `]` walk ancestors; click | the element's own srid | the exact source lines of that `<g>` or `<rect>` |
 | Mermaid node (generated) | `e`, click a node | element (srid of `pre.mermaid`, `generated:true`) plus `svg:{nodeId,label}` | `mermaid node "Gateway"` narrowed to the fence line containing the node |
 | Table cell, row or column | `e`, click a cell; a chooser offers cell, row, column or table | `cell:{tableSrid,row,col,rowKey,colHeader,text}` (rowspan/colspan-aware grid) | `table cell row "refresh_token" x col "TTL"` plus the row's source line |

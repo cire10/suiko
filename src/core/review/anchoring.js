@@ -2,7 +2,8 @@
 // Adapter between the review engine and the anchor library (src/core/anchor, WP3a; design 7,
 // BUILD_AMENDMENTS 3.3 / 3.4 / 4.2 / 4.5 / 4.6). Every call into the anchor library goes through here, so the
 // engine depends on one small surface and contract drift is absorbed in one file:
-//   anchorForCapture   capture (guest) at a version                -> Anchor ('widen' = deepest block element)
+//   anchorForCapture   capture (guest) at a version                -> Anchor ('widen' = deepest block element;
+//                      not for doc / section / snip captures, which already cover whole blocks)
 //   anchorForLines     lines of a version                           -> Anchor (mappedBy 'lines')
 //   anchorForQuote     exact text in a version                      -> Anchor | null
 //   overrideAnchor     agent `reanchor` / reviewer "Move here"      -> Anchor (state 'exact', mappedBy 'override')
@@ -11,7 +12,8 @@
 //   domTarget          Anchor + render                              -> DomTarget (amendments 3.4)
 //   liveAnchor         head anchor mapped onto the working copy     -> Anchor (for 'live' DOM targets)
 //   describe           packet presentation (working-copy lines, src> with the 4.6 caps, label, on, crops)
-//   label              the target label ('text', '<img alt="...">', 'mermaid node "X"', 'GENERAL', ...)
+//   label              the target label ('text', '<img alt="...">', 'mermaid node "X"', 'GENERAL', 'snip (...)')
+//   attachmentKind     what a thread's attachments show: 'region' | 'snip' | 'image'
 //   sectionExtent      source extent of a heading's section
 // The anchor library takes `format`, `docPath` and the version's manifest `assets` (element asset hashes) as
 // context: `AnchorEnv` carries them.
@@ -40,7 +42,7 @@ import { lineHunks, offsetMapper } from '../diff/index.js';
 export function anchorForCapture({ version, capture, source, render, env, assets = null, widen = false }) {
   const base = { version, source, render, format: env.format, docPath: env.docPath, assets, config: env.config };
   let anchor = anchorLib.createAnchor({ ...base, capture });
-  if (widen && anchor.kind !== 'doc' && anchor.kind !== 'section') {
+  if (widen && anchor.kind !== 'doc' && anchor.kind !== 'section' && /** @type {string} */ (anchor.kind) !== 'snip') {
     const srid = deepestBlockAt(render, anchor.src.start, Math.max(anchor.src.start, anchor.src.end));
     const node = srid != null ? render.srcmap.nodes[srid] : null;
     if (node) anchor = anchorLib.createAnchor({ ...base, capture: { kind: 'element', srid: /** @type {number} */ (srid), tag: node.t, label: '' } });
@@ -190,6 +192,15 @@ export function describe(anchor, { headSource, workingSource, hunks, env, attach
  */
 export function label(anchor) {
   return anchor ? anchorLib.anchorLabel(anchor) : '';
+}
+
+/**
+ * What the attachments of a thread / draft with this anchor show ('region' crop, 'snip' picture, other 'image').
+ * @param {Anchor | null | undefined} anchor
+ * @returns {'region' | 'snip' | 'image'}
+ */
+export function attachmentKind(anchor) {
+  return anchorLib.attachmentKindOf(anchor);
 }
 
 /**

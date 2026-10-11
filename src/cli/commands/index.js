@@ -18,6 +18,7 @@ export const COMMANDS = {
   revert: { load: () => import('./revert.js'), summary: 'Undo one unrecorded hunk, or restore a locked range', group: 'loop' },
   reanchor: { load: () => import('./reanchor.js'), summary: "Move a thread's anchor to other lines or text", group: 'loop' },
   ask: { load: () => import('./ask.js'), summary: 'Ask the reviewer a question anchored on the doc', group: 'loop' },
+  snip: { load: () => import('./snip.js'), summary: 'Reviewer: snip the screen (macOS) into a draft comment, or --send it now', group: 'loop' },
   threads: { load: () => import('./threads.js'), summary: 'List threads, one line each', group: 'inspect' },
   show: { load: () => import('./show.js'), summary: 'Show a thread with its timeline, or old source lines', group: 'inspect' },
   diff: { load: () => import('./diff.js'), summary: 'What changed between versions (default: last reviewed..head)', group: 'inspect' },

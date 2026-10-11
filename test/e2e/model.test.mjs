@@ -6,10 +6,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  anchorAt, anchorQuote, applyErrorText, backupHasInput, coalesceWordParts, defaultBase, defaultVerdict, diffLines,
-  draftVersion, groupHunks, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isVerifiable,
-  linesLabel, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary, singleH1, staleApproveText,
-  statusInfo, suggestionMode, targetLabel, threadMatches, timeline, trimDiffContext,
+  anchorAt, anchorQuote, applyErrorText, attachmentName, attachmentUrl, backupHasInput, canSendNow, coalesceWordParts,
+  defaultBase, defaultVerdict, diffLines, draftVersion, groupHunks, hunkLines, hunkPreview, hunkSourceText,
+  isComposerDirty, isReplyDirty, isVerifiable, keyLabel, linesLabel, panelItems, presenceInfo, reviewProgress,
+  roundResults, roundSummary, singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches,
+  timeline, trimDiffContext,
 } from '../../src/ui/model.js';
 import { contentUrl, docUrl, wordParts } from '../../src/ui/util.js';
 
@@ -315,4 +316,57 @@ test('applyErrorText: only a dirty working copy gets the "record first" advice (
   const conflict = { status: 409, message: 'conflict t3: the suggested text was not found in v2', body: { code: 'REFUSED' } };
   assert.equal(applyErrorText('t3', conflict), 'Could not apply t3: conflict t3: the suggested text was not found in v2');
   assert.equal(applyErrorText('t3', { status: 500, message: 'boom' }), 'Could not apply t3: boom');
+});
+
+test('attachmentUrl: attachmentBase + the file name, only on the content origin and only for image names', () => {
+  const ds = { contentBase: 'http://127.0.0.1:4778/c/abc123', attachmentBase: 'http://127.0.0.1:4778/c/abc123/__att/' };
+  assert.equal(attachmentUrl(ds, 'attachments/a3.png'), 'http://127.0.0.1:4778/c/abc123/__att/a3.png');
+  assert.equal(attachmentUrl(ds, 'a4.jpg'), 'http://127.0.0.1:4778/c/abc123/__att/a4.jpg');
+  assert.equal(attachmentUrl({ ...ds, attachmentBase: 'http://127.0.0.1:4778/c/abc123/__att' }, 'attachments/a1.png'),
+    'http://127.0.0.1:4778/c/abc123/__att/a1.png', 'a base without the trailing slash');
+  assert.equal(attachmentUrl({ contentBase: ds.contentBase }, 'attachments/a1.png'), null, 'no attachmentBase (older daemon)');
+  assert.equal(attachmentUrl(ds, 'attachments/notes.txt'), null);
+  assert.equal(attachmentUrl(ds, 'attachments/evil.svg'), null);
+  assert.equal(attachmentUrl(ds, 'attachments/..'), null);
+  assert.equal(attachmentUrl(ds, 'attachments/.hidden.png'), null);
+  assert.equal(attachmentUrl(ds, 'a1.png?x=1'), null);
+  assert.equal(attachmentUrl(ds, null), null);
+  assert.equal(attachmentUrl({ ...ds, attachmentBase: 'http://evil.example/__att/' }, 'a1.png'), null, 'another origin');
+  assert.equal(attachmentUrl({ ...ds, attachmentBase: 'javascript:alert(1)//' }, 'a1.png'), null);
+  assert.equal(attachmentName('attachments/a3.png'), 'a3.png');
+  assert.equal(attachmentName(undefined), '');
+});
+
+test('keyLabel: Mac symbols or Ctrl / Shift names', () => {
+  assert.equal(keyLabel('mod+shift+enter', true), '⌘⇧↵');
+  assert.equal(keyLabel('mod+shift+enter', false), 'Ctrl+Shift+Enter');
+  assert.equal(keyLabel('mod+enter', true), '⌘↵');
+  assert.equal(keyLabel('mod+enter', false), 'Ctrl+Enter');
+  assert.equal(keyLabel('shift+B', true), '⇧B');
+  assert.equal(keyLabel('shift+B', false), 'Shift+B');
+  assert.equal(keyLabel('b', false), 'b');
+  assert.equal(keyLabel('esc', true), 'Esc');
+  assert.equal(keyLabel('mod+shift+enter', false, { compact: true }), 'Ctrl+⇧+↵');
+  assert.equal(keyLabel('mod+shift+enter', true, { compact: true }), '⌘⇧↵');
+  assert.equal(keyLabel('\\', false), '\\');
+});
+
+test('canSendNow: a new comment, question or suggestion; not a draft being edited or "Mark agreed"', () => {
+  assert.equal(canSendNow(null), false);
+  assert.equal(canSendNow({ type: 'comment', draftId: null }), true);
+  assert.equal(canSendNow({ type: 'suggestion', draftId: null }), true);
+  assert.equal(canSendNow({ type: 'comment', draftId: 'd2' }), false);
+  assert.equal(canSendNow({ type: 'agree', draftId: null }), false);
+});
+
+test('snip anchors: the card names the snipped area and quotes the text inside the box', () => {
+  const snip = {
+    v: 1, kind: 'snip', state: 'exact', quote: null, src: { start: 10, end: 90, startLine: 29, endLine: 36, text: '![x](a.png)' },
+    snip: { label: 'area over "2. Request flow" (figure + 2 paragraphs)', covers: 'figure + 2 paragraphs', text: 'Client  app\nGateway', region: null, container: null },
+  };
+  assert.equal(targetLabel(snip), 'area over "2. Request flow" (figure + 2 paragraphs)');
+  assert.equal(targetLabel({ ...snip, snip: { ...snip.snip, label: '' } }), 'snip (figure + 2 paragraphs)');
+  assert.equal(targetLabel({ ...snip, snip: undefined }), 'snipped area');
+  assert.equal(anchorQuote(snip), 'Client app Gateway');
+  assert.equal(anchorQuote({ ...snip, snip: { ...snip.snip, text: '' } }), '');
 });

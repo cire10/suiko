@@ -62,6 +62,22 @@ function invariants(a, ver, prev, created, overridden) {
     if (JSON.stringify(d.lines) !== JSON.stringify([a.src.startLine, a.src.endLine])) errs.push('describe lines mismatch');
     if (d.src == null || d.src.length > 1200) errs.push('describe src missing or too long');
   }
+  // snips: whole lines, no quote, a container that is an element of this version, never painted as kind 'snip'
+  if (dt.kind === 'snip') errs.push("DomTarget kind 'snip' (the guest paints element / source targets)");
+  if (a.kind === 'snip') {
+    if (!a.snip) errs.push('snip anchor without snip info');
+    if (a.quote !== null) errs.push('snip anchor with a quote');
+    if (a.state !== 'orphaned') {
+      const li2 = lineIndex(ver.source);
+      if (a.src.start !== li2.startOf(a.src.startLine) || a.src.end !== li2.endOf(a.src.endLine)) errs.push('snip src is not whole lines');
+      const c = a.snip?.container;
+      if (c) {
+        const n = ver.render.srcmap.nodes[c.srid];
+        if (!n || n.s !== c.s || n.e !== c.e || n.t.toLowerCase() !== c.tag) errs.push('snip container is not an element of this version');
+      }
+      if (!c && a.region) errs.push('snip region without a container');
+    }
+  }
   return errs;
 }
 

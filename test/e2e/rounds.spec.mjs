@@ -330,6 +330,11 @@ test('every TESTID is rendered somewhere in the review flow', async ({ page, ui,
   await expect(page.getByTestId(TESTID.composerSuggestion)).toBeVisible();
   await collect(); // composer, textarea, add, send now, suggestion
   await page.getByTestId(TESTID.composer).getByRole('button', { name: 'Cancel' }).click();
+  // A screen snip (the mock's fake picker): a composer with the screenshot thumbnail.
+  await page.getByTestId(TESTID.snipScreen).click();
+  await expect(page.getByTestId(TESTID.composerAttachment)).toBeVisible();
+  await collect(); // snip tool, snip screen, composer attachment
+  await page.getByTestId(TESTID.composer).getByRole('button', { name: 'Cancel' }).click();
   await focusUi(page);
   await page.keyboard.press('t');
   await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Theme: light' })).toBeVisible();

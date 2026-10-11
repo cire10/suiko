@@ -9,6 +9,9 @@
 //     quote / prefix / suffix come from anchor.quote for text-like kinds (text, code, source); element, cell,
 //     section and doc targets carry no quote (the guest outlines the element / brackets the section).
 //     region / svg / cell are copied (cell gets the anchor's `scope`). label defaults to anchorLabel(anchor).
+//     Snips (kind 'snip', see snip.js) are painted as the box they are: {kind: 'element', srid: the container at
+//     this version, region} while the container is known; otherwise the covered blocks are outlined
+//     ({kind: 'source', srid, endSrid, quote: null, region: null}). The guest never sees kind 'snip'.
 //
 //   mapAnchorToWorking(anchor, headSource, workingSource, hunks?, mapper?, { render?, format?, originalAnchor?,
 //                      docPath?, assets?, config? }) -> Anchor
@@ -70,6 +73,14 @@ export function toDomTarget(anchor, render, opts) {
     cell: anchor.cell ? { ...anchor.cell, ...(anchor.scope ? { scope: anchor.scope } : {}) } : null,
     label: opts.label ?? anchorLabel(anchor),
   };
+  if (anchor.kind === /** @type {any} */ ('snip')) {
+    const container = orphaned ? null : valid(/** @type {any} */ (anchor).snip?.container?.srid);
+    if (container != null && anchor.region) {
+      Object.assign(target, { kind: 'element', srid: container, endSrid: null, region: { ...anchor.region } });
+    } else {
+      Object.assign(target, { kind: 'source', region: null });
+    }
+  }
   if (opts.severity) target.severity = opts.severity;
   if (opts.type) target.type = opts.type;
   return target;

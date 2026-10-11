@@ -4,6 +4,8 @@
 
 SpecReview runs entirely on your machine, keeps every version and thread as plain files you can commit to git, and works with Claude Code (plugin, skill, slash command and hooks), any MCP client, and any CLI agent.
 
+Everything is one key away: select text and press `c` to comment, press `b` to snip any area of the doc, `B` to snip anything on your screen, and `Cmd+Shift+Enter` to send a comment to the agent right now. See [Keyboard shortcuts](#keyboard-shortcuts) and [Snipping](#snipping).
+
 ![Review mode: the rendered spec with highlighted threads, pins and the thread panel](docs/img/review-mode.png)
 
 ![Changes mode after a revision: change bars, inserted words, "⊖ was" tabs, thread badges and the change list](docs/img/changes-mode.png)
@@ -14,6 +16,8 @@ SpecReview runs entirely on your machine, keeps every version and thread as plai
 - [How it works](#how-it-works)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Snipping](#snipping)
 - [The review loop, step by step](#the-review-loop-step-by-step)
 - [Command reference](#command-reference)
 - [Storage layout and git](#storage-layout-and-git)
@@ -60,7 +64,7 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 ## Install
 
-Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional.
+Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
 ### 1. The CLI
 
@@ -133,6 +137,96 @@ specreview open docs/specs/token-service.md     # prints the review UI URL
 specreview feedback token-service               # after you submit: prints the feedback packet
 ```
 
+## Keyboard shortcuts
+
+Press `?` in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`.
+
+| | Key | Does |
+|---|---|---|
+| **Comment** | `c` / `s` / `q` | Comment on, suggest replacement text for, or ask a question about the selected text |
+| | `a` | Mark the selection agreed (locks it) |
+| | `b` | **Snip an area of the doc**: drag a box over anything (text, images, diagrams, a mix) |
+| | `B` (Shift+B) | **Snip anywhere on your screen** with the macOS picker |
+| | `e` | Pick an image, diagram node, table cell or code block (shift-drag marks a region of an image) |
+| | `Cmd+Enter` | In the comment box: **Add to review** (a draft, sent when you submit) |
+| | `Cmd+Shift+Enter` | In the comment box: **Send now** (this comment goes to the agent immediately) |
+| | `Esc` | Cancel the comment, the snip or pick mode |
+| **Review** | `f` or `Cmd+Shift+Enter` | Submit the whole review (outside the comment box) |
+| | `v` | Verify queue: the threads the agent addressed, answered or declined |
+| | `x` / `o` | Accept / reopen the focused thread |
+| | `y` | Accept a decline |
+| | `r` | Reply to the focused thread |
+| **Navigate** | `j` / `k` | Next / previous thread |
+| | `n` / `p` | Next / previous change |
+| | `[` / `]` | Previous / next version (in pick mode: parent / child element) |
+| | `1` `2` `3` `4` | Review / Changes / Source / History mode |
+| | `d` | Compare with your last review, or with the previous version |
+| **View** | `h` | Hide all highlights for a clean read |
+| | `\` | Show or hide the thread panel |
+| | `t` | Cycle the theme |
+| | `?` | Help overlay |
+
+Most keys work while focus is in the document too. Keys that change a thread's state (`x`, `o`, `y`) act only when focus is in the SpecReview UI, so scripts in a reviewed document cannot trigger them. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
+
+## Snipping
+
+A snip is a comment with a picture. The agent receives the image's file path and reads it (Claude Code uses its Read tool), so it sees exactly what you see.
+
+| To comment on | Do | The agent gets |
+|---|---|---|
+| Any area of the doc | Press `b` (or the scissors button in the top bar) and drag a box | The picture, the source lines of every block under the box, and a label such as `snip (figure + 2 paragraphs)` |
+| Anything on your screen: the running app, a terminal, another document (macOS) | Press `B`, then drag with the macOS picker, as with `Cmd+Shift+4` | The picture, as a general comment, or on the text you had selected |
+| Anything, from a terminal or a global hotkey (macOS) | `specreview snip` | The picture as a draft comment in your review, or sent at once with `--send` |
+| A region of one image, SVG or canvas | Press `e`, then shift-drag on the image | The crop, the element's source and the region as percentages |
+
+**Area snips (`b`).** The cursor becomes a crosshair. Drag a box over any part of the rendered doc; when you let go, the comment box opens with a thumbnail of the area. Type your comment, then `Cmd+Enter` to add it to your review or `Cmd+Shift+Enter` to send it now. `Esc` cancels. Each `b` takes one snip, then you are back to selecting text. It works whether focus is in the UI or in the document.
+
+**Screen snips (`B`).** SpecReview's local server runs macOS's own region picker (`screencapture -i`). Drag a box, or press Space and click a window; `Esc` cancels. The comment box opens with the screenshot attached. Select some text in the doc first to attach the screenshot to that text; otherwise it becomes a general comment. Large screenshots are scaled down to 2000 px on the longest side. This needs macOS and, on first use, the Screen Recording permission (see below).
+
+**From the terminal: `specreview snip`.** Runs the same picker and adds the screenshot to the doc as a draft comment. An open review UI shows it at once with a toast, "Screenshot added from your Mac", and an **Edit** button to add text.
+
+```bash
+specreview snip                                         # picker, then a draft on this workspace's doc
+specreview snip token-service -m "The header overlaps the logo"
+specreview snip --send -m "This is the login page today"      # submit it to the agent right away
+specreview snip --file ~/Desktop/shot.png --question -m "Is this the flow you meant?"
+```
+
+`-m` adds the comment text, `--question` makes it a question, `--send` submits it immediately as a one-item review (a waiting agent picks it up at once), `--file <png>` attaches an existing PNG or JPEG (up to 5 MB) instead of opening the picker, and `--json` prints the result as JSON. Without `<doc>`, it uses the only doc tracked in the current directory's workspace (or `--workspace <dir>`); when that workspace tracks several docs, or the current directory has none (a Shortcut starts in your home folder), it picks the most recently active doc and names it on stderr. Pass the doc id or its file path to choose. `Esc` in the picker cancels: nothing is added and the exit code is 0.
+
+### A global snip hotkey with the Shortcuts app (macOS)
+
+Bind `specreview snip` to a key that works in every app, so you can snip a bug in the running app and hand it to Claude without switching windows.
+
+1. **Find the two paths** in a terminal:
+
+   ```bash
+   command -v node                        # e.g. /opt/homebrew/bin/node, or ~/.nvm/versions/node/v24.11.0/bin/node
+   realpath "$(command -v specreview)"    # e.g. /Users/you/src/specreview/bin/specreview.js
+   ```
+
+2. **Allow scripts.** Open the **Shortcuts** app, choose **Shortcuts > Settings > Advanced**, and turn on **Allow Running Scripts**.
+3. **New shortcut.** Choose **File > New Shortcut** and name it, for example "Snip to Claude".
+4. **Add the action.** In the action list on the right, search for **Run Shell Script** and double-click it.
+5. **Paste the command.** Leave **Shell** as `zsh` and replace the sample text with the full form, using the two paths from step 1 and your project folder:
+
+   ```bash
+   "/opt/homebrew/bin/node" "/Users/you/src/specreview/bin/specreview.js" snip --workspace "/Users/you/projects/my-app"
+   ```
+
+   This form works with nvm, asdf and Volta too. Shortcuts runs scripts with a minimal `PATH` that contains neither `node` nor `specreview`, so the short form needs the `PATH` set first. It works when `npm link` put `specreview` next to a system-wide Node, such as Homebrew's:
+
+   ```bash
+   export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+   specreview snip --workspace ~/projects/my-app
+   ```
+
+   Add `--send` to skip the draft and send each snip to the agent at once. If the workspace tracks several docs, the snip goes to the most recently active one; name the spec's file path instead of `--workspace` to pin it to one doc.
+6. **Add the hotkey.** Click the **Shortcut Details** button (ⓘ) in the right sidebar, click **Add Keyboard Shortcut**, and press the keys you want, for example `Ctrl+Option+Cmd+S`. Choose a combination no app uses.
+7. **Test it.** Press the hotkey, or click Run (▶) in the shortcut's window. If Shortcuts asks whether the shortcut may run a script, allow it.
+
+**Screen Recording permission.** macOS asks for it the first time a snip runs. Grant it to **Shortcuts** for the hotkey, and to the app that started SpecReview (your terminal, your editor, or Claude) for `B` and for `specreview snip` in a terminal: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For `B`, also run `specreview stop` and open the doc again so the server restarts under that app. A snip that shows only your wallpaper or empty windows means the permission is missing.
+
 ## The review loop, step by step
 
 **1. The agent writes the spec once and opens it.**
@@ -144,7 +238,7 @@ review UI: http://127.0.0.1:4777/d/3f9a1c2e/token-service?k=Zx81Qm0v7c
 next: open the URL (browser pane), then run `specreview wait token-service` in the background
 ```
 
-**2. You review.** Select a phrase and press `c` to comment, `s` to suggest exact replacement text, or `q` to ask a question. Press `e` to pick an image, a mermaid node or a table cell, and shift-drag to mark a region of an image. Use the **⋯** menu of a section in the outline and choose **Mark agreed** to lock it. Then **Submit review** with a verdict: Comment, Request changes or Approve. See the [reviewer guide](docs/user-guide.md).
+**2. You review.** Select a phrase and press `c` to comment, `s` to suggest exact replacement text, or `q` to ask a question. Press `b` and drag a box to snip any area (a figure with its caption, half a table, a whole section), or `B` to snip something outside the doc. Press `e` to pick an image, a mermaid node or a table cell, and shift-drag to mark a region of an image. Use the **⋯** menu of a section in the outline and choose **Mark agreed** to lock it. Then **Submit review** with a verdict: Comment, Request changes or Approve. A single urgent comment can skip the queue with **Send now** (`Cmd+Shift+Enter` in the comment box). See the [reviewer guide](docs/user-guide.md).
 
 **3. The agent gets a packet**, one item per thread, with the exact source lines to edit:
 
@@ -211,6 +305,7 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | `specreview status [<doc>] [--json]` | Docs, threads, undelivered reviews, listeners, working-copy state |
 | `specreview final <doc> [--decisions] [--out <dir>]` | Check the final version; export the decision log |
 | `specreview close <doc>` | End the review session |
+| `specreview snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: snip anywhere on screen with the macOS picker (or attach an image with `--file`) as a draft comment, or submit it at once with `--send`. See [Snipping](#snipping) |
 | `specreview serve [--foreground] [--port N]` · `specreview stop [--rotate]` · `specreview doctor [--fix]` | Server control and health checks |
 | `specreview mcp` | stdio MCP server |
 | `specreview hook pre-write` · `specreview hook prompt` | Claude Code hook entry points |
@@ -237,7 +332,7 @@ Durable review data lives **in your repository**, next to the spec, and is meant
       threads/t1.json …                     one file per thread
       reviews/rv1.json …                    one file per submitted review
       locks/L1.json …                       agreed regions
-      attachments/a1.png …                  region crops and pasted images
+      attachments/a1.png …                  snips, screenshots, region crops and pasted images
 ```
 
 Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `~/.specreview`). Never commit it; deleting it is safe (stop the server first):
@@ -293,6 +388,7 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 - **Isolated documents.** Specs, including their scripts, run on a separate origin (port 4778) in a sandboxed iframe without top-navigation rights. That origin has no API and no state-changing routes, and each document is served under an unguessable per-document path, so other websites cannot probe your files.
 - **Path safety.** Only files inside the workspace are served; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and key files (`*.pem`, `*.key`, `*.p12`, `id_rsa*`) are refused.
 - **Observe-only overlay.** Messages from the document can at most open a comment box; nothing is submitted, resolved or written without a click in the UI. Comment bodies are sanitised before rendering.
+- **Screen snips are interactive.** `B` and `specreview snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.
 - **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`.
 - **Hooks and install are conservative.** Hooks never block a prompt on error and always exit 0. `install` prints what it would change and writes nothing without `--apply`.
 
@@ -307,6 +403,9 @@ The access token appears in the pane's address bar; it is not sent as a referrer
 | The pane stays blank or shows "Reconnecting to SpecReview…" | Run `specreview doctor`. If needed, `specreview stop`, then `specreview open <file>` again and use the new URL. |
 | The old URL returns 401 | The token was rotated. Get a fresh URL from `specreview open <file>`. |
 | Ports 4777/4778 are taken | The server tries the next free pair up to 4799, then random ports, and remembers its choice. Or set `SPECREVIEW_PORT`. |
+| A screen snip shows only the wallpaper or empty windows | macOS has not granted Screen Recording. Turn it on for the app that started SpecReview (or Shortcuts) in System Settings > Privacy & Security > Screen & System Audio Recording, quit and reopen that app, then `specreview stop` and open the doc again. |
+| `B` or `specreview snip` says screen snips are unsupported | They need macOS (`/usr/sbin/screencapture`). Use `b` to snip inside the doc, or paste an image into the comment box. |
+| An area snip has no picture | The browser could not draw that area (for example a cross-origin image or a video frame). The comment still carries the source lines; use `B` to attach a real screenshot. |
 | `wait` exits 3 immediately | The spec has unrecorded edits. The agent should run `specreview revise`; if the edits are yours, click **Record as my revision**. `--allow-dirty` skips the check. |
 | `revise` says REFUSED | Read each `ERR` line and its `fix:`. Typical fixes: `specreview revert <doc> --hunk hN`, an `other` explanation, or asking the reviewer to unlock text. |
 | Claude says a Write was denied "under SpecReview" | Working as intended: the doc is under review, so Claude must use targeted edits. Set `guards.writeHook` to `warn` or `off` to change this. |
@@ -344,12 +443,12 @@ The access token appears in the pane's address bar; it is not sent as a referrer
 
 - Plain Node.js ESM with JSDoc types and `// @ts-check`; no build step. The UI is Preact + htm, loaded from vendored files.
 - Layout: `bin/specreview.js` (CLI entry), `src/cli` and `src/mcp` (agent surfaces), `src/core` (store, render, text, diff, anchoring, review operations), `src/daemon` (local server), `src/guest` (script injected into documents), `src/ui` (review UI), `integrations/` (Claude Code plugin and AGENTS.md snippet).
-- Tests: `npm test` (unit and integration, `node --test`), `npm run e2e` (Playwright with your system Chrome). Tests use a temporary `SPECREVIEW_HOME` and never the default ports.
+- Tests: `npm test` (unit and integration, `node --test`), `npm run test:guest`, `npm run test:ui` (UI model tests, then Playwright e2e with your system Chrome; `npm run e2e` runs only the Playwright part). Tests use a temporary `SPECREVIEW_HOME` and never the default ports. Screen-snip tests set `SPECREVIEW_SCREENCAPTURE` to a fake capture command, so they never open the real picker.
 - Validate the plugin: `claude plugin validate .` and `claude plugin validate ./integrations/claude-code`.
 
 ## Documentation
 
-- [Reviewer guide](docs/user-guide.md): the UI, gestures, keyboard shortcuts, Verify, locks and final versions.
+- [Reviewer guide](docs/user-guide.md): the UI, gestures, snipping, keyboard shortcuts, Verify, locks and final versions.
 - [Agent protocol](docs/agent-protocol.md): the full contract for agents: commands, packet format, revise JSON, guards, MCP tools.
 - [Claude Code skill](integrations/claude-code/skills/spec-review/SKILL.md) and its [reference](integrations/claude-code/skills/spec-review/reference.md).
 - [AGENTS.md snippet](integrations/agents-md/AGENTS.snippet.md) for other agents.

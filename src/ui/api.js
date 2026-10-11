@@ -14,6 +14,8 @@
 const TOKEN_KEY = 'specreview.token';
 const REQUEST_TIMEOUT_MS = 30000;
 const HEALTH_TIMEOUT_MS = 3000;
+/** The daemon's picker gives up after 120 s; the request outlives it so the daemon's answer always arrives. */
+const SNIP_SCREEN_TIMEOUT_MS = 150000;
 
 /** @typedef {'ok'|'reconnecting'|'unauthorized'} ConnState */
 
@@ -172,11 +174,13 @@ export async function checkConnection() {
  * @param {'GET'|'POST'|'PATCH'|'DELETE'} method
  * @param {string} path absolute path beginning with /api/
  * @param {any} [body] JSON body
- * @param {{ retry?: boolean }} [opts] retry after reconnecting (default: GET only)
+ * @param {{ retry?: boolean, timeoutMs?: number }} [opts] retry: retry after reconnecting (default: GET only);
+ *   timeoutMs: give up after this long (default 30 s; the screen snip waits for the reviewer to pick an area)
  * @returns {Promise<any>}
  */
 export async function request(method, path, body, opts = {}) {
   const retry = opts.retry ?? method === 'GET';
+  const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   for (let attempt = 0; ; attempt++) {
     if (recovering && retry) await recovering;
     /** @type {Response} */
@@ -190,7 +194,7 @@ export async function request(method, path, body, opts = {}) {
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         cache: 'no-store',
-        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+        signal: timeoutSignal(timeoutMs),
       });
     } catch (err) {
       const wait = waitForServer('reconnecting');
@@ -289,6 +293,12 @@ export function docApi(ws, doc) {
     attachment: (dataUrl) => request('POST', `${base}/attachments`, { dataUrl }),
     /** @param {string} source */
     fragment: (source) => request('POST', `${base}/fragment`, { source }, { retry: true }),
+    /**
+     * Runs the macOS region picker (`screencapture -i`) on the reviewer's machine and stores the PNG as an attachment:
+     * {path, dataUrl, width, height} | {cancelled: true}. 409 {code: 'busy'} while one is running, 501 {code:
+     * 'unsupported'} when the daemon cannot capture the screen. It waits for the reviewer, so it gets a long timeout.
+     */
+    snipScreen: () => request('POST', `${base}/snip/screen`, {}, { timeoutMs: SNIP_SCREEN_TIMEOUT_MS }),
     close: () => request('POST', `${base}/close`, {}),
   };
 }

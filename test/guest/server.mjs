@@ -5,9 +5,11 @@
 //                  window.__msgs (hello from the window, everything else from the port) and exposes
 //                  window.__send(type, payload) to talk to the guest over the port.
 //   content origin (http://127.0.0.1:<contentPort>): /doc/<name>.html - a fixture from test/guest/fixtures with the
-//                  guest <script> tag inserted right after <head> (as the daemon does); /__sr/guest.js - the bundle
-//                  from buildGuestBundle(); /img/*.png - PNGs generated in memory (plain zlib, no deps);
-//                  /raw/<name>.html - the same fixture without the guest (baseline for observe-only checks).
+//                  guest <script> tag inserted right after <head> (as the daemon does); /__sr/<RV>/guest.js - the
+//                  bundle from buildGuestBundle(); /__sr/<RV>/vendor/<path> - vendored doc libraries through
+//                  VENDOR_DOC (the snip rasteriser, modern-screenshot, is imported from there, like on the daemon);
+//                  /img/*.png - PNGs generated in memory (plain zlib, no deps); /raw/<name>.html - the same fixture
+//                  without the guest (baseline for observe-only checks).
 // Both servers bind 127.0.0.1 on port 0 by default (never the default SpecReview ports).
 
 import http from 'node:http';
@@ -16,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { buildGuestBundle } from '../../src/guest/build.js';
+import { RENDERER_VERSION } from '../../src/shared/protocol.js';
+import { VENDOR_DOC, resolveVendor } from '../../src/shared/vendor.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -101,7 +105,13 @@ export async function startHarness(opts = {}) {
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
       res.end(body);
     };
-    if (url.pathname === '/__sr/guest.js') return send(200, 'text/javascript; charset=utf-8', bundle);
+    if (url.pathname === `/__sr/${RENDERER_VERSION}/guest.js`) return send(200, 'text/javascript; charset=utf-8', bundle);
+    const vendorPrefix = `/__sr/${RENDERER_VERSION}/vendor/`;
+    if (url.pathname.startsWith(vendorPrefix)) {
+      const abs = resolveVendor(VENDOR_DOC, decodeURIComponent(url.pathname.slice(vendorPrefix.length)));
+      if (!abs) return send(404, 'text/plain', 'not found');
+      return send(200, /\.m?js$/.test(abs) ? 'text/javascript; charset=utf-8' : 'application/octet-stream', readFileSync(abs));
+    }
     if (url.pathname === '/img/arch.png') return send(200, 'image/png', ARCH_PNG);
     const raw = /^\/raw\/([a-z0-9-]+)\.html$/.exec(url.pathname);
     if (raw && existsSync(join(FIXTURES, raw[1] + '.html'))) {
@@ -110,7 +120,7 @@ export async function startHarness(opts = {}) {
     const m = /^\/doc\/([a-z0-9-]+)\.html$/.exec(url.pathname);
     if (m && existsSync(join(FIXTURES, m[1] + '.html'))) {
       const src = readFileSync(join(FIXTURES, m[1] + '.html'), 'utf8');
-      const tag = `<script src="${origins.content}/__sr/guest.js" data-sr-ui="${origins.ui} http://localhost:${new URL(origins.ui).port}" ` +
+      const tag = `<script src="${origins.content}/__sr/${RENDERER_VERSION}/guest.js" data-sr-ui="${origins.ui} http://localhost:${new URL(origins.ui).port}" ` +
         `data-sr-target="ws1/${m[1]}/v1" data-sr-ignore></script>`;
       const at = src.search(/<head[^>]*>/i);
       const html = at < 0 ? tag + src : src.replace(/<head[^>]*>/i, (h) => h + tag);

@@ -43,6 +43,11 @@
 //     position, else the exact heading text at another level (promoted / demoted heading); the extent is
 //     recomputed with sectionRange: 'exact'/'moved' only when the whole section text is unchanged, else
 //     'edited' (a linked hunk changed the old extent or lies in the new one) or 'changed'.
+//   snip: located like text (its src is the covered blocks' whole lines; a changed range is grown back to the
+//     blocks starting / ending inside it and to whole lines); quote stays null; the box's container
+//     element is re-resolved (snip.js): the same tag at the precisely mapped start, else the only same-tag element
+//     with the same label, and it must still overlap the snip's new lines; else the container (and the region
+//     drawn in it) is dropped. Without a render the container's offsets are carried through the mapper.
 // After success quote / srid / endSrid / section / lines / element / code are recomputed against b's render:
 // quote = the previous quote while src.text is unchanged, else sourceToPlainText of the new slice. Without
 // `toRender` the anchor is relocated in the source only (srid/endSrid null, element data kept).
@@ -59,6 +64,7 @@ import {
 } from './fingerprint.js';
 import { exactFind, fuzzyFind } from './fuzzy.js';
 import { mermaidLabelIn, narrowMermaid } from './mermaid.js';
+import { snipContainerOf, snipSpan } from './snip.js';
 import { findCell, tableOf } from './table.js';
 import {
   anchoringConfig, clone, contentHostOf, deepestContaining, elementLabelOf, elementsByTag, formatOf,
@@ -432,6 +438,7 @@ function stateOf(A, src, how, opt, same) {
 function relocateText(A, ctx, opt) {
   const loc = locate(A, ctx, opt);
   if (!loc) return null;
+  if (/** @type {any} */ (A).snip && ctx.to.slice(loc.start, loc.end) !== A.src.text) Object.assign(loc, snipBlocks(ctx, loc.start, loc.end));
   const src = makeSrc(ctx.to, ctx.li, loc.start, loc.end, ctx.cfg.contextChars);
   const same = src.text === A.src.text;
   const out = carry(A, ctx, src, stateOf(A, src, loc.how, opt, same));
@@ -452,6 +459,56 @@ function relocateText(A, ctx, opt) {
     out.kind = code ? 'code' : 'text';
     out.code = code;
   }
+  if (/** @type {any} */ (A).snip) {
+    const snip = nextSnip(/** @type {any} */ (A).snip, ctx, opt, src);
+    /** @type {any} */ (out).snip = snip;
+    out.quote = null;
+    out.region = snip.container && snip.region ? clone(snip.region) : null;
+    if (ctx.render && A.kind === /** @type {any} */ ('snip')) Object.assign(out, snipSpan(ctx.render, ctx.to, src.start, src.end));
+  }
+  return out;
+}
+
+/**
+ * A changed snip range grown back to whole blocks and whole lines: a fuzzy match can stop short of the covered
+ * blocks' edges (e.g. before a closing `</pre>` after the last line was reworded). Elements that start inside the
+ * range extend its end, elements that end inside it extend its start; ancestors around it do not count.
+ * @param {ReCtx} ctx @param {number} start @param {number} end
+ * @returns {{ start: number, end: number }}
+ */
+function snipBlocks(ctx, start, end) {
+  if (end <= start) return { start, end };
+  let s = start;
+  let e = end;
+  if (ctx.render) {
+    for (const srid of ctx.render.srcmap.order) {
+      const n = ctx.render.srcmap.nodes[srid];
+      if (n.s >= start && n.s < end && n.e > e) e = n.e;
+      if (n.e > start && n.e <= end && n.s < s) s = n.s;
+    }
+  }
+  return wholeLines(ctx, s, e);
+}
+
+/**
+ * A snip's info at the new version: its container element re-resolved (null once lost).
+ * @param {import('./snip.js').SnipInfo} snip @param {ReCtx} ctx @param {Opt} opt @param {Anchor['src']} src new range
+ * @returns {import('./snip.js').SnipInfo}
+ */
+function nextSnip(snip, ctx, opt, src) {
+  const out = clone(snip);
+  const c = snip.container;
+  if (!c) return out;
+  if (!ctx.render) {
+    // relocated in the source only: carry the container's offsets, so a later step with a render can find it
+    out.container = { ...c, srid: null, s: ctx.mapper.mapOffset(c.s).off, e: ctx.mapper.mapOffset(c.e).off };
+    return out;
+  }
+  const srid = remapHost(c, ctx, opt);
+  const n = nodeOf(ctx.render, srid);
+  // the box was drawn over the covered blocks: a container that no longer overlaps them is another element
+  const overlaps = n != null && (src.end > src.start ? n.s < src.end && src.start < n.e : n.s <= src.start && src.start <= n.e);
+  out.container = overlaps ? snipContainerOf(ctx.render, srid) : null;
   return out;
 }
 
@@ -521,6 +578,7 @@ function carry(A, ctx, src, state) {
   };
   if (A.scope) out.scope = A.scope;
   if (A.host) out.host = clone(A.host);
+  if (/** @type {any} */ (A).snip) /** @type {any} */ (out).snip = clone(/** @type {any} */ (A).snip);
   if (out.element) out.element.srid = /** @type {any} */ (null);
   return out;
 }
@@ -845,6 +903,7 @@ function orphan(A, ctx) {
   };
   if (A.scope) out.scope = A.scope;
   if (A.host) out.host = clone(A.host);
+  if (/** @type {any} */ (A).snip) /** @type {any} */ (out).snip = clone(/** @type {any} */ (A).snip);
   out.lastKnown = clone(last);
   return out;
 }

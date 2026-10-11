@@ -7,6 +7,9 @@
 //   come last.
 // - Lines and `src` come from the working copy: head anchors are mapped through a precise head->working mapper.
 // - Locks (active), decisions (resolved threads with a decision), counts, drafts (only with includeDrafts).
+// - Attachments (region crops, snips, screenshots, pasted images) are ABSOLUTE paths the agent can Read, for every
+//   thread (GENERAL ones included) and for listed drafts; `attachmentKind` says what they show (region | snip |
+//   image), which picks the packet line ('crop:' / 'image:' and its Read hint, packet.js attachmentLine).
 // - Paths: `path` is workspace-relative (doc.path); `root` (workspace root) and `file` (absolute path) are added
 //   when known, and `pathFromCwd` is how the agent's cwd reaches the file (relative when under the cwd, else
 //   absolute): in a non-git project whose `.specreview/` sits next to the spec in a subfolder, the bare doc.path
@@ -17,7 +20,7 @@ import nodePath from 'node:path';
 import { CONTEXT_CHARS } from '../../shared/protocol.js';
 import { compareIds } from '../store/store.js';
 import { lineIndex } from '../text/index.js';
-import { describe, envOf, label as anchorLabel } from './anchoring.js';
+import { attachmentKind, describe, envOf, label as anchorLabel } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
 import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
 
@@ -61,6 +64,7 @@ import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from '.
  * @property {number} earlier collapsed older comments
  * @property {object | null} suggestion
  * @property {string[]} attachments absolute paths
+ * @property {'region' | 'snip' | 'image'} attachmentKind what the attachments show (region crop, snipped area, other image)
  * @property {string | null} apply command applying the suggestion
  *
  * @typedef {object} Packet
@@ -190,7 +194,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     threads: items,
     locks,
     decisions,
-    drafts: drafts ? drafts.map((d) => draftSummary(d, snap, li, mapRange)) : null,
+    drafts: drafts ? drafts.map((d) => draftSummary(d, snap, li, mapRange, attachmentPath)) : null,
     counts,
     resolvedThisRound,
     firstPacket,
@@ -281,6 +285,7 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
     earlier: conv.earlier,
     suggestion,
     attachments: d?.crops ?? (t.attachments ?? []).map((a) => attachmentPath(a)),
+    attachmentKind: d?.cropKind ?? attachmentKind(anchor),
     apply: pendingSuggestion ? `specreview apply ${snap.doc.id} ${t.id}` : null,
   };
 }
@@ -290,8 +295,9 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
  * @param {Snapshot} snap
  * @param {ReturnType<typeof lineIndex>} li
  * @param {(s: number, e: number) => { start: number, end: number }} mapRange
+ * @param {(rel: string) => string} attachmentPath
  */
-function draftSummary(d, snap, li, mapRange) {
+function draftSummary(d, snap, li, mapRange, attachmentPath) {
   if (d.kind === 'thread') {
     const a = d.anchor;
     const lines = a && a.kind !== 'doc' ? (a.v === snap.head.v ? lineRange(li, mapRange(a.src.start, a.src.end)) : [a.src.startLine, a.src.endLine]) : null;
@@ -306,6 +312,7 @@ function draftSummary(d, snap, li, mapRange) {
       on: a?.quote?.exact ? truncate(a.quote.exact.replace(/\s+/g, ' ').trim(), 120) : null,
       body: d.body ?? '',
       suggestion: d.suggestion ?? null,
+      attachments: (d.attachments ?? []).map((rel) => attachmentPath(rel)),
     };
   }
   if (d.kind === 'reply') return { id: d.id, kind: 'reply', thread: d.thread, body: d.body ?? '', reopen: Boolean(d.reopen) };

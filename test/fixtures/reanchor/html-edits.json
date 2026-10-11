@@ -1,6 +1,6 @@
 {
   "name": "html-edits",
-  "description": "Edits in a messy HTML spec: an edited table cell and an edited SVG node are 'changed' on the same elements; a mermaid node whose definition line changed is 'changed'; text whose own characters are intact on an edited line stays 'exact'; an untouched row and image stay 'exact'; a linked rewrite of a paragraph is 'edited'; a section with new content is 'changed'.",
+  "description": "Edits in a messy HTML spec: an edited table cell and an edited SVG node are 'changed' on the same elements; a mermaid node whose definition line changed is 'changed'; text whose own characters are intact on an edited line stays 'exact'; an untouched row and image stay 'exact'; a linked rewrite of a paragraph is 'edited'; a section with new content is 'changed'; a snip over a section whose diagrams were edited is 'changed' and still boxed in its section, an untouched snip stays 'exact'.",
   "doc": "app-spec.html",
   "format": "html",
   "docPath": "docs/app-spec.html",
@@ -47,6 +47,20 @@
       "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "code", "text": "order.created" } }, "endSrid": { "$srid": { "tag": "code", "text": "order.paid" } },
         "exact": "order.created and order.paid", "prefix": "Emits ", "suffix": " on the event bus." },
       "expect": { "kind": "text", "lines": [82, 82], "mappedBy": "narrowed", "sridTag": "p" }
+    },
+    "t10": {
+      "capture": { "kind": "snip",
+        "srids": [ { "$srid": { "tag": "h2", "text": "2. Request flow" } }, { "$srid": { "tag": "svg", "id": "flow-diagram" } }, { "$srid": { "tag": "pre", "kind": "mermaid" } } ],
+        "containerSrid": { "$srid": { "tag": "section", "id": "flow" } }, "region": { "x": 0.02, "y": 0, "w": 0.96, "h": 1 },
+        "text": "2. Request flow Gateway Checkout Payments", "label": "area over \"2. Request flow\" (heading + 2 diagrams)" },
+      "expect": { "kind": "snip", "lines": [33, 54], "covers": "heading + 2 diagrams", "snipContainerTag": "section", "domKind": "element", "domSridTag": "section" }
+    },
+    "t11": {
+      "capture": { "kind": "snip",
+        "srids": [ { "$srid": { "tag": "td", "text": "loyalty" } }, { "$srid": { "tag": "td", "text": "members only" } }, { "$srid": { "tag": "canvas" } } ],
+        "containerSrid": { "$srid": { "tag": "section", "id": "pricing" } }, "region": { "x": 0, "y": 0.3, "w": 1, "h": 0.7 },
+        "text": "loyalty members only 3", "label": "area over \"3. Pricing rules\" (table + chart)" },
+      "expect": { "kind": "snip", "lines": [66, 69], "covers": "table + image", "snipContainerTag": "section", "domKind": "element" }
     }
   },
   "steps": [
@@ -70,7 +84,9 @@
         "t6": { "state": "changed", "lines": [73, 88], "sridTag": "h2" },
         "t7": { "state": "exact", "lines": [28, 28], "sridTag": "img" },
         "t8": { "state": "edited", "lines": [27, 27], "sridTag": "p" },
-        "t9": { "state": "exact", "lines": [82, 82] }
+        "t9": { "state": "exact", "lines": [82, 82] },
+        "t10": { "state": "changed", "lines": [33, 54], "snipContainerTag": "section", "domKind": "element", "domSridTag": "section" },
+        "t11": { "state": "exact", "lines": [66, 69], "snipContainerTag": "section", "domKind": "element" }
       }
     }
   ]

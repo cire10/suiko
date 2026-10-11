@@ -1,7 +1,8 @@
 // @ts-check
 // Top bar (design 11.1): doc title, version picker, mode tabs (a dropdown below 900 px), Changes base picker,
-// pick / hide / theme / help tools, presence chip, round status, the review progress chip, Drafts count and
-// Submit review.
+// comment / pick / snip / screen-snip / hide / theme / help tools, presence chip, round status, the review progress
+// chip, Drafts count and Submit review. The capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are
+// discoverable; the screen-snip button disappears once the daemon said it cannot capture the screen (not macOS).
 // The second row keeps a fixed, keyed structure (optional items are empty slots, not inserted / removed nodes) and
 // Submit review is its own component: DocState refreshes arriving over SSE (drafts count, presence, a new round)
 // must never re-create or move the button between a mousedown and its mouseup, or the browser drops the click.
@@ -9,9 +10,10 @@
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import {
-  cycleTheme, navigate, openComposer, openSubmit, setBase, setMode, switchVersion, toggleHidden, toggleNav, togglePick,
-  toggleSidebar,
+  cycleTheme, navigate, openComposer, openSubmit, setBase, setMode, snipScreen, switchVersion, toggleHidden, toggleNav,
+  togglePick, toggleSidebar, toggleSnip,
 } from '../actions.js';
+import { KEYS, shortcut } from '../keys.js';
 import {
   agentName, draftCount, filterCounts, presenceInfo, reviewProgress, roundSummary, versionNumbers,
 } from '../model.js';
@@ -42,6 +44,8 @@ export function TopBar() {
     sidebar: st.sidebar,
     nav: st.nav,
     selection: st.guest.selection,
+    screenRunning: st.screenSnip.running,
+    screenSupported: st.screenSnip.supported,
   }));
   const ds = s.ds;
   if (!ds) return null;
@@ -100,11 +104,26 @@ export function TopBar() {
         <button type="button" class="icon-btn" data-selection-comment disabled=${!s.selection || !canPick}
           aria-label="Comment on the selection" title="Comment on the selected text (c)"
           onClick=${() => s.selection && openComposer({ capture: s.selection })}><${Icon} name="comment" /></button>
-        <button type="button" class=${`icon-btn ${s.tool === 'pick' ? 'active' : ''}`} data-testid=${TESTID.pickTool}
-          aria-pressed=${s.tool === 'pick'} disabled=${!canPick}
-          aria-label="Pick an element (image, diagram, table, code)" title="Pick an element (e)" onClick=${togglePick}>
-          <${Icon} name="pick" />
+        <button type="button" class=${`icon-btn has-kbd ${s.tool === 'pick' ? 'active' : ''}`} data-testid=${TESTID.pickTool}
+          aria-pressed=${s.tool === 'pick'} disabled=${!canPick} aria-keyshortcuts="e"
+          aria-label="Pick an element (image, diagram, table, code)" title=${`Pick an element: image, diagram, table, code (${shortcut(KEYS.pick)})`}
+          onClick=${togglePick}>
+          <${Icon} name="pick" /><kbd class="kbd-hint" aria-hidden="true">e</kbd>
         </button>
+        <button type="button" class=${`icon-btn has-kbd ${s.tool === 'snip' ? 'active' : ''}`} data-testid=${TESTID.snipTool}
+          aria-pressed=${s.tool === 'snip'} disabled=${s.version === 'live'} aria-keyshortcuts="b"
+          aria-label="Snip an area of the document"
+          title=${`Snip an area of the document: drag a box over text, images or diagrams, then comment (${shortcut(KEYS.snip)})`}
+          onClick=${() => toggleSnip()}>
+          <${Icon} name="scissors" /><kbd class="kbd-hint" aria-hidden="true">b</kbd>
+        </button>
+        ${s.screenSupported ? html`<button type="button" class=${`icon-btn has-kbd ${s.screenRunning ? 'active' : ''}`} data-testid=${TESTID.snipScreen}
+          aria-busy=${s.screenRunning ? 'true' : undefined} disabled=${s.screenRunning || s.version === 'live'} aria-keyshortcuts="Shift+B"
+          aria-label="Snip anywhere on your screen"
+          title=${`Snip anywhere on your screen with the macOS picker, then comment on the screenshot (${shortcut(KEYS.snipScreen)})`}
+          onClick=${snipScreen}>
+          <${Icon} name="screen" /><kbd class="kbd-hint" aria-hidden="true">⇧B</kbd>
+        </button>` : null}
         <button type="button" class=${`icon-btn ${s.hidden ? 'active' : ''}`} aria-pressed=${s.hidden}
           aria-label="Hide annotations" title="Hide annotations (h)" onClick=${toggleHidden}>
           <${Icon} name=${s.hidden ? 'eyeOff' : 'eye'} />
@@ -139,5 +158,5 @@ export function TopBar() {
 /** Submit review: no props, so a TopBar re-render never touches it (see the header). */
 function SubmitButton() {
   return html`<button type="button" class="btn btn-primary" data-testid=${TESTID.submitReviewOpen} onClick=${openSubmit}
-    title="Submit review (f)">Submit review</button>`;
+    aria-keyshortcuts="F" title=${`Submit review: everything in it goes to the agent (${shortcut(KEYS.submit)}, or ${shortcut(KEYS.sendNow)} when no comment is open)`}>Submit review</button>`;
 }

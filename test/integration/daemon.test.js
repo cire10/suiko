@@ -514,7 +514,9 @@ describe('content origin', () => {
     assert.equal(r.headers['cache-control'], 'no-store');
     assert.equal(r.headers['x-content-type-options'], 'nosniff');
     assert.equal(r.headers['content-security-policy'], `frame-ancestors http://127.0.0.1:${uport} http://localhost:${uport}`);
-    const tag = `<script src="http://127.0.0.1:${cport}/__sr/${RENDERER_VERSION}/guest.js" data-sr-ui="http://127.0.0.1:${uport} http://localhost:${uport}" data-sr-target="${store1.wsId}/spec/live" data-sr-ignore></script>`;
+    const assetTag = /\/__sr\/([^/]+)\/guest\.js/.exec(r.text)?.[1] ?? '';
+    assert.match(assetTag, new RegExp(`^${RENDERER_VERSION}-[0-9a-f]{12}$`), 'asset URLs carry a content hash');
+    const tag = `<script src="http://127.0.0.1:${cport}/__sr/${assetTag}/guest.js" data-sr-ui="http://127.0.0.1:${uport} http://localhost:${uport}" data-sr-target="${store1.wsId}/spec/live" data-sr-ignore></script>`;
     const headAt = r.text.indexOf('<head>');
     assert.ok(headAt >= 0);
     assert.equal(r.text.indexOf(tag), headAt + '<head>'.length);
@@ -537,7 +539,9 @@ describe('content origin', () => {
     const r = await content(`/c/${k}/v1/docs/spec.md`);
     assert.equal(r.status, 200);
     assert.ok(!r.text.includes('__SR_ASSET_BASE__'));
-    const base = `http://127.0.0.1:${cport}/__sr/${RENDERER_VERSION}`;
+    const assetTag = /\/__sr\/([^/"]+)\//.exec(r.text)?.[1] ?? '';
+    assert.match(assetTag, new RegExp(`^${RENDERER_VERSION}-[0-9a-f]{12}$`));
+    const base = `http://127.0.0.1:${cport}/__sr/${assetTag}`;
     const urls = [...r.text.matchAll(/(?:href|src)="(http:\/\/127\.0\.0\.1:\d+\/__sr\/[^"]+)"/g)].map((m) => m[1]);
     assert.ok(urls.includes(`${base}/vendor/github-markdown-css/github-markdown-light.css`), urls.join('\n'));
     assert.ok(urls.includes(`${base}/static/shell.css`));
@@ -557,6 +561,8 @@ describe('content origin', () => {
     assert.equal(guest.headers['content-type'], 'text/javascript; charset=utf-8');
     assert.ok(guest.text.startsWith("(function(){'use strict';"));
     assert.equal((await content('/__sr/r0/guest.js')).status, 404, 'other renderer versions are not served');
+    assert.equal((await content(`/__sr/${RENDERER_VERSION}-nothex/guest.js`)).status, 404, 'malformed asset tags are not served');
+    assert.equal((await content(`/__sr/${assetTag}/guest.js`)).status, 200);
     const fonts = await content(`/__sr/${RENDERER_VERSION}/vendor/katex/fonts/KaTeX_Main-Regular.woff2`);
     assert.equal(fonts.status, 200);
     assert.equal(fonts.headers['content-type'], 'font/woff2');

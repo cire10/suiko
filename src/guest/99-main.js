@@ -4,11 +4,12 @@
 // and DOM-change hooks in a fixed order, starts listening, opens the channel and posts `hello` to the allowed UI
 // origins. After the UI connects, it posts `ready {outline, features, externalsFailed}` and then reacts to UI
 // messages (init, setTargets, setChanges, focus, scrollTo, setTool, setTheme, reveal, clearSelection, setHidden).
+// setTool switches between the exclusive tools: 'select', 'pick' (60-picker.js) and 'snip' (65-snip.js).
 // After every layout pass it posts `positions` when they changed (scroll-only changes are throttled to 100 ms), and
 // when scrolling settles it posts `scroll {topSrid, offset}`.
 //
 // Modes: 'review' (default) and 'changes' allow captures; 'readonly' (working-copy preview) disables the selection
-// toolbar, selection captures and pick mode. Annotation painting is identical in all modes.
+// toolbar, selection captures, pick mode and snip mode. Annotation painting is identical in all modes.
 //
 // Debugging: window.__specreviewGuest (non-enumerable, read-only) exposes inspect(), errors() and a few pure helper
 // modules. It never exposes the channel.
@@ -91,9 +92,26 @@ const Main = (() => {
     state.mode = mode === 'changes' || mode === 'readonly' ? mode : 'review';
     if (!capturesAllowed()) {
       Picker.exit(false);
+      Snip.exit(false);
       SelectionCapture.setEnabled(false);
-    } else if (!Picker.active) {
+    } else if (!Picker.active && !Snip.active) {
       SelectionCapture.setEnabled(true);
+    }
+  }
+
+  /**
+   * SET_TOOL: one tool at a time. Leaving a tool this way is silent (the UI asked for it: no toolChanged).
+   * @param {string} tool
+   */
+  function setTool(tool) {
+    if (tool === 'snip') {
+      Snip.enter(); // leaves pick mode itself; refused in readonly mode
+    } else if (tool === 'pick') {
+      Snip.exit(false);
+      Picker.setTool('pick');
+    } else {
+      Picker.exit(false);
+      Snip.exit(false);
     }
   }
 
@@ -204,7 +222,7 @@ const Main = (() => {
     else if (d.srid != null) Targets.scrollToSrid(Number(d.srid), typeof d.offset === 'number' ? d.offset : undefined);
     Scheduler.requestLayout();
   });
-  Channel.on(MSG.SET_TOOL, (d) => Picker.setTool(String(d.tool)));
+  Channel.on(MSG.SET_TOOL, (d) => setTool(String(d.tool)));
   Channel.on(MSG.SET_THEME, (d) => applyTheme(d.theme));
   Channel.on(MSG.REVEAL, (d) => {
     if (d.id != null) Targets.reveal(String(d.id));
@@ -230,6 +248,7 @@ const Main = (() => {
     Scheduler.onLayout(Highlights.layoutFallback);
     Scheduler.onLayout(SelectionCapture.layout);
     Scheduler.onLayout(Picker.layout);
+    Scheduler.onLayout(Snip.layout);
     Scheduler.onLayout(postPositions);
     Scheduler.onDomChange(Targets.reresolve);
     Scheduler.onDomChange(ChangesOverlay.reresolve);
@@ -272,6 +291,7 @@ const Main = (() => {
       changes: ChangesOverlay.debug(),
       hunks: ChangesOverlay.positions(),
       picker: Picker.state,
+      snip: Snip.state,
       selection: SelectionCapture.current,
       pageErrors: PageErrors.snapshot(),
       navigation: NavGuard.debug(),

@@ -5,5 +5,5 @@
 export * from './ops.js';
 export {
   formatPacket, formatReviseReport, formatStatus, formatLog, formatDiffStat, formatThread, formatThreads, formatApply,
-  formatEdit, formatRevert, formatFinal, formatSourceLines, formatReply, formatAsk, verdictLabel,
+  formatEdit, formatRevert, formatFinal, formatSourceLines, formatReply, formatAsk, verdictLabel, attachmentLine,
 } from './packet.js';

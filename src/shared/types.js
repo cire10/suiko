@@ -18,12 +18,12 @@ export {};
 /** @typedef {'open' | 'addressed' | 'answered' | 'declined' | 'needs_input' | 'resolved'} ThreadStatus */
 /** @typedef {'addressed' | 'answered' | 'declined' | 'needs_input'} AgentReplyStatus */
 /** @typedef {'comment' | 'changes_requested' | 'approved'} Verdict */
-/** @typedef {'text' | 'element' | 'cell' | 'code' | 'section' | 'source' | 'doc'} AnchorKind */
+/** @typedef {'text' | 'element' | 'cell' | 'code' | 'section' | 'source' | 'doc' | 'snip'} AnchorKind */
 /** @typedef {'exact' | 'moved' | 'edited' | 'changed' | 'orphaned'} AnchorState */
 /** @typedef {'textmap' | 'narrowed' | 'raw-source' | 'element' | 'block' | 'lines' | 'override'} AnchorMappedBy */
 /** @typedef {'tagged' | 'hint' | 'overlap'} LinkedBy */
 /** @typedef {[number, number]} LineRange inclusive [startLine, endLine], 1-based */
-/** @typedef {{ x: number, y: number, w: number, h: number }} Region fractions (0..1) of the element's content box */
+/** @typedef {{ x: number, y: number, w: number, h: number }} Region fractions (0..1) of the stamped element's border box */
 
 // ============================================================================ config and daemon
 
@@ -172,6 +172,18 @@ export {};
  * @property {'cell' | 'row' | 'column' | 'table'} [scope] cell anchors
  * @property {boolean} [assetChanged] the anchored image's bytes changed
  * @property {Anchor | null} [lastKnown] previous anchor, kept when orphaned
+ * @property {SnipInfo} [snip] snip anchors (kind 'snip', or 'doc' when the box covered nothing stamped)
+ */
+
+/**
+ * What a snip anchor remembers about the boxed area (src/core/anchor/snip.js).
+ * @typedef {object} SnipInfo
+ * @property {string} label the guest's label, e.g. 'area over "2. Request flow" (figure + 2 paragraphs)'
+ * @property {string} covers what the box covers, computed from the render: 'figure + 2 paragraphs'
+ * @property {string} text visible text inside the box, whitespace-collapsed (<= SNIP.maxText chars)
+ * @property {Region | null} region the box as captured (fractions of the container, or of the document without one)
+ * @property {{ srid: number | null, tag: string, s: number, e: number, label: string } | null} container deepest
+ *   stamped element containing the whole box at the anchor's version (null once lost)
  */
 
 // ============================================================================ captures (guest -> server) and DOM targets
@@ -183,7 +195,14 @@ export {};
  *       scope?: 'cell' | 'row' | 'column' | 'table' }
  *   | { kind: 'section', headingSrid: number }
  *   | { kind: 'source', startLine: number, endLine: number }
+ *   | SnipCapture
  *   | { kind: 'doc' }} Capture
+ */
+
+/**
+ * A snip (key `b`): a box dragged over any area of the rendered doc (protocol.js SNIP documents the fields).
+ * @typedef {{ kind: 'snip', srids: number[], startSrid: number | null, endSrid: number | null,
+ *   containerSrid: number | null, region: Region, text: string, label: string }} SnipCapture
  */
 
 /**
@@ -445,6 +464,8 @@ export {};
  * @property {Array<{ agent: string, since: string, pid?: number }>} waiters
  * @property {{ dirty: boolean, sha256: string }} working
  * @property {string} contentBase 'http://127.0.0.1:<cport>/c/<docKey>' (a doc URL is `${contentBase}/${ver}/${doc.path}`)
+ * @property {string} attachmentBase '<contentBase>/__att/': an attachment's image URL is attachmentBase + basename(path)
+ *   (images only; served to the UI origin, refused to the doc's own origin)
  * @property {{ name: string }} reviewer
  * @property {Decision[]} decisions
  */
@@ -471,6 +492,8 @@ export {};
  * @property {Array<{ by: string, kind: ActorKind, body: string, at: string }>} comments
  * @property {Suggestion | null} suggestion
  * @property {string[]} attachments absolute paths
+ * @property {'region' | 'snip' | 'image'} attachmentKind what the attachments show: a region crop ('crop:' lines),
+ *   a snipped area or another image ('image:' lines)
  * @property {string | null} apply suggested command
  */
 

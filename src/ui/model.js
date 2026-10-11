@@ -173,6 +173,7 @@ export function targetLabel(a) {
   if (a.kind === 'doc') return 'General comment';
   if (a.kind === 'section') return `§ ${sectionTail(a.section) || 'section'}`;
   if (a.kind === 'source') return linesLabel(a.src) || 'source lines';
+  if (a.kind === 'snip') return snipTargetLabel(a);
   if (a.svg) return `diagram node "${clip(a.svg.label || a.svg.nodeId, 40)}"`;
   const table = tableLabel(a);
   if (table) return table;
@@ -183,6 +184,17 @@ export function targetLabel(a) {
   if (a.quote?.exact) return `“${clip(a.quote.exact, 80)}”`;
   if (a.src?.text) return `“${clip(a.src.text, 80)}”`;
   return a.kind || '';
+}
+
+/**
+ * Label of a snip anchor (a box dragged over the doc with `b`): the guest's label ('area over "2. Request flow"
+ * (figure + 2 paragraphs)'), else what the box covers.
+ * @param {Anchor} a
+ */
+function snipTargetLabel(a) {
+  const s = a.snip || {};
+  if (s.label) return clip(s.label, 90);
+  return s.covers ? `snip (${clip(s.covers, 60)})` : 'snipped area';
 }
 
 /** Label of a table anchor (cell / row / column / table scope), or '' for other anchors. @param {Anchor} a */
@@ -202,12 +214,14 @@ function tableLabel(a) {
 /**
  * The text a card quotes for its anchor (at most `max` characters, whitespace collapsed): the selected text of
  * text / code / source anchors, the element's text sample for picked elements (a list item, a paragraph, a table
- * row). Empty for doc and section anchors, diagrams, regions and elements without text (images).
+ * row), the visible text inside a snip's box. Empty for doc and section anchors, diagrams, regions and elements
+ * without text (images).
  * @param {Anchor|null} a
  * @param {number} [max]
  */
 export function anchorQuote(a, max = 120) {
   if (!a || a.kind === 'doc' || a.kind === 'section') return '';
+  if (a.kind === 'snip') return clip(a.snip?.text || '', max);
   if (a.kind === 'text' || a.kind === 'code' || a.kind === 'source') return clip(a.quote?.exact || a.src?.text || '', max);
   if (a.svg || a.region) return '';
   return clip(a.element?.text || '', max);
@@ -792,6 +806,68 @@ export function anchorColumn(a, firstLine) {
   if (both >= 0) return both + pre.length;
   const only = firstLine.indexOf(head);
   return only >= 0 ? only : 0;
+}
+
+/**
+ * Whether the composer can "Send now" (Cmd/Ctrl+Shift+Enter): a new comment, question or suggestion. A draft being
+ * edited is already part of the pending review, and "Mark agreed" creates a lock, so for those the keys submit the
+ * whole review instead.
+ * @param {any} comp Composer (state.js)
+ */
+export function canSendNow(comp) {
+  return !!comp && !comp.draftId && comp.type !== 'agree';
+}
+
+// ------------------------------------------------------------------------------------------------ attachments
+
+/** File names the daemon gives stored attachments ('a3.png'); anything else is never turned into a URL. */
+const ATTACHMENT_NAME = /^[A-Za-z0-9][\w.-]*\.(?:png|jpe?g|gif|webp)$/i;
+
+/**
+ * URL of a stored attachment ('attachments/a3.png') for thumbnails: DocState.attachmentBase plus its file name.
+ * Only URLs on the content origin are returned (attachmentBase lives under contentBase), so a crafted path or base
+ * can never make the UI load an image from anywhere else. Null when the daemon serves no attachments.
+ * @param {DocState} ds
+ * @param {unknown} path
+ * @returns {string|null}
+ */
+export function attachmentUrl(ds, path) {
+  const base = typeof ds?.attachmentBase === 'string' ? ds.attachmentBase : '';
+  const name = typeof path === 'string' ? path.split('/').pop() || '' : '';
+  if (!base || !ATTACHMENT_NAME.test(name)) return null;
+  try {
+    const url = new URL(encodeURIComponent(name), base.endsWith('/') ? base : `${base}/`);
+    const content = new URL(typeof ds.contentBase === 'string' && ds.contentBase ? ds.contentBase : base);
+    if (!/^https?:$/.test(url.protocol) || url.origin !== content.origin) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/** The file name of an attachment path, for labels and alt texts. @param {unknown} path */
+export function attachmentName(path) {
+  return String(path ?? '').split('/').pop() || '';
+}
+
+// ------------------------------------------------------------------------------------------------ shortcuts
+
+/**
+ * A shortcut as buttons and the help show it: '+'-separated parts, where mod / shift / alt / enter / esc are
+ * named and anything else is the key itself. On a Mac 'mod+shift+enter' is '⌘⇧↵'; elsewhere 'Ctrl+Shift+Enter',
+ * or 'Ctrl+⇧+↵' when compact (the small hint inside a button).
+ * @param {string} combo e.g. 'mod+enter', 'shift+B', 'b'
+ * @param {boolean} mac
+ * @param {{ compact?: boolean }} [opts]
+ */
+export function keyLabel(combo, mac, opts = {}) {
+  const MAC = /** @type {Record<string, string>} */ ({ mod: '⌘', shift: '⇧', alt: '⌥', enter: '↵', esc: 'Esc' });
+  const PC = /** @type {Record<string, string>} */ (opts.compact
+    ? { mod: 'Ctrl', shift: '⇧', alt: 'Alt', enter: '↵', esc: 'Esc' }
+    : { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', enter: 'Enter', esc: 'Esc' });
+  const names = mac ? MAC : PC;
+  const parts = String(combo).split('+').filter(Boolean).map((p) => names[p.toLowerCase()] ?? p);
+  return parts.join(mac ? '' : '+');
 }
 
 // ------------------------------------------------------------------------------------------------ unsaved input

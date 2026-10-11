@@ -14,10 +14,15 @@
 // - Versions are `3`, `v3` or `live` and reach the engine as a number or 'live'.
 // - `by` for reviewer actions is the reviewer's display name (string) from the workspace context (ctx.reviewer) or
 //   config; the engine turns it into the {kind:'human', name} actor.
+// - Screen snips (POST .../snip/screen) run the macOS region picker (`screencapture -i`, via
+//   src/core/util/screen-capture.js) on the reviewer's machine and store the image with ops.saveAttachment. At most
+//   one picker runs per daemon (409 {code:'busy'}); a cancelled picker (Esc) is 200 {cancelled:true}; no picker on
+//   this platform is 501 {code:'unsupported'}. A client that disconnects while the picker is up closes the picker.
 
 import { APP_NAME, LIMITS, VERDICTS } from '../shared/protocol.js';
 import { getRender, renderFragment } from '../core/render/index.js';
 import { createLogger } from '../core/util/log.js';
+import { captureScreenRegion, imageMime } from '../core/util/screen-capture.js';
 import { HttpError, invalid, notFound, readJsonBody, sendJson } from './http-util.js';
 
 const log = createLogger('daemon.api');
@@ -56,6 +61,9 @@ export function registerApiRoutes(router, deps) {
 
   /** @param {string} wsId @param {string} docId */
   const contentBase = (wsId, docId) => `http://127.0.0.1:${deps.ports().contentPort}/c/${index.docKey(wsId, docId)}`;
+
+  /** True while a screen snip's region picker is open (single-flight per daemon). */
+  let screenSnipRunning = false;
 
   // ---------------------------------------------------------------- daemon
 
@@ -98,7 +106,9 @@ export function registerApiRoutes(router, deps) {
   router.get(D, async ({ res, params }) => {
     const { wsId, docId } = await resolveDoc(params);
     const state = await engine.call('docState', wsId, docId);
-    sendJson(res, 200, { ...(state ?? {}), ws: state?.ws ?? wsId, contentBase: contentBase(wsId, docId) });
+    const base = contentBase(wsId, docId);
+    // attachmentBase + basename('attachments/a3.png') is the image URL (served by the content origin, see content.js)
+    sendJson(res, 200, { ...(state ?? {}), ws: state?.ws ?? wsId, contentBase: base, attachmentBase: `${base}/__att/` });
   });
 
   router.get(`${D}/versions/:v/targets`, async ({ res, params }) => {
@@ -289,6 +299,51 @@ export function registerApiRoutes(router, deps) {
     const result = await engine.call('saveAttachment', wsId, docId, { dataUrl: body.dataUrl });
     // the UI only needs the doc-relative path ('attachments/a1.png'), never the absolute file path
     sendJson(res, 200, { path: typeof result === 'string' ? result : result?.path });
+  });
+
+  // Snip anywhere on screen (key B / the snip-screen button): the reviewer drags a box with the native picker; the
+  // image becomes an attachment of the doc. 200 {path, dataUrl, width, height} | 200 {cancelled:true} |
+  // 409 {code:'busy'} | 501 {code:'unsupported'}. The request stays open while the picker is up (up to 2 minutes).
+  router.post(`${D}/snip/screen`, async ({ req, res, params }) => {
+    const { wsId, docId } = await resolveDoc(params);
+    await readJsonBody(req); // no options yet; drains (and validates) any body
+    if (screenSnipRunning) throw new HttpError(409, 'a screen snip is already in progress', { code: 'busy' });
+    screenSnipRunning = true;
+    // the UI went away (tab closed, request aborted): close the picker instead of leaving it on screen
+    const gone = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) gone.abort();
+    };
+    res.on('close', onClose);
+    /** @type {{ png: Buffer, width: number, height: number } | null} */
+    let shot;
+    try {
+      shot = await captureScreenRegion({ signal: gone.signal });
+    } catch (err) {
+      const code = /** @type {any} */ (err)?.code;
+      const message = /** @type {Error} */ (err)?.message;
+      if (code === 'unsupported') throw new HttpError(501, message || 'screen snips are not supported here', { code, cause: err });
+      if (code === 'capture_failed') throw new HttpError(500, message || 'the screen capture failed', { code, cause: err });
+      throw err;
+    } finally {
+      screenSnipRunning = false;
+      res.off('close', onClose);
+    }
+    if (gone.signal.aborted || res.destroyed) {
+      log.info(`screen snip for ${wsId}/${docId} discarded: the client went away`);
+      return;
+    }
+    if (!shot) {
+      sendJson(res, 200, { cancelled: true });
+      return;
+    }
+    const mime = imageMime(shot.png);
+    if (!mime) throw new HttpError(500, 'the screen capture is not a PNG or JPEG image', { code: 'capture_failed' });
+    const dataUrl = `data:${mime};base64,${shot.png.toString('base64')}`;
+    validateImageDataUrl(dataUrl); // 413 above LIMITS.maxAttachmentBytes
+    const result = await engine.call('saveAttachment', wsId, docId, { dataUrl });
+    const savedPath = typeof result === 'string' ? result : result?.path;
+    sendJson(res, 200, { path: savedPath, dataUrl, width: shot.width, height: shot.height });
   });
 
   router.post(`${D}/fragment`, async ({ req, res, params }) => {

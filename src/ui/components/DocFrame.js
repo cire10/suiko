@@ -20,7 +20,7 @@ export function DocFrame() {
   const nonce = useStore((s) => s.frameNonce);
   const mode = useStore((s) => s.mode);
   const title = useStore((s) => s.ds?.doc?.title || 'Document');
-  const pick = useStore((s) => s.tool === 'pick');
+  const tool = useStore((s) => s.tool);
   const connected = useStore((s) => s.guest.connected);
   const ref = useRef(/** @type {HTMLIFrameElement|null} */ (null));
   const loaded = useRef('');
@@ -62,8 +62,8 @@ export function DocFrame() {
   };
 
   const hidden = mode === 'source' || mode === 'history';
-  return html`<div class=${`frame-wrap ${hidden ? 'is-hidden' : ''} ${pick ? 'is-picking' : ''}`} aria-hidden=${hidden ? 'true' : undefined}
-    data-guest=${connected ? 'ready' : 'loading'}>
+  return html`<div class=${`frame-wrap ${hidden ? 'is-hidden' : ''} ${tool === 'pick' ? 'is-picking' : ''} ${tool === 'snip' ? 'is-snipping' : ''}`}
+    aria-hidden=${hidden ? 'true' : undefined} data-guest=${connected ? 'ready' : 'loading'} data-tool=${tool}>
     <iframe ref=${ref} class="doc-frame" data-testid=${TESTID.docFrame} title=${`Document: ${title}`} onLoad=${onLoad}
       sandbox=${FRAME_SANDBOX} referrerpolicy="no-referrer" allow="fullscreen; clipboard-write"></iframe>
   </div>`;

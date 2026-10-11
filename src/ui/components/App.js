@@ -6,6 +6,8 @@
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
 // The doc iframe stays mounted in every mode, so switching between Review / Changes and Source / History never
 // reloads the document.
+// While a screen snip (Shift+B) waits for the reviewer in the macOS picker, a floating hint says what to do; it
+// blocks nothing (the picker itself is modal on the Mac).
 
 import { html, useState } from 'preact-htm';
 import { goToNewHead, navigate, recordWorkingCopy, reloadFrame, switchVersion, setMode, toggleNav, toggleSidebar } from '../actions.js';
@@ -17,6 +19,7 @@ import { DocFrame } from './DocFrame.js';
 import { HelpOverlay } from './HelpOverlay.js';
 import { HistoryView } from './HistoryView.js';
 import { Home } from './Home.js';
+import { Lightbox } from './Lightbox.js';
 import { Outline } from './Outline.js';
 import { SourceView } from './SourceView.js';
 import { StatusBar } from './StatusBar.js';
@@ -30,11 +33,21 @@ export function App() {
   const route = useStore((s) => s.route);
   const conn = useStore((s) => s.conn);
   const dialog = useStore((s) => s.dialog);
+  const snipping = useStore((s) => s.screenSnip.running);
   return html`<div class="app-root">
     ${conn !== 'ok' ? html`<${ReconnectBanner} conn=${conn} />` : null}
     ${route.view === 'home' ? html`<${Home} />` : html`<${DocView} />`}
+    ${snipping ? html`<${ScreenSnipHint} />` : null}
     <${Toasts} />
     ${dialog === 'help' ? html`<${HelpOverlay} />` : null}
+    ${dialog === 'image' ? html`<${Lightbox} />` : null}
+  </div>`;
+}
+
+function ScreenSnipHint() {
+  return html`<div class="snip-hint" role="status" data-screen-snip>
+    <span class="spinner" aria-hidden="true"></span>
+    <span><strong>Select an area anywhere on your screen…</strong> (Esc to cancel)</span>
   </div>`;
 }
 

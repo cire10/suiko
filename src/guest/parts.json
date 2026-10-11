@@ -9,6 +9,7 @@
   "45-capture.js",
   "50-selection.js",
   "60-picker.js",
+  "65-snip.js",
   "70-targets.js",
   "80-changes.js",
   "85-keys.js",

@@ -73,13 +73,14 @@ export function ThreadPanel() {
       ${items.length === 0
         ? html`<div class="empty" role="listitem">${total === 0 || s.filter === 'open' || s.filter === 'all'
           ? html`<p><strong>${total === 0 ? 'No threads yet.' : 'No open threads.'}</strong></p>
-              <p>Select text and press <kbd>C</kbd>, or press <kbd>E</kbd> to comment on images, diagrams, tables and code.</p>`
+              <p>Select text and press <kbd>C</kbd>, press <kbd>B</kbd> to snip any area of the document, or <kbd>E</kbd> to
+                pick an image, diagram, table or code block.</p>`
           : html`<p>${EMPTY[s.filter] || 'Nothing here.'}</p>`}</div>`
         : items.map((it) => (it.kind === 'thread'
           ? html`<${ThreadCard} key=${it.id} t=${it.item} ds=${s.ds} version=${s.version} agent=${agent}
               focused=${s.focusedId === it.id} reply=${s.reply && s.reply.threadId === it.id ? s.reply : null}
               position=${stateOf(s.states, it.id)} busy=${s.busyThreads.includes(it.id)} />`
-          : html`<${DraftCard} key=${it.id} d=${it.item} focused=${s.focusedId === it.id} version=${s.version}
+          : html`<${DraftCard} key=${it.id} d=${it.item} focused=${s.focusedId === it.id} version=${s.version} ds=${s.ds}
               shown=${!s.draftTargets || s.draftTargets.some((/** @type {any} */ x) => x.id === it.id)} />`))}
     </div>
   </section>`;

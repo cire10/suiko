@@ -20,8 +20,30 @@ import { linesLabel, sectionLeaf, truncate } from './labels.js';
  * @typedef {import('./packet-data.js').PacketThread} PacketThread
  */
 
-/** Targets whose `on:` (rendered quote) is printed; elements and cells are named by their label instead. */
+/**
+ * Targets whose `on:` (rendered quote) is printed; elements and cells are named by their label instead, and snips by
+ * their label, src> lines and picture (their `on`, the visible text in the box, is in the JSON only).
+ */
 const TEXT_TARGETS = new Set(['text', 'code', 'source']);
+
+/** What each kind of attachment is called in a packet item, and how the agent is told to look at it. */
+const ATTACHMENT_LINE = /** @type {Record<string, { tag: string, hint: string }>} */ ({
+  region: { tag: 'crop', hint: 'Read it to see the region' },
+  snip: { tag: 'image', hint: 'Read it to see what the reviewer snipped' },
+  image: { tag: 'image', hint: 'Read it to see the image the reviewer attached' },
+});
+
+/**
+ * One attachment line of a packet item / `show`: '  image: /abs/.../attachments/a3.png  (Read it to see what the
+ * reviewer snipped)'. `kind` is PacketThread.attachmentKind ('region' -> 'crop:', 'snip' / 'image' -> 'image:').
+ * @param {string} absPath
+ * @param {string | null | undefined} kind
+ * @returns {string}
+ */
+export function attachmentLine(absPath, kind) {
+  const l = ATTACHMENT_LINE[kind ?? 'image'] ?? ATTACHMENT_LINE.image;
+  return `  ${l.tag}: ${absPath}  (${l.hint})`;
+}
 
 const PROTOCOL = [
   'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.',
@@ -265,7 +287,8 @@ export function formatPacketThread(t, docId) {
     if (!t.srcEditable) out.push('  (data: URIs elided above; Read the file for the exact text)');
     else if (!t.srcUnique && t.lines) out.push(`  (src> is shortened or not unique; Read around ${linesLabel(t.lines)} before editing)`);
   }
-  for (const a of t.attachments) out.push(`  ${t.label.includes('region') ? 'crop' : 'image'}: ${a}  (Read it to see the region)`);
+  const kind = t.attachmentKind ?? (t.label.includes('region') ? 'region' : 'image');
+  for (const a of t.attachments ?? []) out.push(attachmentLine(a, kind));
   // One older comment is the reviewer's original request, which the agent already acted on (design 3.11).
   if (t.earlier >= 2) out.push(`  (+${t.earlier} earlier, specreview show ${docId} ${t.id})`);
   for (const c of t.comments) {

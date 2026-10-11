@@ -47,6 +47,7 @@
 | `status [<doc>] [--json]` | Docs, head, thread counts, undelivered reviews, listeners, working-copy state. | 0 |
 | `final <doc> [--decisions] [--out <dir>]` | Check the working copy equals the final version; `--decisions` writes `<name>.decisions.md`. | 0 / 3 |
 | `close <doc>` | End the review session; running waits exit 5. | 0 |
+| `snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | The **reviewer's** screenshot tool (macOS picker, or `--file`): adds a draft comment with the picture, or submits it at once with `--send`. Never run it yourself: it opens a picker on the user's screen. | 0 |
 | `serve [--foreground] [--port N]`, `stop [--rotate]`, `doctor [--fix]` | Local server control and health checks. | |
 | `mcp` | stdio MCP server. | |
 | `hook pre-write`, `hook prompt` | Claude Code hook entry points. | always 0 |
@@ -93,7 +94,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 - **Header:** doc, path, the review(s) and the version they were made on, and the verdict (`COMMENT`, `CHANGES REQUESTED`, `APPROVED`; `· FINAL = vN` when the reviewer marked a final version). The second line says whether the working copy is identical to head or differs (`lines mapped`).
 - **Items** appear in file order, blocking first within ties: `[tN] [LABEL ·] [severity ·] type · L<a>-<b> · §<section path> [· <target>]`. Severity is shown when it is not `normal`.
 - **Labels:** none for new threads, `REOPENED`, `REPLY` (the reviewer replied after your reply), `ANSWER` (the reviewer answered your `needs_input` question).
-- **Targets:** text (no label), `<img alt="…">`, `region x40-62% y10-30%`, `mermaid node "Gateway"`, `table cell row "…" x col "…"`, a section `§7 Rollout plan (L170-196)`, raw source lines, or `GENERAL:` for the whole doc. `(script-rendered inside <div id="chart">)` means the text was built by a script, so `src>` is the enclosing static element.
+- **Targets:** text (no label), `<img alt="…">`, `region x40-62% y10-30%`, a snipped area `snip (figure + 2 paragraphs)`, `mermaid node "Gateway"`, `table cell row "…" x col "…"`, a section `§7 Rollout plan (L170-196)`, raw source lines, or `GENERAL:` for the whole doc. `(script-rendered inside <div id="chart">)` means the text was built by a script, so `src>` is the enclosing static element.
 - **`on:`** the rendered text the reviewer selected (up to 120 characters). Not source.
 - **`src>`** exact full lines from the file on disk, extended until the string is unique in the file. Strip the `  src> ` prefix and join with newlines to get an Edit `old_string`.
   - More than 8 lines are shortened to the first 3, `...(N more lines)` and the last; that is not a valid `old_string`. Read the lines instead.
@@ -101,12 +102,34 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
   - `data:` URIs are elided as `data:image/png;base64,...(512 KB)`; Read the line before editing it.
   - At most about 1,200 characters of `src>` per thread.
 - **`crop:`** an absolute path to a PNG of the region the reviewer drew. Read it to see what they mean.
+- **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc, a screenshot of anything on their screen, or a pasted image (PNG, or JPEG when very large). **Read every `crop:` and `image:` file with the Read tool before acting on its thread**; the comment often only makes sense with the picture. See [Pictures](#pictures-snips-and-screenshots).
 - **Suggestions** show `-` (current) and `+` (proposed) lines and the `apply` command.
 - **Conversation:** your last reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment since. Older ones collapse to `(+2 earlier, specreview show <doc> t2)`.
 - **Anchor notes:** `(outdated: text changed)` means the quoted text was edited since the comment; `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)` means it could not be found.
 - **Footer:** `LOCKED` ranges, `DECISIONS` to keep true, drafts (only with `--include-drafts`, clearly labelled as not submitted), the protocol reminder and `NEXT`.
 - **Size cap:** 10,000 characters. Threads beyond it are listed one per line; run `specreview show <doc> tN` for each.
 - **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: specreview final token-service --decisions   (then stop waiting)`.
+
+### Pictures: snips and screenshots
+
+```text
+[t5] comment · L60-64 · §2 Request flow · snip (figure + 2 paragraphs)
+  src> ![Request flow](./img/request-flow.png)
+  src> 
+  src> Clients call the gateway, which forwards each request to the token service.
+  src> 
+  src> On a timeout the gateway retries once, then fails over to the standby region.
+  image: /abs/path/.specreview/docs/token-service/attachments/a2.png  (Read it to see what the reviewer snipped)
+  Eric: The figure shows the client retrying, but the text says the gateway does. Which is it?
+
+[t6] comment · GENERAL
+  image: /abs/path/.specreview/docs/token-service/attachments/a3.png  (Read it to see the image the reviewer attached)
+  Eric: This is the login page today. The mockup in §5 should match it.
+```
+
+- **Snip** (`b` in the UI): the reviewer boxed an area of the rendered doc. `src>` covers every block under the box, in file order; edit only what the comment is about. A large snip's `src>` is shortened like any other: Read those lines first.
+- **Screenshot** (`B`, or `specreview snip` from a hotkey): usually a `GENERAL` thread, or anchored to text the reviewer had selected. It may show something outside the doc (the running app, a terminal, another page). Tie it to the spec through the comment; if you cannot tell which part it concerns, reply `needs_input`.
+- In JSON, `attachments` lists the absolute paths of a thread's pictures, and `attachmentKind` says what they are (`region`, `snip` or `image`).
 
 ### JSON form (`--json`, and MCP `structuredContent`)
 
@@ -131,6 +154,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 - Types: `comment`, `question`, `suggestion`, `agent-question` (created by `ask`). Severities: `blocking`, `normal`, `nit`.
 - Statuses: `open`, `addressed`, `answered`, `declined`, `needs_input`, `resolved`. You set `addressed`, `answered`, `declined` or `needs_input` through `revise` or `reply`. **Only the reviewer resolves** (Accept) or reopens.
 - A thread needs action when its status is `open`, or when the reviewer's newest comment is newer than yours and it is not `resolved`.
+- A review can hold a single thread: the reviewer's **Send now** (or `specreview snip --send`) submits one comment at once with verdict `comment`. It needs action like any other packet: handle it, revise, wait again.
 - Delivery: a review is marked delivered when the packet has been printed. Your next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. If you never act on it, the prompt hook reminds you after about 5 minutes.
 
 ## Making edits: Edit, apply, edit

@@ -1,4 +1,4 @@
-<!-- Reviewer guide for the SpecReview web UI: layout, modes, commenting gestures, submitting, verifying changes, locks, history, final, and keyboard shortcuts. Describes the v1 UI (see docs/BUILD_AMENDMENTS.md section 1 for what is out of scope). -->
+<!-- Reviewer guide for the SpecReview web UI: layout, modes, commenting gestures, snipping (area snips, screen snips, `specreview snip` and a global macOS hotkey), submitting, verifying changes, locks, history, final, and keyboard shortcuts. Describes the v1 UI (see docs/BUILD_AMENDMENTS.md section 1 for what is out of scope). -->
 
 # SpecReview reviewer guide
 
@@ -8,6 +8,7 @@ SpecReview shows a spec exactly as written (scripts, SVG, images, tables, code, 
 - [The screen](#the-screen)
 - [Modes](#modes)
 - [Commenting on anything](#commenting-on-anything)
+- [Snipping](#snipping)
 - [The composer](#the-composer)
 - [Suggesting exact text](#suggesting-exact-text)
 - [Submitting a review](#submitting-a-review)
@@ -35,7 +36,7 @@ Your agent runs `specreview open <file>` and opens the printed URL for you. In t
 
 Wide layout (900 px and up):
 
-- **Top bar:** doc name, version picker, mode tabs (**Review**, **Changes**, **Source**, **History**), the comparison base (in Changes and Source modes), the presence chip (for example "claude is listening"), the draft count and **Submit review**.
+- **Top bar:** doc name, version picker, mode tabs (**Review**, **Changes**, **Source**, **History**), the comparison base (in Changes and Source modes), the tool buttons (pick, the scissors for an area snip, and screen snip), the presence chip (for example "claude is listening"), the draft count and **Submit review**.
 - **Left rail:** the outline (headings) with badges: open-thread count, `~` changed, `+` added, `[L]` locked. The **⋯** button next to a heading offers **Comment on section**, **Mark agreed** and **Unlock** (shown as "Unlock (L1)" with the lock id). Below it, a compact version history.
 - **Centre:** the document, live and interactive, with highlights, pins and change marks drawn over it.
 - **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card.
@@ -59,6 +60,8 @@ You can comment on any recorded version. On an older version a banner says the c
 | Target | Gesture |
 |---|---|
 | A phrase, sentence or paragraph (even across blocks) | Select it, then press `c` (comment), `s` (suggest), `q` (question) or `a` (agreed), or use the mini-toolbar that appears |
+| Any area of the doc: text, images, diagrams, or a mix of them | Press `b` and drag a box (see [Snipping](#snipping)). A picture of the area is attached |
+| Anything on your screen, inside or outside the doc (macOS) | Press `B` and drag with the macOS picker. The screenshot is attached to your selection, or to a general comment |
 | A whole image, SVG, canvas, video, table, code block, list item or heading | Press `e` (pick mode), hover until the outline and label chip show the right element, click |
 | A region of an image, SVG, canvas, video or iframe | In pick mode, shift-drag a box. A cropped PNG is attached so the agent can see exactly what you mean |
 | A mermaid node | In pick mode, click the node: `mermaid node "Gateway"` |
@@ -72,14 +75,123 @@ You can comment on any recorded version. On an older version a banner says the c
 
 Press `Esc` to leave pick mode. Text that a page script generates at runtime is commentable too; the agent then receives the enclosing static element's source, labelled as script-rendered.
 
+## Snipping
+
+A snip is a comment with a picture: "this, here". The agent gets the picture's file path and opens it (Claude Code reads it with its Read tool) before acting, so it sees exactly what you saw.
+
+| Snip | Key | Where it works | The agent gets |
+|---|---|---|---|
+| An area of the doc | `b`, or the scissors button | Any browser, any OS | The picture, the source lines of every block under the box, and a label |
+| Anything on your screen | `B` (Shift+B), or the screen-snip button | macOS | The screenshot, on your selection or as a general comment |
+| Anything, without the UI | `specreview snip`, or a global hotkey | macOS (or any OS with `--file`) | The screenshot as a draft comment, or sent at once with `--send` |
+| A region of one image | `e`, then shift-drag on the image | Any browser, any OS | The crop, the image's source and the region as percentages |
+
+### Snip an area of the doc (`b`)
+
+Use it when the thing you mean is not a neat text selection: a figure together with its caption, the left half of a table, a diagram and the paragraph that contradicts it, a mockup in an HTML spec.
+
+1. Press `b`, or click the scissors button in the top bar. The cursor becomes a crosshair. This works whether focus is in the SpecReview UI or in the document.
+2. Drag a box over the area. It can cover anything: text, images, SVG, mermaid diagrams, tables, or a mix. Boxes smaller than a few pixels are ignored.
+3. When you let go, the composer opens with a thumbnail of the area. **Agent will see** shows the lines and the label the agent receives, such as `L60-64 §2 Request flow snip (figure + 2 paragraphs)`.
+4. Type your comment, then `Cmd+Enter` (**Add to review**) or `Cmd+Shift+Enter` (**Send now**). Text is optional: a comment with a picture can be added or sent without any.
+
+`Esc` cancels at any point. One press of `b` takes one snip; afterwards you are back to selecting text. The agent receives the picture plus the source lines of every block the box touches, so it can edit them directly. If the browser cannot draw part of the area (for example an image from another website or a playing video), the comment still carries the source lines, just without a picture; use `B` instead to attach a real screenshot.
+
+Area snips and image regions (`e`, then shift-drag) both remain available. A region is tied to one image and tells the agent where inside it, in percent; an area snip can span several blocks of any kind.
+
+### Snip anything on your screen (`B`)
+
+Use it for things outside the document: the app the spec describes, a terminal with an error, a competitor's page, a design file.
+
+1. Press `B` (Shift+B), or click the screen-snip button in the top bar.
+2. macOS's own region picker appears, exactly as with `Cmd+Shift+4`. Drag a box, or press Space and click a window. `Esc` cancels.
+3. The composer opens with the screenshot attached. If you had text selected in the doc, the comment is anchored to it; otherwise it is a general comment on the whole doc. If a comment is already open in the composer, the screenshot is added to that comment instead.
+4. Type your comment and add it to the review, or send it now.
+
+SpecReview's local server takes the screenshot on your Mac with `screencapture`, so this needs macOS and the Screen Recording permission (see [below](#screen-recording-permission)). Large screenshots are scaled down to 2000 px on the longest side, and very large ones are stored as JPEG. Only one screen snip runs at a time, and an unused picker closes after two minutes.
+
+### Snip from a terminal or a global hotkey
+
+`specreview snip` runs the same picker from any terminal and adds the screenshot to the doc as a **draft** comment. An open review UI shows it at once, with a toast "Screenshot added from your Mac" and an **Edit** button to add text before you submit.
+
+```bash
+specreview snip                                              # picker, then a draft on this workspace's doc
+specreview snip token-service -m "The header overlaps the logo"
+specreview snip --question -m "Should the empty state look like this?"
+specreview snip --send -m "This is the login page today"     # submitted to the agent right away
+specreview snip --file ~/Desktop/shot.png -m "From the design review"
+```
+
+| Option | Effect |
+|---|---|
+| `<doc>` | The doc id or file path. Without it, the only doc tracked in the current directory's workspace (or the one given with `--workspace <dir>`). When that workspace tracks several docs, or the current directory has none (a Shortcut starts in your home folder), the most recently active doc; the command names its choice on stderr |
+| `-m <text>` | The comment text. Without it, the draft has only the picture; add text from the toast's **Edit** |
+| `--question` | Make it a question instead of a comment |
+| `--send` | Submit it immediately as a one-item review (verdict Comment), so a waiting agent picks it up at once |
+| `--file <png>` | Attach an existing PNG or JPEG (up to 5 MB) instead of opening the picker (works on any OS) |
+| `--json` | Print the result as JSON |
+
+Pressing `Esc` in the picker cancels and adds nothing (exit code 0). Screen snips on a machine without `screencapture` exit 1; no tracked doc exits 4.
+
+### A global hotkey with the Shortcuts app
+
+The macOS Shortcuts app can bind `specreview snip` to a key that works in every app. Then snipping a bug in the running app and handing it to Claude is one keystroke and a drag.
+
+1. **Find the paths of Node and SpecReview.** In a terminal:
+
+   ```bash
+   command -v node                        # e.g. /opt/homebrew/bin/node, or ~/.nvm/versions/node/v24.11.0/bin/node
+   realpath "$(command -v specreview)"    # e.g. /Users/you/src/specreview/bin/specreview.js
+   ```
+
+   If `specreview` is not on your `PATH`, the second path is `bin/specreview.js` inside your SpecReview checkout.
+2. **Allow scripts in Shortcuts.** Open the **Shortcuts** app, choose **Shortcuts > Settings > Advanced**, and turn on **Allow Running Scripts**.
+3. **Create the shortcut.** Choose **File > New Shortcut** (`Cmd+N`) and give it a name, such as "Snip to Claude".
+4. **Add a Run Shell Script action.** In the action list on the right, search for **Run Shell Script** and double-click it (or drag it into the shortcut).
+5. **Enter the command.** Leave **Shell** as `zsh` and **Input** as it is. Replace the sample text with the full form, built from the two paths and your project folder:
+
+   ```bash
+   "/opt/homebrew/bin/node" "/Users/you/src/specreview/bin/specreview.js" snip --workspace "/Users/you/projects/my-app"
+   ```
+
+   Shortcuts runs scripts with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), and the scripts do not start in your project, which is why the command names Node, SpecReview and the workspace explicitly. The full form works with nvm, asdf and Volta. With nvm, update the Node path when you change Node versions.
+
+   If `npm link` put `specreview` next to a system-wide Node (Homebrew's, or the nodejs.org installer's in `/usr/local/bin`), the short form works too:
+
+   ```bash
+   export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+   specreview snip --workspace ~/projects/my-app
+   ```
+
+   Variations: add `--send` to send every snip to the agent at once instead of making a draft; add `--question` for a question. If the workspace tracks several docs, the snip goes to the most recently active one; to pin it to one doc, give the spec's file path instead of `--workspace`, for example `specreview snip ~/projects/my-app/docs/specs/token-service.md`.
+6. **Assign the keyboard shortcut.** Click the **Shortcut Details** button (ⓘ) in the right sidebar, then **Add Keyboard Shortcut**, and press the combination you want, for example `Ctrl+Option+Cmd+S`. Pick one that no app uses.
+7. **Try it.** Press your hotkey (or click Run, ▶, in the shortcut's window). The crosshair appears; drag a box. The draft shows up in the review UI with a toast. If Shortcuts asks whether the shortcut may run a script, allow it. The first run also asks for the Screen Recording permission.
+
+You can make two shortcuts, one that drafts and one with `--send`, on two different keys.
+
+### Screen Recording permission
+
+macOS only lets an app capture other apps' windows after you allow it. The permission belongs to the app that runs the capture:
+
+| You snip with | Allow |
+|---|---|
+| `B` or the screen-snip button in the UI | The app that started the SpecReview server: usually your terminal (Terminal, iTerm2), your editor, or Claude |
+| `specreview snip` in a terminal | That terminal app |
+| A Shortcuts hotkey | **Shortcuts** (or the app macOS names in its prompt) |
+
+macOS asks on first use. To allow it later: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For `B`, also run `specreview stop` and open the doc again, so the server restarts under the reopened app. A screenshot that shows only the desktop wallpaper or empty windows means the permission is missing.
+
 ## The composer
 
 The composer opens in the thread panel (or the drawer) when you start a comment.
 
 - **Agent will see:** a preview of exactly what the agent receives, for example `L42-43 §3.2 'rotated on every use'`. If it looks too narrow, click **Widen to block**.
 - **Type:** Comment, Question or Suggestion. **Severity:** Blocking, Normal or Nit (keys `1`-`3` while the composer has focus).
-- **Body:** Markdown. Paste an image to attach it. A crop thumbnail shows when you drew a region.
-- **Add to review** (`Cmd+Enter`) saves the comment as a draft in your pending review. **Send now** submits it immediately as a one-item review (verdict Comment). **Cancel** (`Esc`).
+- **Body:** Markdown. Paste an image to attach it. A thumbnail shows the attached picture: the area you snipped, your screenshot, or the region you drew; click it to see it full size. A comment with a picture needs no text.
+- **Add to review** (`Cmd+Enter`) saves the comment as a draft in your pending review.
+- **Send now** (`Cmd+Shift+Enter`) submits just this comment, immediately, as a one-item review with verdict Comment. A waiting agent wakes up and handles it at once; your other drafts stay pending.
+- **Cancel** (`Esc`).
+- The buttons show their keys when you hover them. On Windows and Linux, use `Ctrl` instead of `Cmd`.
 - Drafts autosave as you type and survive reloads. The draft count in the top bar shows how many are pending.
 
 ## Suggesting exact text
@@ -94,7 +206,7 @@ The agent applies suggestions verbatim with `specreview apply`. You can also app
 
 ## Submitting a review
 
-Click **Submit review** (`f`, or `Cmd+Shift+Enter`). The dialog has:
+Click **Submit review** (`f`, or `Cmd+Shift+Enter` while you are not writing a comment). The dialog has:
 
 - a summary box;
 - the verdict: **Comment**, **Request changes** or **Approve**;
@@ -106,6 +218,8 @@ With **Approve**, two options appear, both on by default: **Mark vN final** and 
 If no agent is listening, the dialog says so and offers **Copy prompt**, which copies an instruction such as "Run `specreview feedback token-service` and address it." Paste it into your agent's chat.
 
 After you submit, a status chip moves through **Submitted**, **Delivered to claude 14:02**, **revising…** and **v3 ready**.
+
+For one urgent point, you do not need a whole review: **Send now** (`Cmd+Shift+Enter` in the comment box) sends just that comment, and `specreview snip --send` does the same for a screenshot.
 
 ## While the agent works
 
@@ -187,31 +301,36 @@ Submit with **Approve** and keep **Mark vN final** checked. The doc shows a **FI
 
 ## Keyboard shortcuts
 
-Press `?` in the UI for this list.
+Press `?` in the UI for this list. Buttons show their key when you hover them. On Windows and Linux, use `Ctrl` where this says `Cmd`.
 
-| Key | Action |
-|---|---|
-| `c` / `s` / `q` / `a` | Comment, suggest, question, or mark agreed on the selection |
-| `e` | Pick mode (in pick mode: `[` / `]` parent / child, `Esc` exits) |
-| `j` / `k` | Next / previous thread |
-| `n` / `p` | Next / previous change |
-| `r` | Reply to the focused thread |
-| `x` | Resolve / accept |
-| `o` | Reopen |
-| `y` | Accept a decline |
-| `v` | Verify queue |
-| `f` or `Cmd+Shift+Enter` | Submit review dialog |
-| `Cmd+Enter` | Add the draft to the review |
-| `1` / `2` / `3` / `4` | Review / Changes / Source / History |
-| `[` / `]` (outside pick mode) | Previous / next version |
-| `d` | Toggle base: your last review vs the previous version |
-| `h` | Hide all annotations (clean read) |
-| `\` | Toggle the thread sidebar or drawer |
-| `t` | Cycle theme (light, dark, system) |
-| `?` | Help overlay |
-| `Esc` | Close or cancel |
+| | Key | Action |
+|---|---|---|
+| **Comment** | `c` / `s` / `q` | Comment, suggest, or ask a question on the selection |
+| | `a` | Mark the selection agreed (lock) |
+| | `b` | Snip an area of the doc: drag a box over anything (`Esc` cancels) |
+| | `B` (Shift+B) | Snip anywhere on your screen with the macOS picker |
+| | `e` | Pick mode (in pick mode: `[` / `]` parent / child, shift-drag a region of an image, `Esc` exits) |
+| | `Cmd+Enter` | In the composer: **Add to review** (saves a draft) |
+| | `Cmd+Shift+Enter` | In the composer: **Send now** (submits just this comment) |
+| | `1` / `2` / `3` | In the composer: severity Blocking / Normal / Nit |
+| | `Esc` | Close or cancel |
+| **Review** | `f` or `Cmd+Shift+Enter` | Submit review dialog (outside the composer) |
+| | `v` | Verify queue |
+| | `x` | Resolve / accept |
+| | `o` | Reopen |
+| | `y` | Accept a decline |
+| | `r` | Reply to the focused thread |
+| **Navigate** | `j` / `k` | Next / previous thread |
+| | `n` / `p` | Next / previous change |
+| | `1` / `2` / `3` / `4` | Review / Changes / Source / History |
+| | `[` / `]` (outside pick mode) | Previous / next version |
+| | `d` | Toggle base: your last review vs the previous version |
+| **View** | `h` | Hide all annotations (clean read) |
+| | `\` | Toggle the thread sidebar or drawer |
+| | `t` | Cycle theme (light, dark, system) |
+| | `?` | Help overlay |
 
-Navigation keys work while the document has focus too, as long as you are not typing in one of its fields. Keys that change state act only when focus is in the SpecReview UI: `x`, `o` and `y` do nothing while focus is inside the document (click the thread panel first), and `a` on a document selection asks you to confirm before it locks anything. This keeps scripts in a reviewed document from triggering actions on your behalf.
+Navigation keys, `b` and `Cmd+Shift+Enter` work while the document has focus too, as long as you are not typing in one of its fields. Keys that change state act only when focus is in the SpecReview UI: `x`, `o` and `y` do nothing while focus is inside the document (click the thread panel first), and `a` on a document selection asks you to confirm before it locks anything. This keeps scripts in a reviewed document from triggering actions on your behalf.
 
 ## Theme, accessibility and clean reading
 
@@ -230,3 +349,7 @@ Navigation keys work while the document has focus too, as long as you are not ty
 | A thread is **Orphaned** | Its text is gone | Use the orphan tray: **Move here**, **Keep as general** or **Resolve** |
 | "No agent listening" after you submit | The agent's wait is not running | Click **Copy prompt** and paste it into the agent's chat, or tell it "done" |
 | "Reconnecting to SpecReview…" | The local server restarted or is starting | Wait a few seconds; run `specreview doctor` if it persists |
+| A screen snip shows only the wallpaper or empty windows | macOS has not allowed the capturing app to record the screen | Allow it under [Screen Recording permission](#screen-recording-permission), quit and reopen the app, then `specreview stop` and reopen the doc |
+| `B` or `specreview snip` reports that screen snips are unsupported | Screen snips use macOS's `screencapture`, which this machine does not have | Use `b` to snip inside the doc, paste an image into the composer, or `specreview snip --file <png>` |
+| An area snip has no thumbnail | The browser could not draw that area (an image from another site, a video, a cross-origin frame) | The comment still carries the source lines. Use `B` to attach a real screenshot |
+| The Shortcuts hotkey does nothing | Scripts are not allowed, or the command cannot find Node | Turn on **Allow Running Scripts** in Shortcuts settings, use the full form with absolute paths, and run the shortcut from its window to see the error |

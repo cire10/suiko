@@ -115,6 +115,7 @@ next: open the URL (browser pane), then run `specreview wait token-service` in t
 - `wait --all` waits on every doc in the workspace.
 - While it runs, the UI shows "**claude is listening**" (presence comes from a heartbeat file). On stderr it prints `specreview: waiting for a review of <doc> vN (as claude). Safe to interrupt; nothing is lost.`
 - Only one `wait` per doc and agent is live. Starting a new one makes the older one print `specreview: superseded by pid N (a newer wait is listening); ignore this.` and exit 6.
+- **Single comments.** The reviewer can send one comment at once instead of a whole review (**Send now** in the UI, or `specreview snip --send`). It arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again.
 - **Delivery and acknowledgement.** A review is marked delivered only after the packet has been written to stdout, so a killed `wait` re-delivers next time. The agent's next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. The UI shows "Delivered to claude 14:02", then "revising…".
 
 ## 6. The feedback packet
@@ -198,13 +199,14 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
 | Text | (no label; see `on:`) |
 | Whole element | `<img alt="System overview">` |
 | Region of an image, SVG, canvas, video or iframe | `<img alt="…"> region x40-62% y10-30%` plus `crop:` |
+| Snipped area (any mix of blocks) | `snip (figure + 2 paragraphs)` plus `image:`; `src>` covers every block under the box (JSON `target: "snip"`) |
 | Mermaid node | `mermaid node "Gateway"` (`src>` narrowed to the fence line with the node) |
 | Table cell, row, column | `table cell row "refresh_token" x col "TTL" = "30d"` |
 | Code lines | the exact source lines |
 | Math | `math` with `src> $E=mc^2$` |
 | Section | `§7 Rollout plan (L170-196)` |
 | Source lines | the exact lines (for head metadata, script config, attributes) |
-| Whole doc | `GENERAL:` |
+| Whole doc | `GENERAL:` (a screenshot of the reviewer's screen is usually a GENERAL thread with an `image:` line) |
 | Script-generated text | `(script-rendered inside <div id="chart">)`; `src>` is the enclosing static element |
 
 - **`on:`** the rendered text the reviewer selected, up to 120 characters. Not source.
@@ -214,6 +216,8 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
   - `data:` URIs: elided as `data:image/png;base64,...(512 KB)` (`srcEditable: false`).
   - At most 1,200 characters of `src>` per thread.
 - **`crop:`** an absolute path to a PNG of the reviewer's region. Asset paths are absolute too.
+- **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc (`b`; `(Read it to see what the reviewer snipped)`), a screenshot of anything on their screen (`B`, `specreview snip`) or a pasted image (`(Read it to see the image the reviewer attached)`). PNG, or JPEG for very large screenshots. A thread can have several.
+- **Pictures are part of the comment.** The agent MUST open every `crop:` and `image:` file before acting on that thread (Claude Code: the Read tool). The comment text often only makes sense with the picture ("this arrow", "this is what it looks like now").
 - **Suggestion:** `apply verbatim: specreview apply <doc> <tid>` in the header, then `- old` / `+ new` lines.
 - **Conversation:** the last agent reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment after it. Older comments collapse to `(+2 earlier, specreview show <doc> t2)`.
 - **Anchor notes:** `(outdated: text changed)`; `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)`.
@@ -239,8 +243,33 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
 ```
 
 - `why`: `new`, `reopened`, `reply` or `answer`.
+- `attachments`: absolute paths of the thread's `crop:` and `image:` files, in order. `attachmentKind` says what they show: `region` (a region crop, printed as `crop:`), `snip` (a snipped area of the doc) or `image` (a screenshot or pasted image); both print as `image:`. Listed drafts (`--include-drafts`) carry absolute `attachments` too.
 - `anchorState`: `exact`, `moved`, `edited`, `changed` or `orphaned` (see [section 10](#10-anchors-re-anchoring-and-agent-questions)).
 - A thread is **actionable** when its status is `open`, or when the reviewer's newest comment is newer than the agent's newest comment and it is not `resolved`.
+
+### 6.5 Pictures: snips and screenshots
+
+Reviewers attach pictures with one key: `b` snips any area of the rendered doc, `B` (or `specreview snip`, often bound to a global hotkey) captures anything on their screen. Such threads look like this:
+
+```text
+[t5] comment · L60-64 · §2 Request flow · snip (figure + 2 paragraphs)
+  src> ![Request flow](./img/request-flow.png)
+  src> 
+  src> Clients call the gateway, which forwards each request to the token service.
+  src> 
+  src> On a timeout the gateway retries once, then fails over to the standby region.
+  image: /home/eric/proj/.specreview/docs/token-service/attachments/a2.png  (Read it to see what the reviewer snipped)
+  Eric: The figure shows the client retrying, but the text says the gateway does. Which is it?
+
+[t6] comment · GENERAL
+  image: /home/eric/proj/.specreview/docs/token-service/attachments/a3.png  (Read it to see the image the reviewer attached)
+  Eric: This is the login page today. The mockup in §5 should match it.
+```
+
+- Open each `image:` file before deciding anything. The words alone are often ambiguous.
+- A snip's `src>` covers every block under the box, in file order. Edit only what the comment asks about; the other lines are context. A large snip is shortened (`...(N more lines)`) like any long `src>`: Read those lines from the file before editing.
+- A screenshot on a GENERAL thread may show something outside the doc, such as the running app or a terminal. Relate it to the spec through the comment; if you cannot tell which part of the spec it concerns, reply `needs_input` with one precise question.
+- A screenshot on a text thread (the reviewer had text selected) has the usual `on:` and `src>`; the picture explains what they mean about that text.
 
 ## 7. Acting on feedback
 
@@ -254,6 +283,8 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
 | disagree | No edit; explain why | `declined` |
 | unclear | No edit; ask one precise question | `needs_input` |
 | image / diagram region | Read the `crop:`; edit the diagram source (mermaid, inline SVG, or the generating script) | `addressed` |
+| snipped area (`image:`) | Read the `image:` first; then edit the blocks in `src>` (Read the file when `src>` is shortened) | `addressed` |
+| screenshot on a GENERAL thread | Read the `image:`; it may show something outside the doc (the running app, a terminal). Change the spec where the comment points; if it is unclear which part, ask | `addressed`, or `needs_input` |
 | REOPENED | Read the new comment; fix again | `addressed` |
 | ANSWER | Apply the answer | `addressed` |
 
@@ -496,6 +527,7 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `status [<doc>] [--json]` | Docs, head, counts, undelivered reviews, listeners, working copy | 0 |
 | `final <doc> [--decisions] [--out <dir>]` | Final checks and the decisions export | 0 / 3 |
 | `close <doc>` | End the review session; waits exit 5 | 0 |
+| `snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: a screenshot (macOS picker, or `--file`) as a draft comment, or submitted at once with `--send`. Agents do not run it: it opens a picker on the reviewer's screen | 0 |
 | `serve [--foreground] [--port N]` · `stop [--rotate]` · `doctor [--fix]` | Server control and checks | |
 | `mcp` | stdio MCP server | |
 | `hook pre-write` · `hook prompt` | Claude Code hooks | always 0 |
@@ -507,6 +539,7 @@ Do:
 
 - Write the spec once, then only make targeted edits.
 - Read the file before editing; re-read after `apply` and whenever the editor says it changed.
+- Open every `crop:` and `image:` picture before acting on its thread.
 - Give one reply per listed thread; use `needs_input` when unsure.
 - Explain every change no thread asked for in `other`.
 - Follow the printed `fix:` on a refusal.

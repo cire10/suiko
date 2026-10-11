@@ -407,7 +407,8 @@ async function showThread(ctx, doc, t) {
     src: d?.src ?? null,
     srcUnique: d?.srcUnique ?? false,
     srcEditable: d?.srcEditable ?? true,
-    attachments: d?.crops ?? [],
+    attachments: d?.crops ?? (t.attachments ?? []).map((rel) => ctx.store.attachmentPath(doc.id, rel)),
+    attachmentKind: d?.cropKind ?? 'image',
     timeline,
     changes,
   };

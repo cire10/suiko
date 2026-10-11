@@ -1,6 +1,6 @@
 {
   "name": "insert-above",
-  "description": "Lines inserted above shift every later anchor ('moved', same text, new lines); anchors above stay 'exact'. An agent override re-anchors a thread on given text ('exact', mappedBy 'override').",
+  "description": "Lines inserted above shift every later anchor ('moved', same text, new lines); anchors above stay 'exact'. An agent override re-anchors a thread on given text ('exact', mappedBy 'override'). Snips (t7 over an image, a diagram and a note; t8 inside the diagram, boxed in it) follow their covered lines and keep their container.",
   "doc": "kitchen-sink.md",
   "format": "markdown",
   "docPath": "docs/kitchen-sink.md",
@@ -31,6 +31,22 @@
     "t6": {
       "capture": { "kind": "source", "startLine": 2, "endLine": 3 },
       "expect": { "kind": "source", "mappedBy": "lines", "lines": [2, 3] }
+    },
+    "t7": {
+      "capture": { "kind": "snip",
+        "srids": [ { "$srid": { "tag": "img" } }, { "$srid": { "tag": "pre", "kind": "mermaid" } }, { "$srid": { "tag": "p", "text": "the gateway never stores tokens" } } ],
+        "startSrid": { "$srid": { "tag": "img" } }, "endSrid": { "$srid": { "tag": "p", "text": "the gateway never stores tokens" } }, "containerSrid": null,
+        "region": { "x": 0, "y": 0.1, "w": 1, "h": 0.8 }, "text": "System overview Note: the gateway never stores tokens",
+        "label": "area over \"2 Architecture\" (image + diagram + note)" },
+      "expect": { "kind": "snip", "mappedBy": "element", "lines": [29, 39], "covers": "image + diagram + quote", "snipContainerTag": null,
+        "domKind": "source", "domSridTag": "img" }
+    },
+    "t8": {
+      "capture": { "kind": "snip", "srids": [ { "$srid": { "tag": "pre", "kind": "mermaid" } } ],
+        "startSrid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "endSrid": { "$srid": { "tag": "pre", "kind": "mermaid" } },
+        "containerSrid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "region": { "x": 0.25, "y": 0.1, "w": 0.5, "h": 0.6 },
+        "text": "API Gateway Auth service", "label": "area over the diagram" },
+      "expect": { "kind": "snip", "lines": [31, 36], "covers": "diagram", "snipContainerTag": "pre", "domKind": "element", "domSridTag": "pre" }
     }
   },
   "steps": [
@@ -43,7 +59,9 @@
         "t3": { "state": "moved", "lines": [64, 64], "code": { "fromLine": 4, "toLine": 4 } },
         "t4": { "state": "moved", "lines": [43, 66], "sridTag": "h2" },
         "t5": { "state": "moved", "lines": [31, 31], "sridTag": "img" },
-        "t6": { "state": "exact", "lines": [2, 3] }
+        "t6": { "state": "exact", "lines": [2, 3] },
+        "t7": { "state": "moved", "kind": "snip", "lines": [31, 41], "covers": "image + diagram + quote", "domKind": "source", "domSridTag": "img" },
+        "t8": { "state": "moved", "lines": [33, 38], "snipContainerTag": "pre", "domKind": "element", "domSridTag": "pre" }
       }
     },
     {
@@ -53,7 +71,9 @@
       "expect": {
         "t2": { "state": "exact", "mappedBy": "override", "lines": [53, 53], "text": "previous token is invalidated" },
         "t4": { "state": "exact", "lines": [43, 66] },
-        "t1": { "state": "exact" }
+        "t1": { "state": "exact" },
+        "t7": { "state": "exact", "lines": [31, 41] },
+        "t8": { "state": "exact", "lines": [33, 38], "snipContainerTag": "pre", "domKind": "element" }
       }
     }
   ]

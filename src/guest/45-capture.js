@@ -10,9 +10,10 @@
 //   - `cell.row`/`cell.col` are 0-based indices in the table's rowspan/colspan-expanded grid, counting every row of
 //     the table (thead rows included) in table.rows order. rowKey = text of the row's first grid cell; colHeader =
 //     text of the header row's cell in that column (header row = last <thead> row, else row 0).
-//   - region x/y/w/h are fractions (0..1, 4 decimals) of the content box of regionBase(sridEl): the stamped
-//     element itself when it is media (img/svg/canvas/video/iframe/object/embed), else its single media
-//     descendant, else the stamped element. The painter (70-targets.js) uses the same rule.
+//   - region x/y/w/h are fractions (0..1, 4 decimals) of the BORDER box (getBoundingClientRect) of the stamped
+//     element the capture names (`srid`): one rule for pick regions (60-picker.js), snips (65-snip.js, whose
+//     containerSrid can be any element: a section, a figure, a mermaid <pre>, an img) and the painter
+//     (70-targets.js), so a region always comes back where it was drawn. regionBox() is that box.
 
 const Capture = (() => {
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -37,11 +38,22 @@ const Capture = (() => {
     return MEDIA.has(el.localName) && (el.localName !== 'svg' || !(/** @type {any} */ (el).ownerSVGElement));
   }
 
-  /** The element a region is measured against (see header). @param {Element} sridEl */
-  function regionBase(sridEl) {
-    if (MEDIA.has(sridEl.localName)) return sridEl.localName === 'svg' ? outerSvg(sridEl) || sridEl : sridEl;
-    const list = [...sridEl.querySelectorAll(MEDIA_SEL)].filter(isMedia);
-    return list.length === 1 ? list[0] : sridEl;
+  /** The box a region of a stamped element is measured against: its border box (see header). @param {Element} el */
+  function regionBox(el) {
+    return el.getBoundingClientRect();
+  }
+
+  /**
+   * A viewport rect as region fractions of a base box: 4 decimals, clamped into 0..1, x + w <= 1 and y + h <= 1.
+   * @param {{left:number, top:number, width:number, height:number}} r
+   * @param {{left:number, top:number, width:number, height:number}} base
+   */
+  function regionOf(r, base) {
+    const bw = Math.max(1e-6, base.width);
+    const bh = Math.max(1e-6, base.height);
+    const x = round4(clamp((r.left - base.left) / bw, 0, 1));
+    const y = round4(clamp((r.top - base.top) / bh, 0, 1));
+    return { x, y, w: round4(clamp(r.width / bw, 0, 1 - x)), h: round4(clamp(r.height / bh, 0, 1 - y)) };
   }
 
   /** The content box (border and padding removed) of an element in viewport coordinates. @param {Element} el */
@@ -345,7 +357,8 @@ const Capture = (() => {
     MATH_SEL,
     outerSvg,
     isMedia,
-    regionBase,
+    regionBox,
+    regionOf,
     contentBox,
     mermaidRoot,
     mermaidNodeOf,

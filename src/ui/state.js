@@ -22,9 +22,10 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  * @property {'comment'|'question'|'suggestion'|'agree'} type
  * @property {'blocking'|'normal'|'nit'} severity
  * @property {string} body
- * @property {string|null} crop PNG data URL from the guest (region / element crops)
+ * @property {string|null} crop PNG data URL from the guest (region / element crops, doc snips)
  * @property {string|null} [cropPath] attachment path of the uploaded crop
- * @property {Array<{ path: string, preview: string }>} attachments uploaded images (preview = data URL)
+ * @property {Array<{ path: string, preview: string }>} attachments uploaded images (preview = data URL, '' when
+ *   only the stored path is known: the thumbnail then comes from DocState.attachmentBase)
  * @property {any|null} anchor resolved anchor (POST /anchors/resolve)
  * @property {any|null} preview {label, lines, section, src}
  * @property {boolean} resolving
@@ -64,14 +65,17 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  * @property {{ threadId: string, body: string, reopen: boolean, draftId: string|null, busy: boolean } | null} reply
  * @property {Theme} theme
  * @property {boolean} hidden annotations hidden (clean read)
- * @property {'select'|'pick'} tool
+ * @property {'select'|'pick'|'snip'} tool select text / pick an element (e) / snip an area of the doc (b)
+ * @property {{ running: boolean, supported: boolean }} screenSnip the macOS region picker run by the daemon (B):
+ *   running while it waits for the reviewer; supported turns false once the daemon answered 501 (not macOS)
  * @property {boolean} narrow viewport below 900 px
  * @property {boolean} medium viewport 900-1199 px: the outline / history rail is collapsed unless `rail`
  * @property {boolean} rail medium layout: the outline / history rail is shown (the user's choice, remembered)
  * @property {boolean} drawer thread drawer open (narrow) / thread panel visible (wide)
  * @property {boolean} sidebar wide layout: right panel shown
  * @property {boolean} nav narrow: outline drawer open
- * @property {'submit'|'help'|null} dialog
+ * @property {'submit'|'help'|'image'|null} dialog
+ * @property {{ src: string, alt: string }|null} lightbox the image shown full size (dialog 'image')
  * @property {{ body: string, verdict: string|null, markFinal: boolean, resolveAddressed: boolean }|null} submitForm
  *   what the reviewer entered in the Submit dialog; kept when the dialog closes, cleared by a successful submit
  * @property {string[]} busyThreads threads with an action request in flight (Apply / Accept / Resolve / Reopen / Move)
@@ -113,6 +117,7 @@ export function initialState() {
     theme: readPref('theme', ['system', 'light', 'dark'], 'system'),
     hidden: false,
     tool: 'select',
+    screenSnip: { running: false, supported: true },
     narrow: false,
     medium: false,
     rail: readPref('rail', ['1', '0'], '0') === '1',
@@ -120,6 +125,7 @@ export function initialState() {
     sidebar: readPref('sidebar', ['1', '0'], '1') === '1',
     nav: false,
     dialog: null,
+    lightbox: null,
     submitForm: null,
     busyThreads: [],
     toasts: [],

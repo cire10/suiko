@@ -183,14 +183,17 @@ test('pasting an image into the comment attaches it', async ({ page, ui, mock })
   const list = page.getByTestId('composer').locator('.attach-list li');
   await expect(list).toHaveCount(1);
   await expect(list).toContainText('a1.png');
-  await expect(list.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+  await expect(list.getByTestId('composer-attachment')).toHaveAttribute('src', /^data:image\/png;base64,/);
   await ta.fill('See the screenshot.');
   await page.getByTestId('composer-add').click();
   await expect(page.getByTestId('composer')).toBeHidden();
   const [item] = mock.doc('kitchen-sink').drafts.items;
   expect(item.attachments).toEqual(['attachments/a1.png']);
   expect(item.anchor.kind).toBe('doc');
-  await expect(page.locator('[data-testid="thread-card"][data-draft-id]')).toContainText('1 attachment');
+  // The draft card shows the stored image (served under DocState.attachmentBase).
+  const thumb = page.locator('[data-testid="thread-card"][data-draft-id] .card-attachments img');
+  await expect(thumb).toHaveAttribute('src', /\/__att\/a1\.png$/);
+  await expect.poll(() => thumb.evaluate((el) => /** @type {HTMLImageElement} */ (el).naturalWidth)).toBe(40);
 });
 
 test('a draft can be edited (autosaved through PATCH) and deleted', async ({ page, ui, mock }) => {

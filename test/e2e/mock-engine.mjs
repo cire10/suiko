@@ -7,6 +7,12 @@
 //
 // Every state change appends an event (seq, at, type, ...) and notifies subscribers, which is how the mock SSE
 // endpoint streams `version.created`, `review.submitted`, `drafts.changed`, ...
+// Snips: like the engine (src/core/anchor/snip.js, simplified), a SnipCapture (protocol.js SNIP) resolves to a
+// kind 'snip' anchor on the whole source lines of the stamped blocks under the box, with `snip` {label, covers, text,
+// region, container}; a box over nothing stamped is a general anchor that keeps `snip`. Its DomTarget is the box on
+// the container ({kind:'element', srid, region}) or the covered blocks ({kind:'source', srid, endSrid}).
+// `addSnipDraft` does what `specreview snip` does (a draft with the screenshot attached and the drafts.changed
+// {source:'snip'} hint).
 
 import { createHash } from 'node:crypto';
 import { deepestBlockAt, elementText, renderFragmentSync, renderSourceSync, sectionAt } from '../../src/core/render/index.js';
@@ -324,6 +330,31 @@ export class MockDoc {
           generated: !!cap.svg,
         });
       }
+      case 'snip': {
+        const ids = (Array.isArray(cap.srids) ? cap.srids : []).map(Number).filter((k) => nodes[k]);
+        const container = cap.containerSrid != null && nodes[cap.containerSrid] ? Number(cap.containerSrid) : null;
+        const span = ids.length ? ids : container != null ? [container] : [];
+        const snip = {
+          label: clip(cap.label || '', 200),
+          covers: span.length === 1 ? '1 block' : `${span.length} blocks`,
+          text: clip(cap.text || '', 2000),
+          region: cap.region || null,
+          container: container == null ? null
+            : { srid: container, tag: nodes[container].t, s: nodes[container].s, e: nodes[container].e, label: `<${nodes[container].t}>` },
+        };
+        if (!span.length) return { ...this.resolveCapture(v, { kind: 'doc' }), snip };
+        // Whole source lines from the first to the last covered block.
+        const li = lineIndex(src);
+        const lines = linesOfRange(li, Math.min(...span.map((k) => nodes[k].s)), Math.max(...span.map((k) => nodes[k].e)));
+        return this.anchorAt(v, li.startOf(lines.startLine), li.endOf(lines.endLine), {
+          kind: 'snip',
+          mappedBy: 'block',
+          srid: span[0],
+          endSrid: span.length > 1 ? span[span.length - 1] : null,
+          region: container != null ? cap.region || null : null,
+          snip,
+        });
+      }
       case 'text': {
         const sNode = nodes[cap.startSrid];
         const eNode = nodes[cap.endSrid ?? cap.startSrid];
@@ -374,6 +405,7 @@ export class MockDoc {
     if (a.kind === 'doc') return 'whole document';
     if (a.kind === 'section') return `section "${a.section[a.section.length - 1] || ''}"`;
     if (a.kind === 'source') return `source lines`;
+    if (a.kind === 'snip') return a.snip?.covers ? `snip (${a.snip.covers})` : 'snip';
     if (a.svg) return `mermaid node "${a.svg.label || a.svg.nodeId}"`;
     // Like the real engine (anchorLabel): the label follows the capture scope.
     if (a.cell && a.scope === 'row') return `table row "${a.cell.rowKey}"`;
@@ -478,17 +510,20 @@ export class MockDoc {
    * @param {string} id @param {number|null} num @param {any} a @param {string} state @param {Record<string, any>} [extra]
    */
   target(id, num, a, state, extra = {}) {
+    // The guest never sees kind 'snip': the box on its container, else the covered blocks (like the engine).
+    const box = a.kind === 'snip' && a.snip?.container ? a.snip.container : null;
+    const kind = a.kind === 'snip' ? (box ? 'element' : 'source') : a.kind;
     return {
       id,
       num,
-      kind: a.kind,
+      kind,
       state,
-      srid: a.element ? a.element.srid : a.srid,
-      endSrid: a.endSrid ?? null,
-      quote: a.element || a.kind === 'doc' || a.kind === 'section' || a.kind === 'source' ? null : a.quote?.exact ?? null,
+      srid: box ? box.srid : a.element ? a.element.srid : a.srid,
+      endSrid: box ? null : a.endSrid ?? null,
+      quote: a.element || kind === 'doc' || kind === 'section' || kind === 'source' || kind === 'element' ? null : a.quote?.exact ?? null,
       prefix: a.quote?.prefix || '',
       suffix: a.quote?.suffix || '',
-      region: a.region || null,
+      region: box ? a.region || null : kind === 'source' ? null : a.region || null,
       svg: a.svg || null,
       cell: a.cell || null,
       label: this.label(a),
@@ -837,6 +872,22 @@ export class MockDoc {
     return { path };
   }
 
+  /**
+   * What `specreview snip` does: stores the screenshot, adds it as a draft general comment, and appends the
+   * drafts.changed {source:'snip', draft} hint the UI toasts. With `send` the draft is submitted at once (verdict
+   * comment), like `specreview snip --send`.
+   * @param {{ dataUrl: string, body?: string, send?: boolean }} p
+   */
+  addSnipDraft(p) {
+    const { path } = this.saveAttachment(p.dataUrl);
+    const draft = this.saveDraft({
+      kind: 'thread', type: 'comment', severity: 'normal', body: p.body ?? '', version: this.head, capture: { kind: 'doc' }, attachments: [path],
+    });
+    this.emit('drafts.changed', { source: 'snip', draft: draft.id });
+    if (p.send) this.submitReview({ verdict: 'comment', body: '', draftIds: [draft.id] });
+    return draft;
+  }
+
   /** @param {string} source */
   fragment(source) {
     return { html: renderFragmentSync({ format: this.format, source }) };
@@ -887,7 +938,7 @@ function sectionSrids(render, start, end) {
 function pick(a) {
   return {
     kind: a.kind, quote: a.quote, element: a.element, region: a.region, svg: a.svg, cell: a.cell, scope: a.scope,
-    mappedBy: a.mappedBy, generated: a.generated,
+    mappedBy: a.mappedBy, generated: a.generated, snip: a.snip,
   };
 }
 

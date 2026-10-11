@@ -32,15 +32,20 @@
 // only holds the heading row; else EOF), trailing whitespace and (Markdown) trailing link / footnote definitions
 // trimmed: those serve the whole document.
 // Source captures: whole lines (mappedBy 'lines'); doc captures: an empty range at 0.
+// Snip captures (key `b`, a box over any area; see snip.js): kind 'snip' on the whole source lines of the covered
+// blocks (mappedBy 'element'; the container's lines when no stamped block is covered, mappedBy 'block'), quote null,
+// region = the box in the container (null without one), `snip` = SnipInfo; a box over nothing stamped is a GENERAL
+// ('doc') anchor carrying `snip`.
 //
 // Every anchor has the same key set: { v, kind, state, mappedBy, src, quote, srid, endSrid, section, generated,
-// element, region, svg, cell, code, media } plus `scope` (cell/table element anchors) and `host` (generated
-// text). Invalid captures throw UsageError (exit 1).
+// element, region, svg, cell, code, media } plus `scope` (cell/table element anchors), `host` (generated
+// text) and `snip` (snips). Invalid captures throw UsageError (exit 1).
 
 import { UsageError } from '../store/errors.js';
 import { collapseWs, findQuote, lineIndex } from '../text/index.js';
 import { anchorElement } from './fingerprint.js';
 import { narrowMermaid } from './mermaid.js';
+import { snipInfo, snipSpan, snipSrids } from './snip.js';
 import { tableOf } from './table.js';
 import {
   anchoringConfig, codeLangOf, commonAncestor, contentHostOf, deepestContaining, elementLabelOf, formatOf, lineRange,
@@ -72,6 +77,7 @@ export function createAnchor({ version, capture, source, render, format, docPath
     case 'section': return fromSection(capture, ctx);
     case 'source': return anchorFromLines({ version, startLine: capture.startLine, endLine: capture.endLine, source, render, format: ctx.format, config });
     case 'doc': return docAnchor(ctx);
+    case 'snip': return fromSnip(capture, ctx);
     default: throw new UsageError(`createAnchor: unknown capture kind ${JSON.stringify(capture.kind)}`);
   }
 }
@@ -443,6 +449,39 @@ function fromSection(cap, ctx) {
     endSrid: span.endSrid ?? (span.srid !== srid ? span.srid : null),
   });
   anchor.element = anchorElement(render, srid, ctx);
+  return anchor;
+}
+
+/**
+ * A snip: the whole source lines from the first to the last covered block (see snip.js).
+ * @param {any} cap SnipCapture
+ * @param {Ctx} ctx
+ * @returns {Anchor}
+ */
+function fromSnip(cap, ctx) {
+  const { render, source } = ctx;
+  const srids = snipSrids(render, cap);
+  const containerSrid = validSrid(render, cap.containerSrid);
+  const region = cleanRegion(cap.region);
+  const info = snipInfo(render, cap, srids, containerSrid, region);
+  const covered = srids.length ? srids : containerSrid != null ? [containerSrid] : [];
+  if (!covered.length) return /** @type {Anchor} */ ({ ...docAnchor(ctx), snip: info });
+  const nodes = covered.map((srid) => /** @type {import('../render/srcmap.js').SrcNode} */ (nodeOf(render, srid)));
+  const s = Math.min(...nodes.map((n) => n.s));
+  const e = Math.max(...nodes.map((n) => n.e));
+  const r = lineRange(ctx.li, ctx.li.lineOf(s), ctx.li.lineOf(e > s ? e - 1 : s));
+  const span = snipSpan(render, source, r.start, r.end);
+  const anchor = baseAnchor(ctx, {
+    kind: /** @type {any} */ ('snip'),
+    mappedBy: srids.length ? 'element' : 'block',
+    start: r.start,
+    end: r.end,
+    quote: null,
+    srid: span.srid,
+    endSrid: span.endSrid,
+  });
+  anchor.region = info.container ? region : null;
+  /** @type {any} */ (anchor).snip = info;
   return anchor;
 }
 

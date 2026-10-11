@@ -199,7 +199,8 @@ export function genericText(value, depth = 0) {
  *   working copy: L53                 only when unrecorded edits moved the anchor away from its head lines
  *   src> <exact source lines>         usable as an Edit old_string
  *   (src> is shortened or not unique; Read around L53 before editing)
- *   crop: /abs/attachments/a1.png  (Read it to see the region)      ('image:' when the target is not a region)
+ *   crop: /abs/attachments/a1.png  (Read it to see the region)      (a region crop; see attachmentText)
+ *   image: /abs/attachments/a2.png  (Read it to see what the reviewer snipped)
  * Overflow lines of a capped packet and the skill send the agent to `show` for a thread, so it must carry the same
  * src>/crop facts as a packet item. Orphaned and doc-level threads have no src (nothing is printed for them).
  * @param {any} s
@@ -218,12 +219,26 @@ export function threadSourceLines(s, want = {}) {
     else if (!s.srcUnique && working) out.push(`  (src> is shortened or not unique; Read around ${rangeText(working)} before editing)`);
   }
   if (want.attachments !== false) {
-    const kind = String(s?.label ?? '').includes('region') ? 'crop' : 'image';
+    const kind = s?.attachmentKind ?? (String(s?.label ?? '').includes('region') ? 'region' : 'image');
     for (const a of Array.isArray(s?.attachments) ? s.attachments : []) {
-      if (typeof a === 'string' && a) out.push(`  ${kind}: ${a}  (Read it to see the region)`);
+      if (typeof a === 'string' && a) out.push(attachmentText(a, kind));
     }
   }
   return out;
+}
+
+/**
+ * One attachment line, worded like the engine's packet (src/core/review/packet.js attachmentLine; repeated here
+ * because the CLI formats without loading the engine): 'region' -> crop:, 'snip' / 'image' -> image:, each with
+ * the Read hint.
+ * @param {string} absPath
+ * @param {string | null | undefined} kind 'region' | 'snip' | 'image'
+ * @returns {string}
+ */
+export function attachmentText(absPath, kind) {
+  if (kind === 'region') return `  crop: ${absPath}  (Read it to see the region)`;
+  if (kind === 'snip') return `  image: ${absPath}  (Read it to see what the reviewer snipped)`;
+  return `  image: ${absPath}  (Read it to see the image the reviewer attached)`;
 }
 
 /**
@@ -410,7 +425,8 @@ function formatPacketThread(p, t) {
   } else if (typeof t.src === 'string' && t.src) {
     for (const line of t.src.split('\n')) out.push(`  src> ${line}`);
   }
-  for (const a of Array.isArray(t.attachments) ? t.attachments : []) out.push(`  crop: ${a}  (Read it to see the region)`);
+  const kind = t.attachmentKind ?? (String(t.label ?? '').includes('region') ? 'region' : 'image');
+  for (const a of Array.isArray(t.attachments) ? t.attachments : []) out.push(attachmentText(a, kind));
   for (const c of Array.isArray(t.comments) ? t.comments : []) {
     if (hasBody(c)) out.push(`  ${actorName(c.by)}: ${hangIndent(c.body, '    ')}`); // empty comments are left out
   }

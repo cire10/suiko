@@ -168,7 +168,17 @@ describe('withThreadSource / threadSourceLines', () => {
       '  (data: URIs elided above; Read the file for the exact text)',
     ]);
     assert.deepEqual(threadSourceLines(show({ src: null, workingLines: null, label: '<img alt="x">', attachments: ['/abs/a1.png'] })), [
-      '  image: /abs/a1.png  (Read it to see the region)',
+      '  image: /abs/a1.png  (Read it to see the image the reviewer attached)',
+    ]);
+    // the engine says what the attachments are (show().attachmentKind); the label is only a fallback
+    assert.deepEqual(threadSourceLines(show({ src: null, workingLines: null, label: 'snip (figure + 2 paragraphs)', attachmentKind: 'snip', attachments: ['/abs/a2.png'] })), [
+      '  image: /abs/a2.png  (Read it to see what the reviewer snipped)',
+    ]);
+    assert.deepEqual(threadSourceLines(show({ src: null, workingLines: null, label: 'GENERAL', attachmentKind: 'image', attachments: ['/abs/a3.png'] })), [
+      '  image: /abs/a3.png  (Read it to see the image the reviewer attached)',
+    ]);
+    assert.deepEqual(threadSourceLines(show({ src: null, workingLines: null, label: '<img alt="x"> region x1-2% y1-2%', attachments: ['/abs/a4.png'] })), [
+      '  crop: /abs/a4.png  (Read it to see the region)',
     ]);
     assert.deepEqual(threadSourceLines(show({ src: null, workingLines: null, anchor: null })), []);
     const bare = { id: 't4', type: 'comment', comments: [], src: 'x' };

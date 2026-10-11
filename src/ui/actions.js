@@ -11,6 +11,9 @@
 // - Typed input is never dropped silently: replacing or closing a composer / reply that holds input is refused or
 //   offers Undo, and Esc pressed inside the doc never discards it.
 // - Requests that finish after the user moved on (another doc / version) are dropped.
+// - Snips: `b` snips an area of the doc (the guest draws the box and posts `action` with a SnipCapture and its crop,
+//   which opens the composer like any capture); Shift+B asks the daemon to run the macOS region picker and attaches
+//   the screenshot to a composer. Neither sends anything: the comment goes out on Add to review / Send now.
 
 import { MSG, SSE } from 'protocol';
 import { api, docApi, onConnection, onReconnect } from './api.js';
@@ -304,9 +307,40 @@ function onDocEvent(name, data) {
       toast(`Approved${data?.v ? ` at v${data.v}` : ''}.`, { tone: 'ok' });
       refresh();
       return;
+    case SSE.DRAFTS_CHANGED:
+      if (data?.source === 'snip') announceSnipDraft(data);
+      else refresh();
+      return;
     default:
       refresh();
   }
+}
+
+/**
+ * `specreview snip` (from a terminal or a macOS Shortcut) added a screenshot draft: a toast says so, with [Edit] to
+ * focus the draft card and write about it. When the draft is already gone (`snip --send` submitted it), the toast
+ * only says it arrived.
+ * @param {any} data {source: 'snip', draft: 'dN'}
+ */
+async function announceSnipDraft(data) {
+  const id = typeof data?.draft === 'string' && /^d\d+$/.test(data.draft) ? data.draft : null;
+  await refreshNow();
+  const there = !!id && (get().ds?.drafts?.items || []).some((/** @type {any} */ d) => d.id === id);
+  toast('Screenshot added from your Mac', {
+    tone: 'info',
+    timeout: there ? 15000 : 6000,
+    actions: there && id ? [{ label: 'Edit', run: () => editSnipDraft(id) }] : [],
+  });
+}
+
+/** The [Edit] of a "Screenshot added" toast: focuses the draft card and opens the draft in the composer. @param {string} id */
+function editSnipDraft(id) {
+  if (!(get().ds?.drafts?.items || []).some((/** @type {any} */ d) => d.id === id)) {
+    toast(`${id} is no longer a draft (it was sent or deleted).`, { tone: 'muted', timeout: 3000 });
+    return;
+  }
+  focusItem(id);
+  if (!get().composer) editDraft(id);
 }
 
 /** Toast + tab-title badge for a new version (design 11.7). @param {any} data */
@@ -578,7 +612,8 @@ function onGuestMessage(type, d) {
       }));
       return;
     case MSG.TOOL_CHANGED:
-      set({ tool: d.tool === 'pick' ? 'pick' : 'select' });
+      // The guest left pick / snip mode itself (Esc, a finished pick or snip), or entered snip mode (b in the doc).
+      set({ tool: d.tool === 'pick' || d.tool === 'snip' ? d.tool : 'select' });
       return;
     default:
   }
@@ -716,7 +751,7 @@ export function setMode(mode) {
   if (s.mode === mode) return;
   let base = s.base;
   if (base == null) base = defaultBase(s.ds, s.version, s.baseKind === 'custom' ? 'last' : s.baseKind);
-  if (s.tool === 'pick') guest.send(MSG.SET_TOOL, { tool: 'select' });
+  if (s.tool !== 'select') guest.send(MSG.SET_TOOL, { tool: 'select' });
   set({ mode, base, tool: 'select', sidePane: mode === 'changes' ? 'changes' : s.sidePane, unseenVersion: mode === 'changes' ? null : s.unseenVersion });
   updateTitle();
   sendInit();
@@ -801,12 +836,13 @@ export function viewVersion(v) {
 // ============================================================================================ composer
 
 /**
- * Opens the composer for a capture (from the guest toolbar / picker, a key, the outline, Source mode, ...).
- * Refused while the open composer holds input (a comment, an edited suggestion, attachments, a lock note).
+ * Opens the composer for a capture (from the guest toolbar / picker / snip, a key, the outline, Source mode, a screen
+ * snip, ...). Refused while the open composer holds input (a comment, an edited suggestion, attachments, a lock note).
  * @param {{ capture: any, action?: string, crop?: string|null, body?: string, type?: string, severity?: string,
- *   restore?: any }} p restore: a stored backup to reopen (offerComposerBackup)
+ *   attachments?: Array<{ path: string, preview: string }>, restore?: any }} p attachments: already stored images
+ *   (a screen snip); restore: a stored backup to reopen (offerComposerBackup)
  */
-export function openComposer({ capture, action = 'comment', crop = null, body = '', type, severity, restore }) {
+export function openComposer({ capture, action = 'comment', crop = null, body = '', type, severity, attachments = [], restore }) {
   const s = get();
   if (!s.ds || !capture) return;
   if (s.version === 'live') {
@@ -821,6 +857,9 @@ export function openComposer({ capture, action = 'comment', crop = null, body = 
   const sig = `${t}|${JSON.stringify(capture)}`;
   if (s.composer && s.composer.key === lastOpen.key && lastOpen.sig === sig && Date.now() - lastOpen.at < DUPLICATE_OPEN_MS) return;
   const backup = restore || (!body ? readBackup(capture) : null);
+  const restored = Array.isArray(backup?.attachments)
+    ? backup.attachments.filter((/** @type {any} */ p) => typeof p === 'string').map((/** @type {string} */ p) => ({ path: p, preview: '' }))
+    : [];
   const composer = {
     key: ++composerSeq,
     capture,
@@ -830,9 +869,7 @@ export function openComposer({ capture, action = 'comment', crop = null, body = 
     body: backup?.body || body,
     crop,
     cropPath: null,
-    attachments: Array.isArray(backup?.attachments)
-      ? backup.attachments.filter((/** @type {any} */ p) => typeof p === 'string').map((/** @type {string} */ p) => ({ path: p, preview: '' }))
-      : [],
+    attachments: [...restored, ...attachments.filter((a) => !restored.some((r) => r.path === a.path))],
     anchor: null,
     preview: null,
     resolving: true,
@@ -847,8 +884,9 @@ export function openComposer({ capture, action = 'comment', crop = null, body = 
     error: null,
   };
   lastOpen = { key: composer.key, at: Date.now(), sig };
-  if (s.tool === 'pick') guest.send(MSG.SET_TOOL, { tool: 'select' });
+  if (s.tool !== 'select') guest.send(MSG.SET_TOOL, { tool: 'select' });
   set({ composer, tool: 'select', drawer: s.narrow ? true : s.drawer, sidebar: true });
+  if (attachments.length) saveBackupSoon();
   resolveComposerAnchor(false);
 }
 
@@ -964,7 +1002,8 @@ function composerProblem(comp) {
   const sug = comp.type === 'suggestion' ? comp.suggestion : null;
   if (comp.type === 'suggestion' && (!sug || sug.loading)) return 'The suggestion editor is not ready yet.';
   if (sug && sug.new === sug.old && !body) return 'Edit the suggested text (or add a comment) first.';
-  if (!sug && !body) return 'Write a comment first.';
+  // A screenshot (a snip's crop, an attached image) speaks for itself: the text is optional then.
+  if (!sug && !body && !comp.crop && !comp.attachments.length) return 'Write a comment first.';
   return null;
 }
 
@@ -992,6 +1031,25 @@ function composerItem(comp, cropPath = comp.cropPath) {
 
 /** @param {unknown} err */
 const isNotFound = (err) => /** @type {any} */ (err)?.status === 404;
+
+/** The composer whose submit waits for its anchor (0 = none), and how long a submit waits for it. */
+let settlingKey = 0;
+const ANCHOR_WAIT_MS = 5000;
+
+/**
+ * The composer once its anchor is resolved (or after ANCHOR_WAIT_MS, still resolving); null when it was closed or
+ * replaced meanwhile.
+ * @param {number} key
+ */
+async function anchorSettled(key) {
+  const until = Date.now() + ANCHOR_WAIT_MS;
+  for (;;) {
+    const now = /** @type {any} */ (get().composer);
+    if (!now || now.key !== key) return null;
+    if (!now.resolving || Date.now() >= until) return now;
+    await new Promise((ok) => setTimeout(ok, 40));
+  }
+}
 
 /**
  * Saves an item into an existing draft; when that draft is gone (submitted or deleted elsewhere) the item becomes a
@@ -1022,8 +1080,20 @@ function reviewedVersion() {
  */
 export async function submitComposer(opts = {}) {
   const c = client;
-  const comp = /** @type {any} */ (get().composer);
+  let comp = /** @type {any} */ (get().composer);
   if (!c || !comp || comp.busy) return;
+  if (comp.resolving) {
+    // A key pressed right after the composer opened (a snip sent at once): finish locating the anchor first. A
+    // second press meanwhile is the same request.
+    if (settlingKey === comp.key) return;
+    settlingKey = comp.key;
+    try {
+      comp = await anchorSettled(comp.key);
+    } finally {
+      settlingKey = 0;
+    }
+    if (!comp || comp.busy || client !== c) return;
+  }
   if (comp.type === 'agree') {
     await markAgreed();
     return;
@@ -1492,7 +1562,17 @@ export function openSubmit() {
 }
 
 export function closeDialog() {
-  set({ dialog: null });
+  set({ dialog: null, lightbox: null });
+}
+
+/**
+ * Shows an image (an attachment thumbnail, a crop) full size; Esc, the backdrop or Close shut it.
+ * @param {string} src
+ * @param {string} [alt]
+ */
+export function openLightbox(src, alt = 'Screenshot') {
+  if (!src || get().dialog === 'submit') return;
+  set({ dialog: 'image', lightbox: { src, alt } });
 }
 
 /**
@@ -1627,11 +1707,19 @@ export function toggleHidden() {
   guest.send(MSG.SET_HIDDEN, { hidden });
 }
 
-/** @param {'select'|'pick'} tool */
+/**
+ * Select (text), pick (e: an element) or snip (b: a box over any area). Pick and snip need the rendered doc of a
+ * recorded version (Review / Changes) and a connected guest.
+ * @param {'select'|'pick'|'snip'} tool
+ */
 export function setTool(tool) {
   const s = get();
-  if (tool === 'pick' && (s.version === 'live' || !(s.mode === 'review' || s.mode === 'changes'))) {
+  if (tool !== 'select' && (s.version === 'live' || !(s.mode === 'review' || s.mode === 'changes'))) {
     if (s.version === 'live') toast('The working copy preview is read-only.', { tone: 'warn' });
+    return;
+  }
+  if (tool !== 'select' && !guest.connected) {
+    toast('The document is still loading.', { timeout: 2000 });
     return;
   }
   set({ tool });
@@ -1640,6 +1728,102 @@ export function setTool(tool) {
 
 export function togglePick() {
   setTool(get().tool === 'pick' ? 'select' : 'pick');
+}
+
+/**
+ * b / the scissors button: snip an area of the doc. The guest shows a crosshair; dragging a box opens the composer
+ * with a crop of the box, Esc cancels, and the tool goes back to select after one snip. In Source / History mode it
+ * switches to Review first. A `b` forwarded from the doc while already snipping is ignored (the guest handles its
+ * own keys while it snips); a `b` in the UI then cancels the snip.
+ * @param {{ fromGuest?: boolean }} [opts]
+ */
+export function toggleSnip(opts = {}) {
+  const s = get();
+  if (s.tool === 'snip') {
+    if (!opts.fromGuest) setTool('select');
+    return;
+  }
+  if (s.version !== 'live' && s.mode !== 'review' && s.mode !== 'changes') setMode('review');
+  setTool('snip');
+}
+
+/** What a screen snip is about: the selected text in the doc, the selected lines in Source mode, else the whole doc. @param {UiState} s */
+function screenSnipCapture(s) {
+  if (s.mode === 'source' && s.sourceSel) return { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to };
+  if ((s.mode === 'review' || s.mode === 'changes') && s.guest.selection) return s.guest.selection;
+  return { kind: 'doc' };
+}
+
+const SNIP_SCREEN_UNSUPPORTED = 'Snipping the screen needs macOS (SpecReview runs the system screenshot picker on your Mac). Press b (without Shift) to snip an area of the document instead.';
+
+/**
+ * Shift+B / the screen button: the daemon runs the macOS region picker (`screencapture -i`, like Cmd+Shift+4) on the
+ * reviewer's Mac and stores the PNG. A floating hint says so while it waits. The screenshot is attached to the open composer
+ * when there is one, else to a new composer on the current selection (doc text, or lines in Source mode), else to a
+ * general comment. Esc in the picker cancels quietly; a 501 hides the screen button (not macOS).
+ */
+export async function snipScreen() {
+  const c = client;
+  const s = get();
+  if (!c || !s.ds) return;
+  if (s.screenSnip.running) {
+    toast('A screen snip is already waiting: drag a box anywhere on your screen, or press Esc to cancel it.', { timeout: 3500 });
+    return;
+  }
+  if (!s.screenSnip.supported) {
+    toast(SNIP_SCREEN_UNSUPPORTED, { tone: 'warn' });
+    return;
+  }
+  if (s.version === 'live') {
+    toast('The working copy is a read-only preview. Record it or switch to a recorded version to comment.', { tone: 'warn' });
+    return;
+  }
+  if (s.composer && (s.composer.type === 'agree' || s.composer.busy)) {
+    toast('Finish or cancel the open comment first.', { tone: 'warn' });
+    return;
+  }
+  // Taken now: the picker can take a while, and the selection may change meanwhile.
+  const capture = screenSnipCapture(s);
+  if (s.tool !== 'select') setTool('select');
+  set((st) => ({ screenSnip: { ...st.screenSnip, running: true } }));
+  /** @type {any} */
+  let r;
+  try {
+    r = await c.snipScreen();
+  } catch (err) {
+    const e = /** @type {any} */ (err);
+    const code = e?.body?.code;
+    if (e?.status === 501 || code === 'unsupported') {
+      set((st) => ({ screenSnip: { ...st.screenSnip, supported: false } }));
+      toast(SNIP_SCREEN_UNSUPPORTED, { tone: 'warn', timeout: 8000 });
+    } else if (e?.status === 409 || code === 'busy') {
+      toast('A screen snip is already running on your Mac. Finish it there (or press Esc) first.', { tone: 'warn' });
+    } else {
+      toast(`Screen snip failed: ${e?.offline ? 'the connection to SpecReview was lost' : errorText(err)}`, { tone: 'danger' });
+    }
+    return;
+  } finally {
+    set((st) => ({ screenSnip: { ...st.screenSnip, running: false } }));
+  }
+  if (client !== c) return; // another doc meanwhile
+  if (r?.cancelled) {
+    toast('Screen snip cancelled.', { tone: 'muted', timeout: 2500 });
+    return;
+  }
+  if (!r?.path) {
+    toast('Screen snip failed: the daemon returned no screenshot.', { tone: 'danger' });
+    return;
+  }
+  const att = { path: String(r.path), preview: typeof r.dataUrl === 'string' && r.dataUrl.startsWith('data:image/') ? r.dataUrl : '' };
+  const open = get().composer;
+  if (open && open.type !== 'agree' && !open.busy) {
+    updateComposer({ attachments: [...open.attachments, att] });
+    set({ drawer: get().narrow ? true : get().drawer, sidebar: true });
+    toast('Screenshot attached to the open comment.', { tone: 'ok', timeout: 2500 });
+    return;
+  }
+  openComposer({ capture, attachments: [att] });
+  if (!get().composer) toast('The screenshot was saved but no comment could be opened for it.', { tone: 'warn' });
 }
 
 /** \ : the thread drawer (narrow) or the side panel (wide). */

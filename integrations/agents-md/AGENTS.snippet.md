@@ -18,7 +18,8 @@ Specs, plans, RFCs and design docs written for the user's review go through Spec
 - **suggestion** threads: `specreview apply <doc> <tid...>`. Do this after your other edits; `apply` rewrites the file, so re-read it before editing again. On a conflict, treat the thread as a normal comment.
 - **comment** threads: make the smallest local change, replacing the `src>` text. With no edit tool, use `specreview edit <doc> --thread t1 --old "<src text>" --new "<new text>"`, or a batch: `specreview edit <doc> --stdin` with `[{"threads":["t1"],"old":"...","new":"..."}]`.
 - **question**: answer in the reply (`answered`); edit too only if the answer belongs in the spec (`addressed`). **Disagree**: `declined` with the reason. **Unclear**: `needs_input` with one precise question.
-- **image or diagram region**: open the `crop:` PNG, then edit the diagram source (mermaid, inline SVG, or the script that draws it).
+- **Pictures** (`crop:` and `image:` lines): open every listed picture before acting on its thread. They are a region the reviewer drew, a snipped area of the doc, a screenshot of their screen, or a pasted image. A snip's `src>` covers every block under the snipped area: edit only what the comment is about. A `GENERAL` screenshot may show something outside the doc (the running app, a terminal); if it is unclear which part of the spec it concerns, use `needs_input`. For diagrams, edit the source (mermaid, inline SVG, or the script that draws it).
+- Every packet needs handling, `COMMENT` ones included: the reviewer can send a single comment at once.
 - Never touch `LOCKED` ranges or text behind `DECISIONS`. Never make drive-by edits. Never revert changes you did not make. Never use `--force`, `--allow-rewrite` or `--break-lock` unless the user explicitly asks.
 
 ### Record the revision

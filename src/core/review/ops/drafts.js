@@ -1,7 +1,9 @@
 // @ts-check
 // Reviewer drafts and capture resolution (design 7.2, 10.2, 11.4; BUILD_AMENDMENTS 3.3):
 //   resolveCapture(ctx, doc, { version, capture })      -> { anchor, preview: { label, lines, section, src, text } }
-//   saveDraft(ctx, doc, item)                            -> DraftItem (id allocated, anchor resolved)
+//   saveDraft(ctx, doc, item, { source? })               -> DraftItem (id allocated, anchor resolved); `source`
+//                                                           ('snip' for `specreview snip`) rides on the
+//                                                           drafts.changed event so the UI can announce the draft
 //   updateDraft(ctx, doc, draftId, patch)                -> DraftItem
 //   deleteDraft(ctx, doc, draftId)                       -> { ok, deleted }
 //   listDrafts(ctx, doc)                                 -> Drafts
@@ -81,9 +83,11 @@ export async function listDrafts(ctx, ref) {
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {any} item DraftItem without id
+ * @param {{ source?: string | null }} [opts] source: where the draft came from, added to the drafts.changed event
+ *   ({draft, source: 'snip'} for `specreview snip`)
  * @returns {Promise<DraftItem>}
  */
-export async function saveDraft(ctx, ref, item) {
+export async function saveDraft(ctx, ref, item, { source = null } = {}) {
   return withDoc(ctx, ref, async (doc) => {
     const draft = await normalizeDraft(ctx, doc, item ?? {}, null);
     draft.id = ctx.store.nextId(doc, 'draft');
@@ -91,7 +95,7 @@ export async function saveDraft(ctx, ref, item) {
     const drafts = await ctx.store.getDrafts(doc.id);
     drafts.items.push(draft);
     await ctx.store.saveDrafts(doc.id, drafts);
-    await emit(ctx, doc.id, SSE.DRAFTS_CHANGED, { draft: draft.id });
+    await emit(ctx, doc.id, SSE.DRAFTS_CHANGED, source ? { draft: draft.id, source: String(source) } : { draft: draft.id });
     return draft;
   });
 }

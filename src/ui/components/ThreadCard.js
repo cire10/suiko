@@ -9,18 +9,20 @@
 // (busy), its buttons are disabled so a double click cannot send it twice.
 // A draft made on another version than the one shown says so: it is not painted on this version (the daemon carries
 // it forward when the review is submitted), and its line numbers refer to its own version.
+// Screenshots attached to a thread or draft (snips, picked regions, pasted images, `specreview snip`) show as
+// thumbnails served by the daemon under DocState.attachmentBase; a click shows one full size.
 
 import { html, useEffect, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { docApi } from '../api.js';
 import {
-  applySuggestion, cancelReply, compareVersions, deleteDraft, editDraft, focusItem, goToHunk, moveThread,
+  applySuggestion, cancelReply, compareVersions, deleteDraft, editDraft, focusItem, goToHunk, moveThread, openLightbox,
   resolveThread, revealTarget, setReplyBody, startReply, submitReply, switchVersion, unresolveThread,
 } from '../actions.js';
 import { Markdown } from '../markdown.js';
 import {
-  actorLabel, anchorAt, anchorQuote, anchorStateInfo, clip, draftVersion, isAgent, isVerifiable, linesLabel, relTime,
-  replyDraftsFor, sectionTail, statusInfo, targetLabel,
+  actorLabel, anchorAt, anchorQuote, anchorStateInfo, attachmentName, attachmentUrl, clip, draftVersion, isAgent,
+  isVerifiable, linesLabel, relTime, replyDraftsFor, sectionTail, statusInfo, targetLabel,
 } from '../model.js';
 import { store } from '../state.js';
 import { contentUrl, scrollIntoViewSoft } from '../util.js';
@@ -109,8 +111,7 @@ export function ThreadCard({ t, ds, version, agent, focused, reply, position, bu
         <${Markdown} text=${c.body} class="comment-body" />
       </li>`)}
     </ol>
-    ${(t.attachments || []).length ? html`<p class="attachments small muted">${t.attachments.length} attachment${t.attachments.length > 1 ? 's' : ''}
-      (${t.attachments.map((/** @type {string} */ p) => p.split('/').pop()).join(', ')})</p>` : null}
+    <${Attachments} paths=${t.attachments} ds=${ds} />
     ${t.suggestion ? html`<${SuggestionBlock} t=${t} ds=${ds} canAct=${canAct} busy=${busy} />` : null}
     ${showMini ? html`<${MiniDiff} t=${t} ds=${ds} />` : null}
     ${t.decision ? html`<p class="decision"><${Chip} tone="ok">${t.decision.id || 'Decision'}<//> ${t.decision.text}</p>` : null}
@@ -164,6 +165,31 @@ function CardTarget({ a, lines, section = '' }) {
     ${lines ? html`<span class="target-lines">${lines}</span>` : null}
     ${section ? html`<span class="target-section">§${section}</span>` : null}
   </div>`;
+}
+
+/**
+ * Thumbnails of the screenshots of a thread or draft; a click shows one full size. Without an attachment URL (a
+ * daemon that does not serve attachments) only the file names are listed.
+ * @param {{ paths: unknown, ds: any }} props
+ */
+function Attachments({ paths, ds }) {
+  const list = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string') : [];
+  if (!list.length) return null;
+  const urls = list.map((p) => attachmentUrl(ds, p));
+  if (!urls.some(Boolean)) {
+    return html`<p class="attachments small muted">${list.length} attachment${list.length > 1 ? 's' : ''}
+      (${list.map(attachmentName).join(', ')})</p>`;
+  }
+  return html`<ul class="card-attachments" aria-label=${`${list.length} attachment${list.length > 1 ? 's' : ''}`}>
+    ${list.map((p, i) => {
+      const src = urls[i];
+      const name = attachmentName(p);
+      return html`<li key=${p}>${src
+        ? html`<button type="button" class="thumb-btn" title=${`Show ${name} full size`} onClick=${() => openLightbox(src, name)}>
+            <img src=${src} alt=${`Screenshot ${name}`} loading="lazy" referrerpolicy="no-referrer" data-attachment=${p} /></button>`
+        : html`<span class="small muted">${name}</span>`}</li>`;
+    })}
+  </ul>`;
 }
 
 /** @param {{ reply: any }} props */
@@ -266,10 +292,10 @@ function MiniDiff({ t, ds }) {
 
 /**
  * A new-thread draft of the pending review.
- * @param {{ d: any, focused: boolean, version?: number|'live'|null, shown?: boolean }} props version: the version
- *   shown; shown: whether the doc paints this draft on it
+ * @param {{ d: any, focused: boolean, version?: number|'live'|null, shown?: boolean, ds?: any }} props version: the
+ *   version shown; shown: whether the doc paints this draft on it; ds: DocState (attachment thumbnails)
  */
-export function DraftCard({ d, focused, version = null, shown = true }) {
+export function DraftCard({ d, focused, version = null, shown = true, ds = null }) {
   const ref = useFocusScroll(focused);
   const a = d.anchor;
   const lines = a?.src && a.kind !== 'doc' ? linesLabel(a.src) : '';
@@ -297,7 +323,7 @@ export function DraftCard({ d, focused, version = null, shown = true }) {
     ${quote ? html`<blockquote class="quote" data-anchor-quote>“${quote}”</blockquote>` : null}
     ${d.body ? html`<${Markdown} text=${d.body} class="comment-body" />` : null}
     ${d.suggestion ? html`<${WordDiff} before=${d.suggestion.old} after=${d.suggestion.new} class="mono" />` : null}
-    ${(d.attachments || []).length ? html`<p class="small muted">${d.attachments.length} attachment${d.attachments.length > 1 ? 's' : ''}</p>` : null}
+    <${Attachments} paths=${d.attachments} ds=${ds} />
     <footer class="card-actions">
       <button type="button" class="btn btn-sm" onClick=${() => editDraft(d.id)}>Edit</button>
       <button type="button" class="btn btn-sm danger" onClick=${() => deleteDraft(d.id)}>Delete</button>

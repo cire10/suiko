@@ -13,11 +13,12 @@
 //   marks     element outlines, region boxes, mermaid node boxes, lock brackets
 //   changes   change bars, badges, "removed" tabs
 //   pins      numbered thread pins in the right margin
-//   ui        pick glass, picker hover box + label chip, drag box, cell-scope chooser, selection mini-toolbar,
-//             popovers, focus pulse
+//   ui        pick / snip glass, picker hover box + label chip, drag box, pending snip box, hint chip, cell-scope
+//             chooser, selection mini-toolbar, popovers, focus pulse
 // Each layer is managed through keyed pools (pool(name).begin()/el(key, cls)/end()) so a redraw reuses nodes.
 // Pointer events from interactive children are stopped at the shadow root so they do not reach the page's
-// bubbling handlers.
+// bubbling handlers. scratch(node) parks a helper node (the snip rasteriser's style sandbox iframe) inside the
+// shadow root, out of the author's DOM and out of every page MutationObserver.
 
 /**
  * Where the selection mini-toolbar anchors (viewport coordinates): `left` = the selection start, `top` = the top of
@@ -106,6 +107,15 @@ const Overlay = (() => {
   line-height: 16px; color: #fff; background: #0969da; pointer-events: none; }
 .dragbox { position: absolute; box-sizing: border-box; border: 2px dashed #0969da;
   background: rgba(9, 105, 218, 0.12); pointer-events: none; }
+.dragbox.pending { border-style: solid; background: rgba(9, 105, 218, 0.06);
+  animation: sr-snip 0.7s ease-in-out infinite alternate; }
+@keyframes sr-snip { from { opacity: 1; } to { opacity: 0.45; } }
+.hint { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); box-sizing: border-box;
+  max-width: calc(100vw - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 11px;
+  border-radius: 12px; font-size: 12px; line-height: 18px; color: #fff; background: rgba(9, 105, 218, 0.95);
+  box-shadow: var(--shadow); pointer-events: none; }
+.scratch { position: absolute; left: 0; top: 0; width: 0; height: 0; border: 0; visibility: hidden;
+  pointer-events: none; }
 .menu { position: absolute; display: flex; gap: 2px; padding: 3px; border-radius: 7px; background: var(--bg);
   border: 1px solid var(--border); box-shadow: var(--shadow); pointer-events: auto; }
 .menu button { all: unset; box-sizing: border-box; padding: 4px 9px; border-radius: 5px; cursor: pointer;
@@ -123,7 +133,7 @@ const Overlay = (() => {
 .pulse { position: absolute; box-sizing: border-box; border: 3px solid #fb8500; border-radius: 5px;
   pointer-events: none; animation: sr-pulse 1.2s ease-out forwards; }
 @keyframes sr-pulse { 0% { opacity: 1; transform: scale(1.03); } 100% { opacity: 0; transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .pulse { animation-duration: 0.01s; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation-duration: 0.01s; } .dragbox.pending { animation: none; } }
 `;
 
   /** @type {HTMLElement|null} */
@@ -337,7 +347,10 @@ const Overlay = (() => {
   // ---- single widgets in the 'ui' layer ---------------------------------------------------------------------
 
   /** @type {Record<string, HTMLElement|null>} */
-  const widgets = { glass: null, pickbox: null, chip: null, dragbox: null, chooser: null, toolbar: null, pop: null };
+  const widgets = {
+    glass: null, pickbox: null, chip: null, dragbox: null, snipbox: null, hint: null, chooser: null, toolbar: null,
+    pop: null,
+  };
 
   /** @param {string} name @param {string} cls @param {string} [tag] */
   function widget(name, cls, tag) {
@@ -484,11 +497,11 @@ const Overlay = (() => {
       },
     },
 
-    // pick mode
+    // pick and snip modes
     glass: {
       /**
        * @param {{move: (e: PointerEvent) => void, down: (e: PointerEvent) => void, up: (e: PointerEvent) => void,
-       *          leave: () => void}} h
+       *          leave: () => void, cancel?: (e: PointerEvent) => void}} h
        */
       on(h) {
         const el = widget('glass', 'glass');
@@ -496,6 +509,7 @@ const Overlay = (() => {
         el.onpointerdown = guard(h.down, 'glass-down');
         el.onpointerup = guard(h.up, 'glass-up');
         el.onpointerleave = guard(h.leave, 'glass-leave');
+        el.onpointercancel = h.cancel ? guard(h.cancel, 'glass-cancel') : null;
         el.oncontextmenu = (ev) => ev.preventDefault();
         return el;
       },
@@ -533,6 +547,41 @@ const Overlay = (() => {
       hide() {
         removeWidget('dragbox');
       },
+    },
+    /** The box of a finished snip while its crop is being rendered (never part of the crop: see 65-snip.js). */
+    snipBox: {
+      /** @param {{left:number, top:number, width:number, height:number}} r */
+      show(r) {
+        place(widget('snipbox', 'dragbox pending'), r.left, r.top, r.width, r.height);
+      },
+      hide() {
+        removeWidget('snipbox');
+      },
+    },
+    /** A one-line hint centred at the top of the viewport (e.g. how to finish or cancel snip mode). */
+    hint: {
+      /** @param {string} text */
+      show(text) {
+        const el = widget('hint', 'hint');
+        if (el.textContent !== text) el.textContent = text;
+        el.setAttribute('role', 'status');
+      },
+      hide() {
+        removeWidget('hint');
+      },
+    },
+    /**
+     * Parks a helper node inside the closed shadow root (hidden, zero-sized): it lives in this document but outside
+     * the author's DOM, so no page MutationObserver (nor the guest's own) sees it come and go. The caller removes it.
+     * @template {HTMLElement} T
+     * @param {T} node
+     * @returns {T}
+     */
+    scratch(node) {
+      if (!frame) throw new Error('overlay not mounted');
+      node.classList.add('scratch');
+      frame.appendChild(node);
+      return node;
     },
     chooser: {
       /**
@@ -621,6 +670,9 @@ const Overlay = (() => {
         chooser: menuInfo(widgets.chooser),
         pickBox: widgets.pickbox && { rect: r(widgets.pickbox), label: widgets.chip ? widgets.chip.textContent : '' },
         glass: !!widgets.glass,
+        dragBox: widgets.dragbox && r(widgets.dragbox),
+        snipBox: widgets.snipbox && r(widgets.snipbox),
+        hint: widgets.hint ? widgets.hint.textContent : null,
         popover: widgets.pop && { for: widgets.pop.dataset.for, text: widgets.pop.textContent,
           html: widgets.pop.innerHTML, rect: r(widgets.pop) },
       };

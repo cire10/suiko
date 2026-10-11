@@ -1,6 +1,8 @@
 // @ts-check
 // Helpers shared by the guest browser tests: open a fixture inside the two-origin harness, talk to the guest over
-// the harness port, wait for messages, inspect the overlay and drive selections / the mouse.
+// the harness port, wait for messages, inspect the overlay, drive selections / the mouse and decode PNG crops.
+
+import zlib from 'node:zlib';
 
 /** @typedef {import('playwright-core').Page} Page */
 /** @typedef {import('playwright-core').Frame} Frame */
@@ -147,4 +149,77 @@ export function pngSize(dataUrl) {
   const buf = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
   if (buf.toString('ascii', 1, 4) !== 'PNG') throw new Error('not a PNG');
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+/**
+ * Decodes a PNG data URL (8-bit RGB / RGBA, not interlaced: what canvas.toDataURL produces) to RGBA pixels.
+ * @param {string} dataUrl
+ * @returns {{ width: number, height: number, pixel: (x: number, y: number) => [number, number, number, number] }}
+ */
+export function decodePng(dataUrl) {
+  const buf = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  if (buf.toString('ascii', 1, 4) !== 'PNG') throw new Error('not a PNG');
+  let at = 8;
+  let width = 0;
+  let height = 0;
+  let colorType = 0;
+  /** @type {Buffer[]} */
+  const idat = [];
+  while (at < buf.length) {
+    const len = buf.readUInt32BE(at);
+    const type = buf.toString('ascii', at + 4, at + 8);
+    const data = buf.subarray(at + 8, at + 8 + len);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[12] !== 0) throw new Error('unsupported PNG: bit depth / interlace');
+      colorType = data[9];
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    at += 12 + len;
+  }
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
+  if (!channels) throw new Error(`unsupported PNG colour type ${colorType}`);
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? out[y * stride + i - channels] : 0;
+      const b = y > 0 ? out[(y - 1) * stride + i] : 0;
+      const c = i >= channels && y > 0 ? out[(y - 1) * stride + i - channels] : 0;
+      let v = line[i];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) {
+        throw new Error(`bad PNG filter ${filter}`);
+      }
+      out[y * stride + i] = v & 0xff;
+    }
+  }
+  return {
+    width,
+    height,
+    pixel(x, y) {
+      const px = Math.max(0, Math.min(width - 1, Math.round(x)));
+      const py = Math.max(0, Math.min(height - 1, Math.round(y)));
+      const o = py * stride + px * channels;
+      return [out[o], out[o + 1], out[o + 2], channels === 4 ? out[o + 3] : 255];
+    },
+  };
+}
+
+/** Whether an RGBA pixel is within `tol` of an RGB colour. @param {number[]} px @param {number[]} rgb @param {number} [tol] */
+export function near(px, rgb, tol = 24) {
+  return rgb.every((v, i) => Math.abs(px[i] - v) <= tol);
 }

@@ -11,9 +11,10 @@
 // Click: a table cell opens the [Cell][Row][Column][Table] chooser; a mermaid node yields an element capture with
 // svg {nodeId, label} on the stamped diagram element; anything else yields an element capture.
 // Shift-drag over an img/svg/canvas/video/iframe draws a region; the capture carries region {x,y,w,h} (fractions of
-// the content box of Capture.regionBase) and the action carries a PNG crop when the source is not tainted.
+// the border box of the stamped element the capture names, Capture.regionBox) and the action carries a PNG crop
+// when the source is not tainted.
 // Every completed pick posts `action {action:'comment', capture, rect, crop?}`, exits pick mode and posts
-// `toolChanged {tool:'select'}`.
+// `toolChanged {tool:'select'}`. Pick and snip mode (65-snip.js) are exclusive: Main.setTool switches between them.
 
 const Picker = (() => {
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -26,7 +27,7 @@ const Picker = (() => {
   let level = 0;
   /** @type {Element|null} */
   let hit = null;
-  /** @type {{media: Element, sridEl: Element|null, base: Element, x0: number, y0: number, x1: number, y1: number, pointerId: number}|null} */
+  /** @type {{media: Element, sridEl: Element|null, x0: number, y0: number, x1: number, y1: number, pointerId: number}|null} */
   let drag = null;
   /** @type {{x: number, y: number}|null} */
   let downAt = null;
@@ -160,8 +161,7 @@ const Picker = (() => {
     if (!media) return;
     const m = media.localName === 'svg' ? Capture.outerSvg(media) || media : media;
     const sridEl = closestSridEl(m);
-    drag = { media: m, sridEl, base: sridEl ? Capture.regionBase(sridEl) : m, x0: ev.clientX, y0: ev.clientY,
-      x1: ev.clientX, y1: ev.clientY, pointerId: ev.pointerId };
+    drag = { media: m, sridEl, x0: ev.clientX, y0: ev.clientY, x1: ev.clientX, y1: ev.clientY, pointerId: ev.pointerId };
     const glass = Overlay.glass.el;
     if (glass) {
       try {
@@ -199,14 +199,9 @@ const Picker = (() => {
    * @param {DOMRect} r  viewport rect of the drawn region
    */
   function finishRegion(d, r) {
-    const base = Capture.contentBox(d.base);
+    const base = Capture.regionBox(d.sridEl || d.media);
     if (base.width < 1 || base.height < 1) return;
-    const region = {
-      x: round4(clamp((r.left - base.left) / base.width, 0, 1)),
-      y: round4(clamp((r.top - base.top) / base.height, 0, 1)),
-      w: round4(clamp(r.width / base.width, 0, 1)),
-      h: round4(clamp(r.height / base.height, 0, 1)),
-    };
+    const region = Capture.regionOf(r, base);
     const capture = Capture.elementCapture(d.media, { sridEl: d.sridEl, region });
     capture.label += ` region x${Math.round(region.x * 100)}-${Math.round((region.x + region.w) * 100)}%` +
       ` y${Math.round(region.y * 100)}-${Math.round((region.y + region.h) * 100)}%`;

@@ -1,0 +1,39 @@
+SPECREVIEW FEEDBACK · kitchen-sink (docs/kitchen-sink.md) · review rv1 on v1 · CHANGES REQUESTED
+Line numbers = current file on disk (identical to v1).
+Reviewer summary: See the snips.
+4 threads need action (4 new): 1 blocking · 3 comments
+
+[t1] comment · L29-39 · §2 Architecture · snip (image + diagram + quote)
+  src> ![System overview](./img/arch.png "Architecture overview")
+  src> 
+  src> ```mermaid
+  src> ...(7 more lines)
+  src> > to the auth service for validation.
+  (src> is shortened or not unique; Read around L29-39 before editing)
+  image: <root>/.specreview/docs/kitchen-sink/attachments/a1.png  (Read it to see what the reviewer snipped)
+  Eric: The arrows contradict the note: the gateway does forward tokens.
+
+[t4] comment · L29 · §2 Architecture · <img alt="System overview"> region x40-62% y10-30%
+  src> ![System overview](./img/arch.png "Architecture overview")
+  crop: <root>/.specreview/docs/kitchen-sink/attachments/a4.png  (Read it to see the region)
+  Eric: Label this arrow.
+
+[t2] blocking · question · L31-36 · §2 Architecture · snip (diagram)
+  src> ```mermaid
+  src> flowchart LR
+  src>   Client[Client app] --> Gateway[API Gateway]
+  src>   Gateway --> Auth[Auth service]
+  src>   Auth --> Store[(Token store)]
+  src> ```
+  image: <root>/.specreview/docs/kitchen-sink/attachments/a2.png  (Read it to see what the reviewer snipped)
+  Eric: Is the gateway the only way in?
+
+[t3] comment · GENERAL
+  image: <root>/.specreview/docs/kitchen-sink/attachments/a3.png  (Read it to see the image the reviewer attached)
+  Eric: This is the login page today.
+
+LOCKED (agreed - do not modify): (none)
+DECISIONS to keep true: (none yet)
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
+  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+NEXT: edits -> specreview revise kitchen-sink --replies - (JSON, one entry per thread) -> specreview wait kitchen-sink (background)
