@@ -11,6 +11,8 @@
 //                                         (Bearer token, Origin check on non-GET, 401 without a token), plus
 //                                         POST .../snip/screen (a fake macOS picker: setScreenSnip picks its outcome)
 //                   /api/events           SSE (?k= token, Last-Event-ID / ?lastEventId= replay, reset, ping)
+//                   GET .../files, .../files/diff, .../files/source  code reviews (doc kind 'code', scenario
+//                                         'code', test/e2e/mock-code.mjs): 400 on any other doc, 422 on a bad query
 //   content origin  /c/<docKey>/<vN|live>/<doc.path>  the real render (WP2) with the guest bundle (WP6) inserted
 //                                         at guestInsertAt (data-sr-ui = the UI origin)
 //                   /c/<docKey>/<ver>/<asset>         fixture files (or a version's replaced asset bytes)
@@ -19,7 +21,7 @@
 //                   /__sr/<RV>/guest.js | static/* | vendor/*   guest, shell CSS / mermaid init, VENDOR_DOC
 //
 // Use in tests:   const mock = await startMockServer({ scenario: 'round2' }); ... mock.doc('kitchen-sink').revise(...)
-// Run by hand:    node test/e2e/mock-server.mjs [--scenario fresh|round2] [--port 5810]
+// Run by hand:    node test/e2e/mock-server.mjs [--scenario fresh|round2|code] [--port 5810]
 //                 (prints the review URL with its ?k= token)
 // Ports default to 0 (random); never the real daemon ports.
 
@@ -36,6 +38,7 @@ import { UI_DIR, uiIndex } from '../../src/ui/csp.js';
 import { setUiHeaders } from '../../src/daemon/security.js';
 import { isDocumentType } from '../../src/daemon/mime.js';
 import { FIXTURE_DIR, buildScenario, makePng } from './mock-data.mjs';
+import { buildCodeScenario } from './mock-code.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const PROTOCOL_FILE = join(ROOT, 'src', 'shared', 'protocol.js');
@@ -133,12 +136,13 @@ function safeJoin(root, rel) {
 
 /**
  * Starts the mock daemon.
- * @param {{ scenario?: 'fresh'|'round2', uiPort?: number, contentPort?: number, token?: string, quiet?: boolean }} [opts]
+ * @param {{ scenario?: 'fresh'|'round2'|'code', uiPort?: number, contentPort?: number, token?: string, quiet?: boolean }} [opts]
  */
 export async function startMockServer(opts = {}) {
   const token = opts.token || randomBytes(16).toString('hex');
   let acceptedToken = token;
-  const docs = buildScenario(opts.scenario || 'round2');
+  /** @type {any[]} MockDoc, or MockCodeDoc in the 'code' scenario (the same interface plus the code routes) */
+  const docs = opts.scenario === 'code' ? buildCodeScenario() : buildScenario(opts.scenario || 'round2');
   /** @type {Map<string, import('./mock-engine.mjs').MockDoc>} */
   const byKey = new Map();
   /** @type {Map<string, string>} */
@@ -215,7 +219,10 @@ export async function startMockServer(opts = {}) {
         res.write(`id: ${d.seq}\n\n`);
       }
       writeEvent(res, { type: 'presence', waiters: d.waiters }, d);
-      writeEvent(res, { type: 'working.changed', dirty: d.working.dirty, sha256: d.working.sha256 }, d);
+      writeEvent(res, {
+        type: 'working.changed', dirty: d.working.dirty, sha256: d.working.sha256,
+        ...(d.doc.kind === 'code' ? { missing: false, changedFiles: d.working.changedFiles } : {}),
+      }, d);
     }
     sseClients.add(client);
     req.on('close', () => sseClients.delete(client));
@@ -286,6 +293,7 @@ export async function startMockServer(opts = {}) {
       const from = Number(url.searchParams.get('from') || Math.max(1, (to === 'live' ? d.head : Number(to)) - 1));
       return b === 'source' ? d.sourceDiff(from, /** @type {any} */ (to)) : d.changes(from, /** @type {any} */ (to));
     }
+    if (method === 'GET' && a === 'files') return codeRoute(b, d, url);
     if (method === 'POST' && a === 'record') return d.recordWorking(String(body.summary || ''));
     if (method === 'POST' && a === 'attachments') return d.saveAttachment(body.dataUrl);
     if (method === 'POST' && a === 'fragment') return d.fragment(String(body.source || ''));
@@ -297,6 +305,45 @@ export async function startMockServer(opts = {}) {
     const err = /** @type {any} */ (new Error(`no route ${method} ${url.pathname}`));
     err.status = 404;
     throw err;
+  }
+
+  /**
+   * The code routes (code-contracts.md 11.2) with the daemon's validation: GET D/files (?v= or ?from=&to=),
+   * D/files/diff (?path=&v= or &from=&to=, optional &context=), D/files/source (?path=&v=&side=new|old).
+   * @param {string|undefined} sub undefined | 'diff' | 'source'
+   * @param {any} d
+   * @param {URL} url
+   */
+  function codeRoute(sub, d, url) {
+    const q = url.searchParams;
+    if (d.doc.kind !== 'code') throw Object.assign(new Error('not a code review'), { status: 400, code: 'BAD_REQUEST' });
+    /** @param {string} name */
+    const int = (name) => {
+      const raw = q.get(name);
+      if (raw == null || raw === '') return undefined;
+      if (!/^\d+$/.test(raw) || Number(raw) < 1) throw Object.assign(new Error(`${name} must be a version number`), { status: 422, code: 'VALIDATION' });
+      return Number(raw);
+    };
+    const v = int('v');
+    const from = int('from');
+    const to = int('to');
+    if (v != null && (from != null || to != null)) throw Object.assign(new Error('give v or from/to, not both'), { status: 422, code: 'VALIDATION' });
+    const range = from != null || to != null ? { from: from ?? Math.max(1, (to ?? d.head) - 1), to: to ?? d.head } : null;
+    if (sub === undefined) return d.files(range || { v: v ?? d.head });
+    const path = q.get('path');
+    if (!path) throw Object.assign(new Error('path is required'), { status: 422, code: 'VALIDATION' });
+    if (sub === 'diff') {
+      const rawCtx = q.get('context');
+      if (rawCtx != null && !/^\d{1,5}$/.test(rawCtx)) throw Object.assign(new Error('context must be a number of lines'), { status: 422, code: 'VALIDATION' });
+      const context = rawCtx == null ? undefined : Number(rawCtx);
+      return d.fileDiff(range ? { path, ...range, context } : { path, v: v ?? d.head, context });
+    }
+    if (sub === 'source') {
+      const side = q.get('side') ?? 'new';
+      if (side !== 'new' && side !== 'old') throw Object.assign(new Error('side must be new or old'), { status: 422, code: 'VALIDATION' });
+      return d.fileSource({ path, v: v ?? d.head, side });
+    }
+    throw Object.assign(new Error(`no route ${url.pathname}`), { status: 404 });
   }
 
   /**
@@ -353,6 +400,7 @@ export async function startMockServer(opts = {}) {
     if (method === 'GET' && url.pathname === '/api/docs') {
       sendJson(res, 200, docs.map((d) => ({
         ws: d.ws, root: FIXTURE_DIR, id: d.id, path: d.doc.path, title: d.doc.title, format: d.format, head: d.head,
+        kind: d.doc.kind || 'file', origin: d.doc.origin?.type ?? null,
         state: d.doc.state, openThreads: d.threads.filter((t) => t.status !== 'resolved').length,
         undelivered: d.reviews.filter((r) => !Object.keys(r.deliveredTo).length).length,
         listening: d.waiters.length > 0, final: d.doc.final,
@@ -472,6 +520,12 @@ export async function startMockServer(opts = {}) {
     const m = /^\/c\/([0-9a-f]+)\/(v\d+|live)\/(.+)$/.exec(p);
     const d = m ? byKey.get(m[1]) : null;
     if (!m || !d) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    if (d.doc.kind === 'code') {
+      // like the daemon: a code review has no content (only attachments, above)
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('not found');
       return;
