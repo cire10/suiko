@@ -61,6 +61,7 @@ export function ThreadPanel() {
 
   return html`<section class="thread-panel" data-testid=${TESTID.threadPanel} aria-label="Threads">
     <div class="panel-head">
+      <h2 class="panel-title">Threads</h2>
       <div class="filters" role="tablist" aria-label="Filter threads">
         ${FILTERS.map((f) => html`<button type="button" role="tab" class=${`filter ${s.filter === f.key ? 'active' : ''}`}
           aria-selected=${s.filter === f.key} data-filter=${f.key} onClick=${() => setFilter(f.key)}>

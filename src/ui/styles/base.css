@@ -20,8 +20,9 @@ html {
 body {
   background: var(--bg);
   color: var(--fg);
-  font: var(--fs) / 1.45 var(--font);
+  font: var(--fs) / 1.5 var(--font);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 #app,
@@ -46,6 +47,11 @@ h3 {
 
 a {
   color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 
 code,
@@ -60,11 +66,11 @@ kbd {
   display: inline-block;
   min-width: 1.6em;
   padding: 0 5px;
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 -1px 0 var(--border);
   background: var(--bg-subtle);
-  color: var(--fg);
+  color: var(--fg-muted);
   font-size: var(--fs-xs);
   line-height: 1.6;
   text-align: center;
@@ -105,10 +111,11 @@ select,
   font: inherit;
   color: var(--fg);
   background: var(--bg);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: 5px 12px;
   max-width: 100%;
+  box-shadow: inset 0 1px 0 rgba(208, 215, 222, 0.2);
 }
 
 textarea {
@@ -124,15 +131,18 @@ input[type="text"] {
 
 select,
 .select {
-  padding: 4px 6px;
+  padding: 3px 8px;
   min-width: 0;
+  background-color: var(--btn-bg);
+  font-weight: 500;
+  cursor: pointer;
 }
 
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: 0;
+  outline-offset: -1px;
   border-color: var(--focus);
 }
 
@@ -145,18 +155,23 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--btn-border);
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: var(--btn-bg);
   color: var(--fg);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
-  line-height: 1.3;
+  font-size: var(--fs);
+  font-weight: 500;
+  line-height: 20px;
   white-space: nowrap;
+  transition: background-color 80ms cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--bg-subtle);
+  background: var(--btn-hover);
 }
 
 .btn:disabled {
@@ -165,24 +180,25 @@ button {
 }
 
 .btn-sm {
-  padding: 3px 9px;
-  font-size: var(--fs-sm);
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
 }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
+  background: var(--primary);
+  border-color: var(--primary-border);
+  color: var(--primary-fg);
   font-weight: 600;
+  box-shadow: 0 1px 0 rgba(31, 35, 40, 0.1);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--primary-hover);
+  border-color: var(--primary-border);
 }
 
 .btn-ok {
-  border-color: var(--ok);
   color: var(--ok);
   font-weight: 600;
 }
@@ -192,12 +208,18 @@ button {
   color: var(--danger);
 }
 
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -208,7 +230,7 @@ button {
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: var(--bg-muted);
+  background: var(--bg-hover);
   color: var(--fg);
 }
 
@@ -216,7 +238,7 @@ button {
 .icon-btn[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: var(--accent);
+  border-color: var(--accent-muted);
 }
 
 .icon-btn:disabled {
@@ -244,6 +266,8 @@ button {
   border-radius: 3px;
   font-size: 9px;
   line-height: 1.25;
+  box-shadow: none;
+  background: var(--bg);
   pointer-events: none;
 }
 
@@ -254,8 +278,12 @@ button {
   color: var(--accent);
   cursor: pointer;
   font-size: var(--fs-sm);
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
 }
 
 .link-btn.active {
@@ -271,12 +299,15 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 20px;
   padding: 0 7px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
   font-size: var(--fs-xs);
-  line-height: 1.7;
-  font-weight: 600;
+  line-height: 18px;
+  font-weight: 500;
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -288,27 +319,48 @@ button {
   font-family: inherit;
 }
 
-.tone-muted { background: var(--bg-muted); color: var(--fg-muted); }
-.tone-accent { background: var(--accent-soft); color: var(--accent); }
-.tone-ok { background: var(--ok-soft); color: var(--ok); }
-.tone-warn { background: var(--warn-soft); color: var(--warn); }
-.tone-attn { background: var(--attn-soft); color: var(--attn); }
-.tone-danger { background: var(--danger-soft); color: var(--danger); }
-.tone-info { background: var(--info-soft); color: var(--info); }
-.tone-lock { background: var(--lock-soft); color: var(--lock); }
-.tone-draft { background: var(--draft-soft); color: var(--draft); }
+/* Primer "Label": an outline in the meaning colour, no fill. Colour is reserved for state, so a card shows at most
+   one or two of these instead of a row of tinted pills. */
+.tone-muted { border-color: var(--border); color: var(--fg-muted); }
+.tone-accent { border-color: var(--accent); color: var(--accent); }
+.tone-ok { border-color: var(--ok); color: var(--ok); }
+.tone-warn { border-color: var(--warn); color: var(--warn); }
+.tone-attn { border-color: var(--attn); color: var(--attn); }
+.tone-danger { border-color: var(--danger); color: var(--danger); }
+.tone-info { border-color: var(--info); color: var(--info); }
+.tone-lock { border-color: var(--lock); color: var(--lock); }
+.tone-draft { border-color: var(--draft); color: var(--draft); }
 
 .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
+  min-width: 20px;
   height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
   flex: 0 0 auto;
+}
+
+/* Primer "Counter": a filled neutral pill for numbers; tones tint it only where the number carries meaning. */
+.badge { background: var(--bg-selected); color: var(--fg); border: 0; }
+.badge.tone-accent { background: var(--accent-soft); color: var(--accent); }
+.badge.tone-ok { background: var(--ok-soft); color: var(--ok); }
+.badge.tone-warn { background: var(--warn-soft); color: var(--warn); }
+.badge.tone-lock { background: var(--lock-soft); color: var(--lock); }
+
+/* Thread ids that jump to a thread read as references (#t4 style), not as status. */
+.chip-btn.tone-accent {
+  border-color: transparent;
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.chip-btn.tone-accent:hover {
+  text-decoration: underline;
 }
 
 .check {
@@ -352,22 +404,23 @@ button {
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md pre, .md blockquote { margin: 0.4em 0; }
 .md ul, .md ol { padding-left: 1.4em; }
-.md code { background: var(--bg-muted); padding: 0 3px; border-radius: 3px; }
-.md pre { background: var(--bg-inset); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; }
+.md code { background: var(--bg-hover); padding: 0.2em 0.4em; border-radius: var(--radius-xs); font-size: 85%; }
+.md pre { background: var(--bg-subtle); padding: 8px 12px; border-radius: var(--radius-sm); overflow-x: auto; }
 .md pre code { background: none; padding: 0; }
-.md blockquote { border-left: 3px solid var(--border-strong); padding-left: 8px; color: var(--fg-muted); }
+.md blockquote { border-left: 0.25em solid var(--border); padding-left: 1em; color: var(--fg-muted); }
 .md img { max-width: 100%; height: auto; }
 .md table { border-collapse: collapse; display: block; overflow-x: auto; }
-.md th, .md td { border: 1px solid var(--border); padding: 2px 6px; }
+.md th, .md td { border: 1px solid var(--border); padding: 4px 10px; }
 
 /* Word diff */
 .worddiff {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: var(--fs-sm);
-  background: var(--bg-inset);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: 6px 10px;
 }
 
 .worddiff ins,

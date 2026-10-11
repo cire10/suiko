@@ -103,6 +103,7 @@ export function ThreadCard({ t, ds, version, agent, focused, reply, position, bu
     <ol class="comments">
       ${(t.comments || []).map((/** @type {any} */ c) => html`<li key=${c.id} class=${`comment ${isAgent(c.by) ? 'by-agent' : 'by-human'}`}>
         <div class="comment-head">
+          <span class="avatar" aria-hidden="true">${String(actorLabel(c.by) || '?').slice(0, 1)}</span>
           <strong>${actorLabel(c.by)}</strong>
           ${c.version ? html`<span class="vtag">v${c.version}</span>` : null}
           ${c.status ? html`<span class=${`stag stag-${c.status}`}>${c.status.replace('_', ' ')}</span>` : null}

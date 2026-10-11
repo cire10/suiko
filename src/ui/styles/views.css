@@ -10,9 +10,10 @@
 
 .changes-head {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 8px;
+  padding: 12px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .changes-title {
@@ -31,7 +32,7 @@
 
 .progress {
   margin-left: auto;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .guard-badges {
@@ -46,15 +47,14 @@
 }
 
 .change-group {
-  padding: 4px 10px 8px;
+  padding: 4px 12px 8px;
 }
 
 .group-title {
   font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-subtle);
-  margin: 8px 0 4px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 12px 0 6px;
   overflow-wrap: anywhere;
 }
 
@@ -63,25 +63,24 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
+/* One change: a file-diff-like box; the +/~/- mark carries the kind, the box stays neutral. */
 .change-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 8px;
+  gap: 4px 8px;
   align-items: start;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--warn);
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
-.change-item.op-add { border-left-color: var(--ok); }
-.change-item.op-del { border-left-color: var(--danger); }
-.change-item.active { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
-.change-item.seen { opacity: 0.7; }
+.change-item:hover { border-color: var(--border-strong); }
+.change-item.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.change-item.seen { opacity: 0.65; }
 
 .seen-box {
   margin-top: 4px;
@@ -107,8 +106,9 @@
 }
 
 .op-badge {
+  font-family: var(--mono);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .op-badge.op-add { color: var(--ok); }
@@ -206,10 +206,9 @@
 
 .result {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--ok);
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  margin-bottom: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
   background: var(--bg);
 }
 
@@ -238,30 +237,35 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 6px 12px;
-  background: var(--panel);
+  padding: 8px 16px;
+  background: var(--header);
   border-bottom: 1px solid var(--border);
 }
 
 .seg {
   display: inline-flex;
-  border: 1px solid var(--border-strong);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  background: var(--bg-muted);
 }
 
 .seg button {
-  border: 0;
-  background: var(--bg);
-  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  padding: 1px 10px;
   cursor: pointer;
   font-size: var(--fs-sm);
+  color: var(--fg-muted);
 }
 
 .seg button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 650;
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .sel-bar {
@@ -276,8 +280,8 @@
   width: 100%;
   table-layout: fixed;
   font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .code-table td {
@@ -291,6 +295,7 @@
   color: var(--fg-subtle);
   user-select: none;
   padding-right: 4px;
+  background: var(--bg);
 }
 
 .code-table .ln.old {
@@ -360,9 +365,11 @@
 }
 
 .hunk-head {
-  padding: 3px 12px;
-  background: var(--bg-subtle);
+  padding: 4px 12px;
+  background: var(--accent-soft);
   color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -379,8 +386,9 @@
 }
 
 .view-title {
-  font-size: 16px;
-  margin-bottom: 12px;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -419,10 +427,10 @@
 .tl-marker {
   width: 14px;
   height: 14px;
-  margin-top: 3px;
+  margin-top: 10px;
   margin-left: 2px;
   border-radius: 50%;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--border-strong);
   background: var(--bg);
   position: relative;
   z-index: 1;
@@ -430,10 +438,10 @@
 
 .tl-review .tl-marker {
   border-color: var(--info);
-  border-radius: 3px;
 }
 
 .tl-item.current .tl-marker {
+  border-color: var(--accent);
   background: var(--accent);
 }
 
@@ -441,8 +449,8 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
-  background: var(--panel);
+  padding: 10px 12px;
+  background: var(--bg);
 }
 
 .tl-head {

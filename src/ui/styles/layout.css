@@ -17,9 +17,9 @@
 
 .topbar {
   flex: 0 0 auto;
-  background: var(--panel);
+  background: var(--header);
   border-bottom: 1px solid var(--border);
-  padding: 6px 12px 4px;
+  padding: 8px 16px;
   min-width: 0;
 }
 
@@ -33,7 +33,7 @@
 }
 
 .tb-sub {
-  margin-top: 4px;
+  margin-top: 8px;
   font-size: var(--fs-sm);
 }
 
@@ -43,17 +43,29 @@
   gap: 6px;
   color: var(--fg-muted);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 400;
   flex: 0 0 auto;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-sm);
 }
 
 .brand:hover {
-  color: var(--accent);
+  color: var(--fg);
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+/* "SpecReview / Notification Service": a GitHub-style breadcrumb, the slash between brand and title. */
+.brand::after {
+  content: "/";
+  margin-left: 4px;
+  color: var(--fg-subtle);
 }
 
 .doc-name {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 600;
   min-width: 0;
   max-width: 34ch;
   overflow: hidden;
@@ -62,32 +74,39 @@
   flex: 0 1 auto;
 }
 
+/* Primer SegmentedControl: a sunken track with the current mode raised. */
 .mode-tabs {
   display: inline-flex;
-  border: 1px solid var(--border-strong);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  background: var(--bg-muted);
   flex: 0 0 auto;
 }
 
 .mode-tabs button {
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: var(--bg);
-  padding: 4px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  padding: 2px 12px;
   cursor: pointer;
   font-size: var(--fs-sm);
+  line-height: 20px;
   color: var(--fg-muted);
 }
 
-.mode-tabs button:last-child {
-  border-right: 0;
+.mode-tabs button:hover:not(.active) {
+  color: var(--fg);
+  background: var(--bg-hover);
 }
 
 .mode-tabs button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 650;
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.08);
 }
 
 .mode-select {
@@ -106,15 +125,20 @@
   display: inline-flex;
   gap: 2px;
   flex: 0 0 auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
 }
 
+/* Agent presence: a status dot and plain text, like a CI check line, not a pill. */
 .presence {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 9px;
-  border-radius: 999px;
-  font-weight: 600;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -122,11 +146,17 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--fg-subtle);
 }
 
+.presence.tone-ok .dot { background: var(--ok); }
+.presence.tone-warn .dot { background: var(--warn); }
+.presence.tone-attn .dot { background: var(--attn); }
+.presence.tone-danger .dot { background: var(--danger); }
+.presence.tone-accent .dot { background: var(--accent); }
+
 .presence.tone-ok .dot {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+  box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
 .round-status {
@@ -153,12 +183,13 @@
   flex: 0 0 auto;
 }
 
+/* Primer "Flash" (full-width): a faint tint with a coloured hairline, text stays in the body colour. */
 .banner {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 12px;
-  padding: 6px 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
 }
@@ -170,10 +201,10 @@
   align-items: center;
 }
 
-.banner-warn { background: var(--warn-soft); color: var(--fg); }
-.banner-info { background: var(--accent-soft); color: var(--fg); }
-.banner-ok { background: var(--ok-soft); color: var(--fg); }
-.banner-muted { background: var(--bg-muted); color: var(--fg-muted); }
+.banner-warn { background: var(--warn-soft); color: var(--fg); border-bottom-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.banner-info { background: var(--accent-soft); color: var(--fg); border-bottom-color: var(--accent-muted); }
+.banner-ok { background: var(--ok-soft); color: var(--fg); border-bottom-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.banner-muted { background: var(--bg-subtle); color: var(--fg-muted); }
 
 .banner-conn {
   position: fixed;
@@ -237,6 +268,11 @@
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--panel);
+  scrollbar-width: thin;
+}
+
+.rail-right {
+  background: var(--bg-subtle);
 }
 
 .rail-left {
@@ -246,6 +282,7 @@
 .rail-right {
   border-left: 1px solid var(--border);
 }
+
 
 .center {
   min-width: 0;
@@ -310,9 +347,9 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 3px 12px;
+  padding: 4px 16px;
   border-top: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--header);
   color: var(--fg-muted);
   font-size: var(--fs-xs);
   white-space: nowrap;
