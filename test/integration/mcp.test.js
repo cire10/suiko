@@ -81,7 +81,7 @@ describe('mcp (in-process)', () => {
     const names = res.result.tools.map((/** @type {any} */ t) => t.name).sort();
     const expected = [
       'specreview_apply', 'specreview_ask', 'specreview_diff', 'specreview_edit', 'specreview_feedback', 'specreview_final',
-      'specreview_log', 'specreview_open', 'specreview_reanchor', 'specreview_reply', 'specreview_revert', 'specreview_revise',
+      'specreview_log', 'specreview_open', 'specreview_reanchor', 'specreview_reply', 'specreview_revert', 'specreview_review', 'specreview_revise',
       'specreview_show', 'specreview_status', 'specreview_threads', 'specreview_wait',
     ];
     assert.deepEqual(names, expected);

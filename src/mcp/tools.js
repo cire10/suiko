@@ -9,6 +9,7 @@ import * as z from 'zod/v4';
 import { AGENT_REPLY_STATUS } from '../shared/protocol.js';
 import { normalizeAt, parseSingleRange, parseVersionRef } from '../cli/args.js';
 import { buildReviseInput } from '../cli/commands/revise.js';
+import { reviewInput } from '../cli/commands/review.js';
 import { OtherSchema, ThreadReplySchema } from '../cli/schemas.js';
 import { defaultDocId } from '../cli/runtime.js';
 
@@ -44,6 +45,24 @@ export const TOOLS = [
     schema: z.object({ path: z.string().min(1).describe('Path of the .md/.html spec'), title: z.string().optional(), workspace: workspaceArg }),
     command: 'open',
     toInput: async (a) => ({ paths: [a.path], title: a.title }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'specreview_review',
+    title: 'Open a code review of your changes',
+    description:
+      'Snapshot your changes in the git repository as a code review (round v1, or a new round when the files changed since the last one), make sure the local review server runs, open the review UI, and return its URL. mode: since-base (default: merge-base with the default branch up to the working tree, untracked included), uncommitted, staged, branch (with base: committed changes only), range (with range "A..B" or "A...B") or commit (with commit). Then wait for the review; after editing the files, record the round with specreview_revise.',
+    schema: z.object({
+      mode: z.enum(['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit']).optional().describe('Default: since-base, else uncommitted'),
+      base: z.string().min(1).optional().describe('Base ref for since-base / branch, e.g. "main"'),
+      range: z.string().min(1).optional().describe('"A..B" or "A...B" (mode range)'),
+      commit: z.string().min(1).optional().describe('Commit to review (mode commit)'),
+      paths: z.array(z.string().min(1)).optional().describe('Limit to these pathspecs'),
+      title: z.string().optional(),
+      workspace: workspaceArg,
+    }),
+    command: 'review',
+    toInput: async (a) => ({ input: reviewInput({ mode: a.mode, base: a.base, range: a.range, commit: a.commit, paths: a.paths }), title: a.title }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
@@ -120,7 +139,7 @@ export const TOOLS = [
       thread_id: threadId,
       body: z.string().min(1).describe('Markdown reply'),
       status: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_REPLY_STATUS])).optional(),
-      at: z.string().optional().describe('Lines you changed for it, e.g. "L42-46"'),
+      at: z.string().optional().describe('Lines you changed for it, e.g. "L42-46" (code reviews: "src/a.js:L42-46")'),
       decision: z.string().optional(),
       workspace: workspaceArg,
     }),

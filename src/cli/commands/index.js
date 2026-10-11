@@ -9,6 +9,7 @@
 /** @type {Record<string, { load: () => Promise<any>, summary: string, group: string }>} */
 export const COMMANDS = {
   open: { load: () => import('./open.js'), summary: 'Track a spec (a file, a folder, or - for stdin), start the server, print the URL', group: 'loop' },
+  review: { load: () => import('./review.js'), summary: 'Open a code review of your changes (since-base, uncommitted, staged, range, commit)', group: 'loop' },
   wait: { load: () => import('./wait.js'), summary: 'Block until the reviewer submits a review; print the feedback packet', group: 'loop' },
   feedback: { load: () => import('./feedback.js'), summary: 'Print the feedback packet now (marks it delivered unless --peek)', group: 'loop' },
   apply: { load: () => import('./apply.js'), summary: 'Apply suggestion threads verbatim to the working copy', group: 'loop' },

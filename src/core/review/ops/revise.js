@@ -27,6 +27,8 @@ import { docRefFor, isCode, isSnapshot, reviseHint, snapshotNoun } from '../../s
 import { recordCodeRound, reviseCode } from '../../code/round.js';
 import { applyCodeSuggestions } from '../../code/apply.js';
 import { decodeText, encodeText } from '../../util/stable-read.js';
+import { isCodeAt, isCodeOtherAt } from '../../util/code-at.js';
+import { parseLinesArg } from '../../util/lines-arg.js';
 import { sha256 } from '../../util/hash.js';
 
 /**
@@ -76,6 +78,34 @@ export function parseReviseInput(input) {
 }
 
 /**
+ * A spec or snapshot doc takes lines of its own text in `at` ('L42-46'); the repo-file forms ('src/a.js:L42',
+ * 'src/a.js#h3') are for code reviews. Refused before anything is written (exit 1).
+ * @param {{ threads: Record<string, { at?: string }>, other: Array<{ at: string }> }} p
+ */
+function refuseCodeAtForms(p) {
+  const hint = 'file paths are for code reviews; give lines of the spec, e.g. "L42-46"';
+  for (const [tid, r] of Object.entries(p.threads)) {
+    if (r.at !== undefined && !linesOk(r.at) && isCodeAt(r.at)) throw new UsageError(`threads.${tid}.at ${JSON.stringify(r.at)}: ${hint}`);
+  }
+  p.other.forEach((o, i) => {
+    if (!/^(del:)?h\d+$/.test(String(o.at).trim()) && !linesOk(o.at) && isCodeOtherAt(o.at)) throw new UsageError(`other.${i}.at ${JSON.stringify(o.at)}: ${hint}`);
+  });
+}
+
+/**
+ * @param {unknown} s
+ * @returns {boolean}
+ */
+function linesOk(s) {
+  try {
+    parseLinesArg(String(s));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Records a revision. A file doc records its working copy. A snapshot doc (see store/snapshot.js) has no working
  * file: the new version's bytes come from `snapshot.source` (`revise --source`, the plan gate, re-piped text), its
  * guards only warn (their errors are stored as warnings, never refuse), and the manifest keeps `snapshot.origin`.
@@ -106,6 +136,7 @@ export async function revise(ctx, ref, input, snapshot = null) {
       if (!snap && snapshot) {
         throw new UsageError(`${doc.id} tracks the file ${doc.path}: edit the file, then run revise without --source`, { details: { doc: doc.id } });
       }
+      refuseCodeAtForms(p);
       for (const tid of Object.keys(p.threads)) await requireThread(ctx, doc.id, tid);
       for (const lid of Object.keys(p.breakLocks)) {
         if (!(await ctx.store.getLock(doc.id, lid))) throw new UsageError(`--break-lock ${lid}: no such lock`);
