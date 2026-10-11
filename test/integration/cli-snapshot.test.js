@@ -103,7 +103,7 @@ describe('open -', () => {
     const b = await cli(['open', '-', '--title', 'Draft answer'], { input: 'Some text.\n' });
     assert.equal(a.code, 0, a.stderr);
     assert.equal(b.code, 0, b.stderr);
-    assert.match(a.stdout, /^specreview: tracking piped text as "draft-answer" /);
+    assert.match(a.stdout, /^specreview: tracking piped text as "draft-answer" \(markdown, 1 line\) · recorded v1$/m, 'one line, not "1 lines"');
     assert.match(b.stdout, /^specreview: tracking piped text as "draft-answer-2" /);
   });
 
@@ -141,9 +141,9 @@ describe('open <dir>', () => {
     assert.equal(r.code, 0, r.stderr);
     const lines = r.stdout.trimEnd().split('\n');
     assert.deepEqual(lines.slice(0, 4), [
-      'specreview: tracking specs/a.md as "a" (markdown, 1 lines) · recorded v1',
-      'specreview: tracking specs/sub/b.markdown as "b" (markdown, 1 lines) · recorded v1',
-      'specreview: tracking specs/sub/c.html as "c" (html, 1 lines) · recorded v1',
+      'specreview: tracking specs/a.md as "a" (markdown, 1 line) · recorded v1',
+      'specreview: tracking specs/sub/b.markdown as "b" (markdown, 1 line) · recorded v1',
+      'specreview: tracking specs/sub/c.html as "c" (html, 1 line) · recorded v1',
       // sub/link-in.md resolves to a.md, which is tracked once
       'review UI (all docs): http://127.0.0.1:5873/?k=tok',
     ]);
@@ -190,9 +190,9 @@ describe('open <dir>: workspaces, symlinks, overlaps, dirty docs', () => {
     assert.deepEqual(stores, ['docs']);
     const lines = r.stdout.trimEnd().split('\n');
     assert.deepEqual(lines.slice(0, 3), [
-      'specreview: tracking a/x.md as "x" (markdown, 1 lines) · recorded v1',
-      'specreview: tracking b/y.md as "y" (markdown, 1 lines) · recorded v1',
-      'specreview: tracking z.md as "z" (markdown, 1 lines) · recorded v1',
+      'specreview: tracking a/x.md as "x" (markdown, 1 line) · recorded v1',
+      'specreview: tracking b/y.md as "y" (markdown, 1 line) · recorded v1',
+      'specreview: tracking z.md as "z" (markdown, 1 line) · recorded v1',
     ]);
     assert.ok(lines.includes('next: run `specreview wait --all --workspace docs` in the background'), r.stdout);
     assert.equal(lines.filter((l) => l.startsWith('created ')).length, 1);
