@@ -381,6 +381,10 @@ export class Repo {
       let copied = false;
       try {
         await fsp.copyFile(real, idx);
+        // keep the real index's timestamps: git's racy-entry check compares file mtimes with the index's own mtime,
+        // and a fresh copy (newer) would make a same-size edit made in the index's second look unchanged
+        const st = await fsp.stat(real);
+        await fsp.utimes(idx, st.atime, st.mtime);
         copied = true;
       } catch (err) {
         if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
