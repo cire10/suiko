@@ -453,16 +453,20 @@ describe('plan-gate: the plan review belongs to the gate', () => {
     assert.equal(fs.existsSync(path.join(elsewhere, '.specreview')), false);
   });
 
-  test('the plugin loads the gate from hooks/plan-gate.json; hooks/hooks.json (also what `install claude --with-hooks` copies) has no blocking gate', () => {
+  test('the plugin registers the gate in hooks/hooks.json next to the other hooks; install claude --with-hooks leaves it out unless --with-plan-gate', async () => {
     const plugin = path.resolve(path.dirname(BIN), '..', 'integrations', 'claude-code');
     const manifest = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
-    assert.equal(manifest.hooks, './hooks/plan-gate.json');
-    const gateHooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks', 'plan-gate.json'), 'utf8'));
-    assert.deepEqual(gateHooks.hooks, {
-      PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: 'specreview plan-gate', timeout: 345600 }] }],
-    });
+    assert.equal(manifest.hooks, undefined, 'hooks/hooks.json is loaded by default; no extra hook file');
     const hooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks', 'hooks.json'), 'utf8'));
-    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PreToolUse', 'UserPromptSubmit']);
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PermissionRequest', 'PreToolUse', 'UserPromptSubmit']);
+    assert.deepEqual(hooks.hooks.PermissionRequest, [
+      { matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: 'specreview plan-gate', timeout: 345600 }] },
+    ]);
+    const { hookEntries } = await import('../../src/cli/install.js');
+    assert.equal(hookEntries({ execPath: '/n', binPath: '/b.js', hooks: true }).PermissionRequest, undefined);
+    const withGate = hookEntries({ execPath: '/n', binPath: '/b.js', hooks: true, planGate: true });
+    assert.equal(withGate.PermissionRequest.length, 1);
+    assert.match(withGate.PermissionRequest[0].hooks[0].command, /"\/n" "\/b\.js" plan-gate$/);
   });
 });
 

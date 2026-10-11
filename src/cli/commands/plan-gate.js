@@ -1,6 +1,6 @@
 // @ts-check
 // `specreview plan-gate [--timeout 30m] [--browser system|none]`: the Claude Code plan-mode gate, run as a
-// PermissionRequest hook with matcher ExitPlanMode (integrations/claude-code/hooks/plan-gate.json, timeout 345600 s).
+// PermissionRequest hook with matcher ExitPlanMode (integrations/claude-code/hooks/hooks.json, timeout 345600 s).
 //
 // 1. Reads the hook JSON on stdin ({session_id, cwd, tool_name: "ExitPlanMode", tool_input: {plan, planFilePath}}).
 //    The plan text is the plan file (tool_input.planFilePath, read only when it is an absolute path to a regular .md
