@@ -19,7 +19,9 @@
 //     DomTarget {kind:'element', srid: containerSrid, region} is drawn exactly where the reviewer dragged.
 //   - text: the visible rendered text inside the box (TEXT_EXCLUDE walk of the container, or of the document; each
 //     character counts when the centre of its Range rect is inside the box), whitespace collapsed, gaps read as one
-//     space, at most SNIP.maxText characters.
+//     space, zero-width characters dropped, at most SNIP.maxText characters. KaTeX math the box touches reads as its
+//     TeX source ($...$, or $$...$$ for display math) from the MathML annotation: the HTML rendering's text is in
+//     layout order (a fraction's denominator before its numerator) and full of zero-width struts.
 //   - label: e.g. 'area in "2. Request flow" (paragraph + figure)' - the heading inside the box ("over"), else the
 //     heading the area sits under ("in"), plus what the box covers: a single block, or the blocks of a single
 //     table / figure / diagram, named by Capture.labelFor; else counts ("2 headings + paragraph").
@@ -53,6 +55,8 @@ const Snip = (() => {
   const MAX_CROP_CHARS = 6500000;
   /** Upper bound of per-character Range probes for text the box cuts through. */
   const MAX_CHAR_PROBES = 40000;
+  /** Zero-width characters (KaTeX struts, joiners, BOM) left out of the snip text. */
+  const ZERO_WIDTH = new Set([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]);
   const EDGE_PX = 28;
   const MAX_AUTOSCROLL = 24;
   const VENDOR_PATH = 'vendor/modern-screenshot/index.mjs';
@@ -215,6 +219,8 @@ const Snip = (() => {
     const range = document.createRange();
     /** @type {Map<Element, boolean>} */
     const shown = new Map();
+    /** @type {Set<Element>} KaTeX elements already read as TeX */
+    const tex = new Set();
     /** @param {Text} t */
     const visible = (t) => {
       const p = t.parentElement;
@@ -236,13 +242,33 @@ const Snip = (() => {
       out.push(s);
       len += s.length;
     };
+    // a block boundary waits for the next text: inside a formula already read as TeX it is layout, not a gap
+    let sep = false;
     for (const seg of index.segs) {
       if (len > SNIP.maxText) break;
       if (!seg.node) {
-        gap = true;
+        sep = true;
         continue;
       }
       const node = seg.node;
+      const math = node.parentElement?.closest('.katex');
+      if (math && tex.has(math)) {
+        sep = false;
+        continue;
+      }
+      if (sep) gap = true;
+      sep = false;
+      const source = math ? texOf(math) : '';
+      if (math && source) {
+        // the whole formula once, if any of it shows in the box; spacing comes from the text around it
+        tex.add(math);
+        if (visible(node) && intersects(math.getBoundingClientRect(), box)) {
+          push(math.closest('.katex-display') || math.querySelector('math[display="block"]') ? `$$${source}$$` : `$${source}$`);
+        } else {
+          gap = true;
+        }
+        continue;
+      }
       const data = node.data;
       if (!data || !visible(node)) {
         gap = true;
@@ -250,7 +276,7 @@ const Snip = (() => {
       }
       range.selectNodeContents(node);
       const rects = [...range.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
-      if (!rects.some((r) => r.right > box.left && r.left < box.right && r.bottom > box.top && r.top < box.bottom)) {
+      if (!rects.some((r) => intersects(r, box))) {
         gap = true;
         continue;
       }
@@ -262,6 +288,7 @@ const Snip = (() => {
           gap = true;
           continue;
         }
+        if (ZERO_WIDTH.has(c)) continue;
         const n = c >= 0xd800 && c <= 0xdbff && i + 1 < data.length ? 2 : 1;
         let hit = whole;
         if (!whole && probes++ < MAX_CHAR_PROBES) {
@@ -279,6 +306,20 @@ const Snip = (() => {
     }
     range.detach();
     return clip(out.join(''), SNIP.maxText);
+  }
+
+  /** @param {{left:number, right:number, top:number, bottom:number}} r @param {Box} box */
+  function intersects(r, box) {
+    return r.right > box.left && r.left < box.right && r.bottom > box.top && r.top < box.bottom;
+  }
+
+  /**
+   * The TeX source of a rendered KaTeX element (its MathML annotation), whitespace collapsed; '' when it has none.
+   * @param {Element} math  a .katex element
+   */
+  function texOf(math) {
+    const a = math.querySelector('annotation[encoding="application/x-tex"]');
+    return (a?.textContent ?? '').replace(/\s+/g, ' ').trim();
   }
 
   /** What a leaf block counts as in the label: [noun key, unit element]. @param {Element} leaf */

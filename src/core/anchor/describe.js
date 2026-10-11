@@ -31,7 +31,7 @@
 
 import { LIMITS } from '../../shared/protocol.js';
 import { offsetMapper } from '../diff/index.js';
-import { lineIndex } from '../text/index.js';
+import { lineIndex, widenQuote } from '../text/index.js';
 import { snipLabel } from './snip.js';
 import { assetPathOf, oneLine } from './util.js';
 
@@ -97,7 +97,7 @@ export function describeAnchor(anchor, opts) {
         v: lk.v,
         lines: [lk.src.startLine, lk.src.endLine],
         section: [...(lk.section ?? [])],
-        text: oneLine(lk.quote?.exact || lk.src.text, 60),
+        text: oneLine(lk.quote?.exact ? quoteText(lk) : lk.src.text, 60),
       };
     }
     return base;
@@ -229,12 +229,12 @@ function onOf(anchor) {
   const snipText = /** @type {any} */ (last).snip?.text;
   switch (/** @type {string} */ (last.kind)) {
     case 'snip':
-      return snipText ? oneLine(snipText, ON_CHARS) : null;
+      return snipText ? oneLine(snipOn(snipText), ON_CHARS) : null;
     case 'doc':
       // a GENERAL anchor made from a selection of generated text outside every source element keeps its quote (a
       // snip over nothing stamped keeps the text inside its box)
-      if (last.quote?.exact) return oneLine(last.quote.exact, ON_CHARS);
-      return snipText ? oneLine(snipText, ON_CHARS) : null;
+      if (last.quote?.exact) return oneLine(quoteText(last), ON_CHARS);
+      return snipText ? oneLine(snipOn(snipText), ON_CHARS) : null;
     case 'section':
       return null;
     case 'cell':
@@ -245,8 +245,24 @@ function onOf(anchor) {
       return t ? oneLine(t, ON_CHARS) : null;
     }
     default:
-      return last.quote?.exact ? oneLine(last.quote.exact, ON_CHARS) : null;
+      return last.quote?.exact ? oneLine(quoteText(last), ON_CHARS) : null;
   }
+}
+
+/**
+ * Snips made before the guest dropped zero-width characters (KaTeX struts) can still hold them.
+ * @param {string} text
+ */
+function snipOn(text) {
+  return text.replace(/[\u200b-\u200d\u2060\ufeff]/g, '');
+}
+
+/**
+ * The rendered quote, widened to whole words where the source shows the selection cut a word (display only).
+ * @param {Pick<Anchor, 'quote' | 'src'>} a
+ */
+export function quoteText(a) {
+  return widenQuote(a.quote, a.src);
 }
 
 // ------------------------------------------------------------------------------------------- working-copy range

@@ -366,7 +366,8 @@ function formatPacket(p) {
       out.push(`  [${d.id}] ${d.kind === 'reply' ? `reply on ${d.thread}` : d.type ?? 'comment'}: ${excerpt(d.body, 100)}`);
     }
   }
-  if (threads.length) out.push(...PROTOCOL_LINES);
+  if (p.replyOnly) out.push('APPROVED with a final version: reply to each thread; do not edit the spec.');
+  else if (threads.length) out.push(...PROTOCOL_LINES);
   if (p.next) out.push(`NEXT: ${p.next}`);
   return out.join('\n');
 }

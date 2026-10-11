@@ -225,6 +225,41 @@ describe('decisions.md', () => {
     assert.match(md, /^## Resolved threads\n\n### t2: Why\?$/m);
     assert.doesNotMatch(md, /t3/);
   });
+
+  test('renderDecisionsMarkdown: applied suggestions keep line breaks and survive inner backticks', () => {
+    const anchor = { v: 1, kind: 'text', state: 'exact', src: { text: 'x', startLine: 5, endLine: 5 }, section: [] };
+    const doc = /** @type {any} */ ({ id: 'spec', title: 'T', path: 'spec.md', head: 2, final: null });
+    const multi = '- One API.\n- Idempotent sends keyed by `notification_id`.\n- Rate limits.';
+    const threads = /** @type {any[]} */ ([
+      { id: 't1', type: 'suggestion', status: 'resolved', resolvedIn: 2, anchors: { 1: anchor }, suggestion: { new: multi, status: 'applied', appliedIn: 2 }, comments: [] },
+      { id: 't2', type: 'suggestion', status: 'resolved', resolvedIn: 2, anchors: { 1: anchor }, suggestion: { new: 'use `a` and ``b``', status: 'applied', appliedIn: 2 }, comments: [] },
+      { id: 't3', type: 'suggestion', status: 'resolved', resolvedIn: 2, anchors: { 1: anchor }, suggestion: { new: '```js\nx()\n```', status: 'applied', appliedIn: 2 }, comments: [] },
+      { id: 't4', type: 'comment', status: 'resolved', resolvedIn: 2, anchors: { 1: anchor }, attachments: ['attachments/a2.png'], comments: [{ by: { kind: 'human', name: 'Eric' }, body: '', version: 1 }] },
+    ]);
+    const md = renderDecisionsMarkdown({ doc, threads, reviews: /** @type {any} */ ([{}]), versions: 2 });
+    // multi-line: a fenced block under the bullet, line breaks kept; the heading is the first line only
+    assert.match(md, /^### t1: suggests: - One API\. …$/m);
+    assert.ok(md.includes('- Suggestion applied in v2:\n\n  ```text\n  - One API.\n  - Idempotent sends keyed by `notification_id`.\n  - Rate limits.\n  ```\n'), md);
+    // one line: a code span whose fence is longer than any backtick run inside
+    assert.match(md, /^- Suggestion applied in v2: ``` use `a` and ``b`` ```$/m);
+    // a suggestion that itself holds a code fence gets a longer outer fence
+    assert.ok(md.includes('  ````text\n  ```js\n  x()\n  ```\n  ````\n'), md);
+    // blank lines inside the suggestion are kept, not squeezed
+    const blanks = renderDecisionsMarkdown({ doc, threads: [{ ...threads[0], suggestion: { new: 'a\n\n\nb', status: 'applied', appliedIn: 2 } }], reviews: /** @type {any} */ ([{}]), versions: 2 });
+    assert.ok(blanks.includes('  ```text\n  a\n  \n  \n  b\n  ```\n'), blanks);
+    // a comment with only an image: the heading says so
+    assert.match(md, /^### t4: comment \(image only, no text\)$/m);
+  });
+
+  test('renderDecisionsMarkdown: context cut mid-word is widened to whole words', () => {
+    const anchor = { v: 1, kind: 'text', state: 'exact', src: { text: 'eploy to staging.\n2. Week 2', prefix: '1. **Week 1:** D', suffix: ': migrate', startLine: 5, endLine: 6 }, section: [] };
+    const doc = /** @type {any} */ ({ id: 'spec', title: 'T', path: 'spec.md', head: 2, final: null });
+    const threads = /** @type {any[]} */ ([
+      { id: 't1', type: 'comment', status: 'resolved', resolvedIn: 2, anchors: { 1: anchor }, comments: [{ by: { kind: 'human', name: 'Eric' }, body: 'ok', version: 1 }] },
+    ]);
+    const md = renderDecisionsMarkdown({ doc, threads, reviews: /** @type {any} */ ([{}]), versions: 2 });
+    assert.match(md, /^ {2}> Deploy to staging\.\n {2}> 2\. Week 2$/m, md);
+  });
 });
 
 describe('git auto-commit', () => {

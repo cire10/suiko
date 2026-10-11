@@ -20,7 +20,7 @@ import nodePath from 'node:path';
 import { CONTEXT_CHARS } from '../../shared/protocol.js';
 import { compareIds } from '../store/store.js';
 import { lineIndex } from '../text/index.js';
-import { attachmentKind, describe, envOf, label as anchorLabel } from './anchoring.js';
+import { attachmentKind, describe, envOf, label as anchorLabel, quoteText } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
 import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
 
@@ -89,6 +89,8 @@ import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from '.
  *   drafts: number, undelivered: number }} counts
  * @property {string[]} resolvedThisRound
  * @property {boolean} firstPacket no earlier review was delivered to this agent (adds the protocol reminder)
+ * @property {boolean} replyOnly approved with a final version that is head, but threads still need action: the agent
+ *   answers them with `specreview reply` and must not edit (the working copy has to stay identical to the final)
  * @property {string} agent
  * @property {string} next
  */
@@ -175,6 +177,10 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     undelivered: deliver.length,
   };
   const latest = deliver[deliver.length - 1] ?? null;
+  const approval = approvalOf(doc, latest);
+  const replyOnly = approval.approved && approval.finalNow && counts.actionable > 0;
+  // nothing to apply once the reviewer approved the final version: a suggestion that came with it gets a reply
+  if (replyOnly) for (const i of items) i.apply = null;
   const firstPacket = !snap.reviews.some((r) => r.deliveredTo?.[agent] && !delivering.has(r.id));
 
   const file = root ? nodePath.join(root, ...doc.path.split('/')) : null;
@@ -198,8 +204,9 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     counts,
     resolvedThisRound,
     firstPacket,
+    replyOnly,
     agent,
-    next: nextStep(doc, latest, counts.actionable),
+    next: nextStep(doc, approval, counts.actionable),
   };
 }
 
@@ -309,7 +316,7 @@ function draftSummary(d, snap, li, mapRange, attachmentPath) {
       version: a?.v ?? null,
       lines,
       label: anchorLabel(a),
-      on: a?.quote?.exact ? truncate(a.quote.exact.replace(/\s+/g, ' ').trim(), 120) : null,
+      on: a?.quote?.exact ? truncate(quoteText(a).replace(/\s+/g, ' ').trim(), 120) : null,
       body: d.body ?? '',
       suggestion: d.suggestion ?? null,
       attachments: (d.attachments ?? []).map((rel) => attachmentPath(rel)),
@@ -359,15 +366,33 @@ function byFileOrder(a, b) {
 }
 
 /**
- * The NEXT line (without the 'NEXT: ' prefix).
+ * Whether the doc stands approved, and whether its final version is the current head (so `final` will succeed).
+ * `latest` is the newest review being delivered; without one (`feedback` after the approved packet was delivered or
+ * lost) the doc's own state decides. A later revise puts the doc back in review, so an older final is not current.
  * @param {Doc} doc
  * @param {Review | null} latest
+ * @returns {{ approved: boolean, finalNow: boolean }}
+ */
+function approvalOf(doc, latest) {
+  const finalNow = doc.state === 'approved' && doc.final?.version === doc.head;
+  return { approved: latest ? latest.verdict === 'approved' : finalNow, finalNow };
+}
+
+/**
+ * The NEXT line (without the 'NEXT: ' prefix).
+ * @param {Doc} doc
+ * @param {{ approved: boolean, finalNow: boolean }} approval
  * @param {number} actionable
  */
-function nextStep(doc, latest, actionable) {
+function nextStep(doc, { approved, finalNow }, actionable) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
-  if (latest?.verdict === 'approved' && actionable === 0) {
-    return doc.final ? `specreview final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
+  if (approved && actionable === 0) {
+    return finalNow ? `specreview final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
+  }
+  // Approved with a final version, but the same submission reopened a thread or answered a question. A revise would
+  // make the working copy differ from the final version, so the threads get replies only; a status clears them.
+  if (approved && finalNow) {
+    return `approved: answer each thread with specreview reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> specreview final ${doc.id} --decisions   (then stop waiting)`;
   }
   if (actionable === 0) return `nothing to act on; specreview wait ${doc.id} (background)`;
   return `edits -> specreview revise ${doc.id} --replies - -> specreview wait ${doc.id} (background)`;

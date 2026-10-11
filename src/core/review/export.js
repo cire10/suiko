@@ -4,6 +4,7 @@
 // hunk that changed it. Pure: renderDecisionsMarkdown returns the text; ops/final.js writes it atomically.
 
 import { compareIds } from '../store/store.js';
+import { toWordBounds } from '../text/index.js';
 import { sectionPath } from './labels.js';
 import { anchorAt, hasContent, originalAnchor } from './threadstate.js';
 
@@ -55,7 +56,7 @@ export function renderDecisionsMarkdown({ doc, threads, reviews, versions }) {
     // the reviewer's request (an agent question has none: its own first comment); an empty one is skipped
     const human = t.comments?.filter((c) => c.by?.kind !== 'agent') ?? [];
     const first = human.length ? human.find(hasBody) : t.comments?.[0];
-    const headline = first?.body || (t.suggestion ? `suggests: ${t.suggestion.new}` : t.type);
+    const headline = first?.body || (t.suggestion ? `suggests: ${firstLine(t.suggestion.new)}` : t.attachments?.length ? `${t.type} (image only, no text)` : t.type);
     out.push(`### ${t.id}: ${oneLine(headline, 100)}`, '');
     out.push(...threadFacts(t, doc));
     out.push('');
@@ -73,7 +74,13 @@ function threadFacts(t, doc) {
   const anchor = anchorAt(t, t.resolvedIn ?? Infinity) ?? originalAnchor(t);
   const section = sectionPath(anchor?.section ?? [], doc.title);
   const out = [`- Thread: ${t.id} (${t.type}${t.severity && t.severity !== 'normal' ? `, ${t.severity}` : ''})${section ? ` · §${section}` : ''}${t.resolvedIn ? ` · resolved in v${t.resolvedIn}` : ''}`];
-  const context = t.decision?.srcText || anchor?.src?.text || anchor?.quote?.exact || '';
+  // widened to whole words: a selection that starts or ends mid-word ('eploy to staging') reads badly in a quote.
+  // A recorded decision quotes the source at the decision's version; widen it with that anchor's context.
+  const srcText = t.decision?.srcText;
+  const at = srcText ? (anchorAt(t, t.decision?.version ?? Infinity) ?? anchor)?.src : anchor?.src;
+  const context = srcText && srcText !== at?.text
+    ? srcText
+    : at?.text ? toWordBounds(at.text, at.prefix, at.suffix) : anchor?.quote?.exact ?? '';
   if (context.trim()) {
     out.push('- Context:', '');
     for (const line of clip(context).split('\n')) out.push(`  > ${line}`);
@@ -87,10 +94,40 @@ function threadFacts(t, doc) {
     const said = hasBody(reply) ? `: ${oneLine(reply.body, 400)}` : '';
     out.push(`- Resolution (${reply.by?.name ?? 'agent'}, v${reply.version}${reply.status ? `, ${reply.status}` : ''})${said}`);
   }
-  if (t.suggestion?.status === 'applied') out.push(`- Suggestion applied in v${t.suggestion.appliedIn}: \`${oneLine(t.suggestion.new, 200)}\``);
+  if (t.suggestion?.status === 'applied') out.push(...suggestionLines(t.suggestion.new, t.suggestion.appliedIn));
   const changes = (t.changes ?? []).map((c) => `v${c.version} ${c.hunk}`);
   if (changes.length) out.push(`- Changed in: ${changes.join(', ')}`);
   return out;
+}
+
+/**
+ * '- Suggestion applied in v2: …': a code span for one line, else a fenced block under the bullet that keeps the
+ * line breaks. Fences are longer than any backtick run inside, so inline code in the suggestion cannot end them.
+ * @param {string} text
+ * @param {number | null | undefined} v
+ * @returns {string[]}
+ */
+function suggestionLines(text, v) {
+  const s = String(text ?? '').replace(/\r\n/g, '\n').replace(/^\n+|\s+$/g, '');
+  const longest = Math.max(0, ...(s.match(/`+/g) ?? []).map((r) => r.length));
+  const head = `- Suggestion applied in v${v}:`;
+  if (!s.includes('\n')) {
+    const fence = '`'.repeat(longest + 1);
+    const pad = s.startsWith('`') || s.endsWith('`') ? ' ' : '';
+    return [`${head} ${fence}${pad}${s}${pad}${fence}`];
+  }
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  // every line keeps the list indent, blank ones too: the final squeeze of blank lines must not merge them
+  return [head, '', `  ${fence}text`, ...clip(s).split('\n').map((l) => `  ${l}`), `  ${fence}`, ''];
+}
+
+/**
+ * The first non-empty line, with ' …' when more lines follow.
+ * @param {string} s
+ */
+function firstLine(s) {
+  const lines = String(s ?? '').split(/\r?\n/).filter((l) => l.trim());
+  return lines.length > 1 ? `${lines[0].trim()} …` : (lines[0] ?? '').trim();
 }
 
 /**
