@@ -195,6 +195,15 @@ export function label(anchor) {
 }
 
 /**
+ * The anchor's rendered quote for display, widened to whole words where the selection cut a word ('' without one).
+ * @param {Anchor | null | undefined} anchor
+ * @returns {string}
+ */
+export function quoteText(anchor) {
+  return anchor?.quote?.exact ? anchorLib.quoteText(anchor) : '';
+}
+
+/**
  * What the attachments of a thread / draft with this anchor show ('region' crop, 'snip' picture, other 'image').
  * @param {Anchor | null | undefined} anchor
  * @returns {'region' | 'snip' | 'image'}

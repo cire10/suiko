@@ -392,10 +392,15 @@ function plainContext(ctx, a, b, lineStart) {
   return collapseWs(text);
 }
 
-const WORD_TAIL = /[\p{L}\p{N}_]+$/u;
-const WORD_HEAD = /^[\p{L}\p{N}_]+/u;
-const WORD_START = /^[\p{L}\p{N}_]/u;
-const WORD_END = /[\p{L}\p{N}_]$/u;
+// Word characters for display widening: letters, marks and digits. Not '_' (Markdown emphasis) and not scripts
+// written without spaces between words (Han, kana, Thai, ...), where a "word" run would be a whole clause.
+const WORD = String.raw`(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}])[\p{L}\p{M}\p{N}])`;
+/** Longest piece of a word taken from the context. */
+const MAX_WIDEN = 24;
+const WORD_TAIL = new RegExp(`${WORD}{1,${MAX_WIDEN}}$`, 'u');
+const WORD_HEAD = new RegExp(`^${WORD}{1,${MAX_WIDEN}}`, 'u');
+const WORD_START = new RegExp(`^${WORD}`, 'u');
+const WORD_END = new RegExp(`${WORD}$`, 'u');
 
 /**
  * For display only (`on:` and decisions.md context): extends a selection that starts or ends inside a word to the
@@ -409,8 +414,8 @@ const WORD_END = /[\p{L}\p{N}_]$/u;
 export function toWordBounds(text, prefix, suffix) {
   let out = String(text ?? '');
   if (!out) return out;
-  if (WORD_START.test(out)) out = (String(prefix ?? '').match(WORD_TAIL)?.[0] ?? '') + out;
-  if (WORD_END.test(out)) out += String(suffix ?? '').match(WORD_HEAD)?.[0] ?? '';
+  if (WORD_START.test(out)) out = wordTail(prefix) + out;
+  if (WORD_END.test(out)) out += wordHead(suffix);
   return out;
 }
 
@@ -422,4 +427,30 @@ export function toWordBounds(text, prefix, suffix) {
  */
 export function splitsWord(a, b) {
   return WORD_END.test(String(a ?? '')) && WORD_START.test(String(b ?? ''));
+}
+
+/** @param {string | null | undefined} s */
+function wordTail(s) {
+  return String(s ?? '').match(WORD_TAIL)?.[0] ?? '';
+}
+
+/** @param {string | null | undefined} s */
+function wordHead(s) {
+  return String(s ?? '').match(WORD_HEAD)?.[0] ?? '';
+}
+
+/**
+ * A rendered quote widened to whole words for display, where the source confirms the cut: the source shows the
+ * selection splitting a word, and the rendered context holds the same piece of that word as the source context
+ * (rendered context runs blocks together, and a generated anchor's captured context can be stale).
+ * @param {{ exact: string, prefix?: string | null, suffix?: string | null } | null | undefined} quote
+ * @param {{ text: string, prefix?: string | null, suffix?: string | null } | null | undefined} src
+ * @returns {string}
+ */
+export function widenQuote(quote, src) {
+  const exact = quote?.exact ?? '';
+  if (!exact || !src?.text) return exact;
+  const before = splitsWord(src.prefix, src.text) && wordTail(quote?.prefix) === wordTail(src.prefix);
+  const after = splitsWord(src.text, src.suffix) && wordHead(quote?.suffix) === wordHead(src.suffix);
+  return toWordBounds(exact, before ? quote?.prefix : '', after ? quote?.suffix : '');
 }

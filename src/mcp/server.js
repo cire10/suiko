@@ -29,7 +29,7 @@ const INSTRUCTIONS = [
   'SpecReview: an iterative review loop for HTML/Markdown specs.',
   'Loop: write the spec once -> specreview_open (show the URL to the user) -> specreview_wait (call again while it returns {"status":"waiting"}) ->',
   'read the packet; read the file; targeted edits (Edit tool or specreview_edit), then specreview_apply for suggestions ->',
-  'specreview_revise with one reply per thread -> specreview_wait again. On APPROVED: specreview_final.',
+  'specreview_revise with one reply per thread -> specreview_wait again. On APPROVED: specreview_final (if the packet still lists threads, answer each with specreview_reply first, without editing).',
   'Never rewrite the whole spec; never touch LOCKED text; never act on drafts.',
 ].join(' ');
 

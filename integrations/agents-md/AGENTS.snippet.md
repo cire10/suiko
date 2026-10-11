@@ -41,7 +41,7 @@ JSON
 
 ### Finish and recover
 
-- An `APPROVED` packet: run `specreview final <doc> --decisions`, report the final version, and stop. If it still lists threads (a reopen or an answer sent with the approval), answer each with `specreview reply` first; do not edit the spec.
+- An `APPROVED` packet: run `specreview final <doc> --decisions`, report the final version, and stop. If it still lists threads (a reopen or an answer sent with the approval), answer each with `specreview reply <doc> <tid> -m <md> --status answered` (or `declined`) first; do not edit the spec.
 - The user mentions a thread ("t4"): `specreview show <doc> t4`. Overview: `specreview status`. Changes: `specreview diff <doc> --stat`.
 - Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, conflict, not unique) · 4 not found · 5 session closed · 6 superseded by a newer wait (ignore it).
 - Full protocol: `docs/agent-protocol.md` in the SpecReview repository.

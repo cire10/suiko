@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 process.env.SPECREVIEW_HOME ??= mkdtempSync(path.join(tmpdir(), 'sr-home-'));
 
-const { findQuote, sourceToPlainText, similarity, normalizeWs, balanceMarkdown, toWordBounds } = await import('../../src/core/text/quote.js');
+const { findQuote, sourceToPlainText, similarity, normalizeWs, balanceMarkdown, toWordBounds, widenQuote } = await import('../../src/core/text/quote.js');
 const { toPlain } = await import('../../src/core/text/plain.js');
 const { decodeEntities } = await import('../../src/core/text/entities.js');
 
@@ -160,7 +160,25 @@ test('toWordBounds: a selection cut mid-word is widened to whole words for displ
   assert.equal(toWordBounds('all channels.', 'One API for ', ' Next'), 'all channels.');
   assert.equal(toWordBounds('`x`', 'a', 'b'), '`x`');
   assert.equal(toWordBounds('über', 'gr', 'ß'), 'grüberß');
+  // scripts without spaces between words are never widened (a "word" run would be the whole clause)
+  assert.equal(toWordBounds('語の中', '日本', '文章です'), '語の中');
+  assert.equal(toWordBounds('ステム', 'シ', 'です'), 'ステム');
+  // '_' is Markdown emphasis, not part of a word
+  assert.equal(toWordBounds('bar', 'foo _', '_ baz'), 'bar');
+  // a piece longer than 24 characters is not taken
+  assert.equal(toWordBounds('end', 'a'.repeat(40), ''), `${'a'.repeat(24)}end`);
   assert.equal(toWordBounds('abc', null, undefined), 'abc');
   assert.equal(toWordBounds('', 'a', 'b'), '');
+});
+
+test('widenQuote: widens only where the source shows a split word and both contexts agree', () => {
+  // the source cuts 'Deploy': widen with the rendered context
+  assert.equal(widenQuote({ exact: 'eploy to stagin', prefix: 'Week 1: D', suffix: 'g; route' }, { text: 'eploy to stagin', prefix: '**Week 1:** D', suffix: 'g; route' }), 'Deploy to staging');
+  // rendered context runs blocks together; the source shows the block boundary
+  assert.equal(widenQuote({ exact: 'Measured', prefix: 'Footnotes', suffix: ' monthly' }, { text: 'Measured', prefix: '## Footnotes\n\n', suffix: ' monthly' }), 'Measured');
+  // stale rendered context (a generated anchor after an edit): no widening on that side
+  assert.equal(widenQuote({ exact: 'ploy', prefix: 'De', suffix: 'ment' }, { text: 'ploy', prefix: 'Re', suffix: 'ment' }), 'ployment');
+  assert.equal(widenQuote({ exact: 'abc', prefix: 'x', suffix: 'y' }, null), 'abc');
+  assert.equal(widenQuote(null, { text: 'a' }), '');
 });
 

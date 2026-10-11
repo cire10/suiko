@@ -15,7 +15,7 @@ export {
   elementFingerprint, fingerprintScore, fingerprintOfElement, bestFingerprintMatch, anchorElement, ordinalOf,
   FINGERPRINT_ACCEPT,
 } from './fingerprint.js';
-export { describeAnchor, anchorLabel, regionLabel, elideDataUris, attachmentKindOf } from './describe.js';
+export { describeAnchor, anchorLabel, regionLabel, elideDataUris, attachmentKindOf, quoteText } from './describe.js';
 export { toDomTarget, mapAnchorToWorking } from './targets.js';
 export { snipCovers, snipLabel, snipContainerOf } from './snip.js';
 export { narrowMermaid, mermaidLabelIn } from './mermaid.js';

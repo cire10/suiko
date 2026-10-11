@@ -74,11 +74,13 @@ function threadFacts(t, doc) {
   const anchor = anchorAt(t, t.resolvedIn ?? Infinity) ?? originalAnchor(t);
   const section = sectionPath(anchor?.section ?? [], doc.title);
   const out = [`- Thread: ${t.id} (${t.type}${t.severity && t.severity !== 'normal' ? `, ${t.severity}` : ''})${section ? ` · §${section}` : ''}${t.resolvedIn ? ` · resolved in v${t.resolvedIn}` : ''}`];
-  // widened to whole words: a selection that starts or ends mid-word ('eploy to staging') reads badly in a quote
-  const src = anchor?.src;
-  const context = t.decision?.srcText && t.decision.srcText !== src?.text
-    ? t.decision.srcText
-    : src?.text ? toWordBounds(src.text, src.prefix, src.suffix) : anchor?.quote?.exact ?? '';
+  // widened to whole words: a selection that starts or ends mid-word ('eploy to staging') reads badly in a quote.
+  // A recorded decision quotes the source at the decision's version; widen it with that anchor's context.
+  const srcText = t.decision?.srcText;
+  const at = srcText ? (anchorAt(t, t.decision?.version ?? Infinity) ?? anchor)?.src : anchor?.src;
+  const context = srcText && srcText !== at?.text
+    ? srcText
+    : at?.text ? toWordBounds(at.text, at.prefix, at.suffix) : anchor?.quote?.exact ?? '';
   if (context.trim()) {
     out.push('- Context:', '');
     for (const line of clip(context).split('\n')) out.push(`  > ${line}`);
@@ -115,7 +117,8 @@ function suggestionLines(text, v) {
     return [`${head} ${fence}${pad}${s}${pad}${fence}`];
   }
   const fence = '`'.repeat(Math.max(3, longest + 1));
-  return [head, '', `  ${fence}text`, ...clip(s).split('\n').map((l) => (l ? `  ${l}` : '')), `  ${fence}`, ''];
+  // every line keeps the list indent, blank ones too: the final squeeze of blank lines must not merge them
+  return [head, '', `  ${fence}text`, ...clip(s).split('\n').map((l) => `  ${l}`), `  ${fence}`, ''];
 }
 
 /**

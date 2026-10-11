@@ -122,7 +122,8 @@ export function formatPacket(packet, opts = {}) {
     footer.push('DRAFTS (not submitted - do not act on them):');
     for (const d of p.drafts) footer.push(`  ${draftLine(/** @type {any} */ (d))}`);
   }
-  if (p.firstPacket && !approvedDone && items.length) footer.push(...PROTOCOL);
+  if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the spec (it must stay identical to the final version).`);
+  else if (p.firstPacket && !approvedDone && items.length) footer.push(...PROTOCOL);
   footer.push(`NEXT: ${nextText(p)}`);
 
   const headText = head.join('\n');

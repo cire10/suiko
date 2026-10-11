@@ -244,6 +244,9 @@ describe('decisions.md', () => {
     assert.match(md, /^- Suggestion applied in v2: ``` use `a` and ``b`` ```$/m);
     // a suggestion that itself holds a code fence gets a longer outer fence
     assert.ok(md.includes('  ````text\n  ```js\n  x()\n  ```\n  ````\n'), md);
+    // blank lines inside the suggestion are kept, not squeezed
+    const blanks = renderDecisionsMarkdown({ doc, threads: [{ ...threads[0], suggestion: { new: 'a\n\n\nb', status: 'applied', appliedIn: 2 } }], reviews: /** @type {any} */ ([{}]), versions: 2 });
+    assert.ok(blanks.includes('  ```text\n  a\n  \n  \n  b\n  ```\n'), blanks);
     // a comment with only an image: the heading says so
     assert.match(md, /^### t4: comment \(image only, no text\)$/m);
   });

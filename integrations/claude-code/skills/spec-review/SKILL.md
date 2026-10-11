@@ -96,7 +96,7 @@ Give one line per thread in chat: what you changed, or what you asked. Then star
 
 ## 7. Approval, recovery and other requests
 
-- **APPROVED** packet: run `specreview final <doc> --decisions`, report the final version and the decisions file, and stop waiting. If the packet still lists threads (the reviewer reopened or answered one in the same submission), answer each with `specreview reply` first and do not edit the spec: a new version would no longer match the final one.
+- **APPROVED** packet: run `specreview final <doc> --decisions`, report the final version and the decisions file, and stop waiting. If the packet still lists threads (the reviewer reopened or answered one in the same submission), answer each with `specreview reply <doc> <tid> -m <md> --status answered` (or `declined`) first and do not edit the spec: a new version would no longer match the final one. The status matters: a reply without one leaves the thread open.
 - The user says "done" or "submitted" but no packet arrived: run `specreview feedback <doc> --include-drafts`. If it only lists DRAFT comments, ask the user to click **Submit review**; do not act on drafts.
 - A hook message says a review was not delivered or not handled: run `specreview feedback <doc>` and handle it as in section 4.
 - The user mentions a thread ("t4"): `specreview show <doc> t4`.

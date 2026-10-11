@@ -242,13 +242,33 @@ const Snip = (() => {
       out.push(s);
       len += s.length;
     };
+    // a block boundary waits for the next text: inside a formula already read as TeX it is layout, not a gap
+    let sep = false;
     for (const seg of index.segs) {
       if (len > SNIP.maxText) break;
       if (!seg.node) {
-        gap = true;
+        sep = true;
         continue;
       }
       const node = seg.node;
+      const math = node.parentElement?.closest('.katex');
+      if (math && tex.has(math)) {
+        sep = false;
+        continue;
+      }
+      if (sep) gap = true;
+      sep = false;
+      const source = math ? texOf(math) : '';
+      if (math && source) {
+        // the whole formula once, if any of it shows in the box; spacing comes from the text around it
+        tex.add(math);
+        if (visible(node) && intersects(math.getBoundingClientRect(), box)) {
+          push(math.closest('.katex-display') || math.querySelector('math[display="block"]') ? `$$${source}$$` : `$${source}$`);
+        } else {
+          gap = true;
+        }
+        continue;
+      }
       const data = node.data;
       if (!data || !visible(node)) {
         gap = true;
@@ -256,19 +276,8 @@ const Snip = (() => {
       }
       range.selectNodeContents(node);
       const rects = [...range.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
-      if (!rects.some((r) => r.right > box.left && r.left < box.right && r.bottom > box.top && r.top < box.bottom)) {
+      if (!rects.some((r) => intersects(r, box))) {
         gap = true;
-        continue;
-      }
-      const math = node.parentElement?.closest('.katex');
-      const source = math ? texOf(math) : '';
-      if (math && source) {
-        if (!tex.has(math)) {
-          tex.add(math);
-          gap = true;
-          push(math.closest('.katex-display') ? `$$${source}$$` : `$${source}$`);
-          gap = true;
-        }
         continue;
       }
       const whole = rects.every((r) => r.left >= box.left - 0.5 && r.right <= box.right + 0.5 &&
@@ -297,6 +306,11 @@ const Snip = (() => {
     }
     range.detach();
     return clip(out.join(''), SNIP.maxText);
+  }
+
+  /** @param {{left:number, right:number, top:number, bottom:number}} r @param {Box} box */
+  function intersects(r, box) {
+    return r.right > box.left && r.left < box.right && r.bottom > box.top && r.top < box.bottom;
   }
 
   /**

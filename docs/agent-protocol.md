@@ -446,7 +446,7 @@ working copy matches v3: ok
 wrote docs/specs/token-service.decisions.md
 ```
 
-If the same submission also reopened a thread or answered a question, the packet lists those threads and NEXT says to answer each with `specreview reply <doc> <tid> -m …` (no edits, no new version) before running `final`.
+If the same submission also reopened a thread or answered a question, the packet lists those threads and NEXT says to answer each with `specreview reply <doc> <tid> -m … --status answered|declined` (no edits, no new version) before running `final`; without a status the thread stays open.
 
 `final` exits 3 if the working copy does not match the final version. `--out <dir>` changes where the decisions file is written. A later `revise` puts the doc back in review; the earlier final stays in the history.
 

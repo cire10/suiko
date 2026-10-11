@@ -15,7 +15,7 @@
 import { SEVERITIES, SSE, THREAD_TYPES } from '../../../shared/protocol.js';
 import { NotFoundError, UsageError } from '../../store/errors.js';
 import { lineIndex } from '../../text/index.js';
-import { anchorForCapture, envOf, label as anchorLabel } from '../anchoring.js';
+import { anchorForCapture, envOf, label as anchorLabel, quoteText } from '../anchoring.js';
 import { linesLabel, sectionPath, truncate } from '../labels.js';
 import { emit, oneOf, parseVersionArg, requireThread, resolveDoc, withDoc } from './common.js';
 
@@ -63,7 +63,7 @@ export function preview(anchor, source, title) {
   }
   const label = anchorLabel(anchor);
   const sec = sectionPath(anchor.section, title);
-  const what = anchor.quote?.exact && anchor.kind !== 'section' ? `"${truncate(anchor.quote.exact.replace(/\s+/g, ' ').trim(), 60)}"` : label;
+  const what = anchor.quote?.exact && anchor.kind !== 'section' ? `"${truncate(quoteText(anchor).replace(/\s+/g, ' ').trim(), 60)}"` : label;
   const text = anchor.kind === 'doc' ? 'Agent will see: GENERAL' : `Agent will see: ${[lines ? linesLabel(lines) : '', sec ? `§${sec}` : '', what].filter(Boolean).join(' ')}`;
   return { label, lines, section: anchor.section ?? [], src, text };
 }
