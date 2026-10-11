@@ -64,6 +64,8 @@ export {};
  *   '<dir>/<slug>.md', never read or written; see core/store/snapshot.js)
  * @property {'file' | 'snapshot'} [kind] absent = 'file'
  * @property {DocOrigin} [origin] where a snapshot doc's content comes from
+ * @property {{ network?: 'allow' | 'block' }} [render] per-doc override of the workspace's render settings (a
+ *   fetched web page: network 'block' unless --allow-remote-assets)
  * @property {DocFormat} format
  * @property {string} title
  * @property {string} createdAt
@@ -79,8 +81,9 @@ export {};
 
 /**
  * Provenance of a snapshot doc (doc.json) or of one of its versions (manifest): `type` 'plan' | 'message' |
- * 'stdin' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
- * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...).
+ * 'stdin' | 'url' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
+ * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...; a web page: url, finalUrl,
+ * private, fetchedAt, and on each version's manifest also status, contentType, etag, reader, removed).
  * @typedef {{ type: string, key: string | null } & Record<string, unknown>} DocOrigin
  */
 

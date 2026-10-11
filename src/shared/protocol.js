@@ -160,6 +160,12 @@ export const LIMITS = Object.freeze({
   threadSrcChars: 1200,
   maxAttachmentBytes: 5 * 1024 * 1024,
   maxServeBytes: 200 * 1024 * 1024,
+  // `specreview snapshot <url>` (design 6.2): body cap (after decompression), total time, redirect hops, and the
+  // text length under which a page that had scripts gets the "rendered by JavaScript" note
+  urlMaxBytes: 10 * 1024 * 1024,
+  urlTimeoutMs: 30000,
+  urlMaxRedirects: 10,
+  urlLowTextChars: 200,
 });
 
 /**

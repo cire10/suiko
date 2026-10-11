@@ -57,6 +57,18 @@ const SNAPSHOT_PROTOCOL = [
   '  Questions: answer in the reply; change the text only if the answer belongs in it. Unsure: status needs_input.',
 ];
 
+/** The protocol reminder of a web-page snapshot of a page you build (a private host): change its sources. */
+const PAGE_SOURCES_PROTOCOL = [
+  'PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page (only what the threads ask for), then snapshot it again.',
+  '  src> lines quote SpecReview\'s conversion of the page. Questions: answer in the reply. Unsure: status needs_input.',
+];
+
+/** The protocol reminder of a public web page's snapshot: there is nothing to edit; threads get replies. */
+const PAGE_REPLY_PROTOCOL = [
+  'PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit. Answer each thread with a reply',
+  '  (status answered, or declined with the reason). Unsure: status needs_input.',
+];
+
 /** The protocol reminder of a plan snapshot: the plan file is edited in place. */
 const PLAN_PROTOCOL = [
   'PROTOCOL: targeted Edit-tool changes to the plan file only (never rewrite it); src> lines are exact Edit old_string.',
@@ -139,7 +151,7 @@ export function formatPacket(packet, opts = {}) {
     for (const d of p.drafts) footer.push(`  ${draftLine(/** @type {any} */ (d))}`);
   }
   if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the spec (it must stay identical to the final version).`);
-  else if (p.firstPacket && !approvedDone && items.length) footer.push(...(!snapshot ? PROTOCOL : p.origin === 'plan' ? PLAN_PROTOCOL : SNAPSHOT_PROTOCOL));
+  else if (p.firstPacket && !approvedDone && items.length) footer.push(...protocolLines(p));
   footer.push(`NEXT: ${nextText(p)}`);
 
   return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
@@ -247,8 +259,34 @@ function packetHeader(p) {
   return parts.join(' · ');
 }
 
+/**
+ * The protocol reminder for the kind of doc.
+ * @param {Packet} p
+ * @returns {string[]}
+ */
+function protocolLines(p) {
+  if (p.kind !== 'snapshot') return PROTOCOL;
+  if (p.origin === 'plan') return PLAN_PROTOCOL;
+  if (p.origin === 'url' && p.page) return p.page.private ? PAGE_SOURCES_PROTOCOL : PAGE_REPLY_PROTOCOL;
+  return SNAPSHOT_PROTOCOL;
+}
+
+/**
+ * '2026-10-11 14:02 UTC' ('' when invalid).
+ * @param {string | null | undefined} iso
+ */
+function utcMinute(iso) {
+  const t = Date.parse(String(iso ?? ''));
+  if (!Number.isFinite(t)) return '';
+  return `${new Date(t).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
 /** @param {Packet} p */
 function lineBasis(p) {
+  if (p.kind === 'snapshot' && p.origin === 'url' && p.page) {
+    const when = utcMinute(p.page.fetchedAt);
+    return `Line numbers = lines of SpecReview's ${p.page.format === 'html' ? 'HTML' : 'Markdown'} snapshot of ${p.page.finalUrl}${when ? ` (fetched ${when})` : ''}; there is no file for you to edit.`;
+  }
   if (p.kind === 'snapshot') {
     return p.origin === 'plan' && p.file
       ? `Line numbers = lines of the plan file as submitted (v${p.head}).`

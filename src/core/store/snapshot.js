@@ -1,6 +1,6 @@
 // @ts-check
 // Snapshot docs: docs whose content is not a user-authored file in the workspace (a Claude Code plan, an agent's
-// message, piped text; later a diff or a fetched URL). Everything kind-specific lives here so new origin types only
+// message, piped text, a fetched web page; later a diff). Everything kind-specific lives here so new origin types only
 // add a row to ORIGIN_TYPES.
 //
 // doc.json of a snapshot doc:
@@ -30,6 +30,8 @@ export const SNAPSHOT_KIND = 'snapshot';
  *   and never reverts the agent's revisions)
  * @property {boolean} gated reviews are delivered only by the command that took the snapshot (the plan gate) or
  *   an explicit `wait <doc>`: never by `wait --all` or a doc-less default
+ * @property {boolean} [refresh] taking the snapshot again updates the doc's origin fields (a web page: its final URL
+ *   and fetch time) besides recording the new text
  */
 
 /** @type {Record<string, OriginInfo>} */
@@ -37,6 +39,7 @@ const ORIGIN_TYPES = {
   plan: { dir: 'plans', label: 'Claude Code plan', noun: 'plan', rerecord: true, gated: true },
   message: { dir: 'messages', label: 'agent message', noun: 'message', rerecord: false, gated: false },
   stdin: { dir: 'text', label: 'piped text', noun: 'text', rerecord: true, gated: false },
+  url: { dir: 'web', label: 'web page', noun: 'page', rerecord: true, gated: false, refresh: true },
 };
 
 /** Origin types without a row (future kinds) still work with these defaults. */
@@ -184,6 +187,36 @@ export function planFileOf(doc) {
 }
 
 /**
+ * The page URL of a web-page snapshot (origin type "url"), or null.
+ * @param {unknown} doc
+ * @returns {string | null}
+ */
+export function pageUrlOf(doc) {
+  if (originType(doc) !== 'url') return null;
+  const u = /** @type {any} */ (doc).origin?.url;
+  return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null;
+}
+
+/**
+ * The command that records the next version of a web-page snapshot: the same URL with the flags that made the first
+ * one (a private host needs --allow-private; an HTML snapshot --as-html; remote assets --allow-remote-assets).
+ * @param {unknown} doc
+ * @param {string | null | undefined} root the doc's workspace root (a scratch workspace adds --workspace)
+ * @returns {string | null} null when the doc is not a web-page snapshot
+ */
+export function resnapshotCommand(doc, root) {
+  const url = pageUrlOf(doc);
+  if (!url) return null;
+  const d = /** @type {any} */ (doc);
+  const flags = [];
+  if (d.origin?.private === true) flags.push('--allow-private');
+  if (d.format === 'html') flags.push('--as-html');
+  if (d.render?.network === 'allow') flags.push('--allow-remote-assets');
+  if (isScratchRoot(root)) flags.push(`--workspace ${shellQuote(String(root))}`);
+  return `specreview snapshot ${shellQuote(url)}${flags.length ? ` ${flags.join(' ')}` : ''}`;
+}
+
+/**
  * One sentence telling an agent how a snapshot doc is revised (refusals, `revise` without --source, packets).
  * @param {unknown} doc
  * @param {string} ref the doc as follow-up commands name it (see docRefFor)
@@ -193,6 +226,13 @@ export function reviseHint(doc, ref) {
   if (originType(doc) === 'plan') {
     const file = planFileOf(doc);
     return `edit the plan file${file ? ` ${file}` : ''} with targeted Edit-tool changes (never rewrite it), then call ExitPlanMode again; the plan gate records the new version and the reviewer sees a diff`;
+  }
+  if (originType(doc) === 'url') {
+    // a scratch workspace: the ref carries --workspace, and so must the snapshot command
+    const again = `${resnapshotCommand(doc, null) ?? 'specreview snapshot <url>'}${/\s--workspace\s.+$/.exec(ref)?.[0] ?? ''}`;
+    return /** @type {any} */ (doc).origin?.private === true
+      ? `change the sources that produce the page, then record what the page serves now with \`${again} --replies -\` (replies JSON on stdin)`
+      : `answer the threads with \`specreview reply ${ref} <tid> -m <md> --status answered|declined\`; \`${again}\` records a newer version of the page when it changes`;
   }
   return `write the complete revised text to a file (\`specreview show ${ref}\` prints the current version), then record it with \`specreview revise ${ref} --source <file> --replies -\` (replies JSON on stdin)`;
 }

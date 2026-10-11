@@ -47,7 +47,23 @@ export function Home() {
 }
 
 /** What a snapshot doc (no file on disk: store/snapshot.js) shows in place of its path. */
-const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code plan', message: 'agent message', stdin: 'piped text' });
+const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code plan', message: 'agent message', stdin: 'piped text', url: 'web page' });
+
+/**
+ * The path column of a doc row: the file path, or for a snapshot what it is (a web page also names its host).
+ * @param {any} d
+ * @returns {string}
+ */
+function docPlace(d) {
+  if (d.kind !== 'snapshot') return d.path;
+  const label = ORIGIN_LABEL[d.origin] || 'snapshot';
+  if (d.origin !== 'url' || typeof d.source !== 'string') return label;
+  try {
+    return `${label} · ${new URL(d.source).host}`;
+  } catch {
+    return label;
+  }
+}
 
 /** @param {{ d: any }} props */
 function DocRow({ d }) {
@@ -60,7 +76,7 @@ function DocRow({ d }) {
       navigate(href);
     }}>
       <span class="doc-title">${d.title || d.id}</span>
-      <span class="doc-path">${d.kind === 'snapshot' ? ORIGIN_LABEL[d.origin] || 'snapshot' : d.path}</span>
+      <span class="doc-path" title=${d.source || undefined}>${docPlace(d)}</span>
     </a>
     <span class="doc-meta">
       <${Chip} tone="muted">v${d.head}<//>

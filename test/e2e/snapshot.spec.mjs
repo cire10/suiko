@@ -2,7 +2,8 @@
 // Snapshot docs (an agent message / piped text / a Claude Code plan, recorded from bytes; store/snapshot.js) in the
 // reviewer UI against the REAL daemon and engine (test/e2e/real-daemon.mjs): the doc renders, never shows the
 // Record banner (its working copy is its head), and after the agent records vN+1 (`recordSnapshot`, what the plan
-// gate, `open -` and `revise --source` do) Changes, Source, History and Verify work as for a file doc.
+// gate, `open -` and `revise --source` do) Changes, Source, History and Verify work as for a file doc. Snapshot docs
+// get the strict sandbox and content policy (no inline script), and a fetched web page shows its host on Home.
 
 import { test as base, expect } from '@playwright/test';
 import { TESTID } from '../../src/shared/protocol.js';
@@ -25,6 +26,9 @@ const test = base.extend(/** @type {any} */ ({
 
 /** @param {import('@playwright/test').Page} page @param {string} mode */
 const modeTab = (page, mode) => page.locator(`[data-testid="${TESTID.modeTab}"][data-mode="${mode}"]`);
+
+/** src/ui/frame.js FRAME_SANDBOX_STRICT (that module imports the UI's import-map names, so it is not loaded here). */
+const FRAME_SANDBOX_STRICT = 'allow-scripts allow-same-origin allow-modals allow-popups allow-popups-to-escape-sandbox';
 
 const MESSAGE = ['# Token refresh answer', '', 'Rotate refresh tokens on every use.', '', 'Keep a 30 s grace window for concurrent clients.', '', 'Ship it behind a flag.', ''].join('\n');
 
@@ -108,4 +112,34 @@ test('a snapshot doc renders without the Record banner and shows Changes, Source
   await expect(page.getByTestId(TESTID.docList)).toContainText('Token refresh answer');
   await expect(page.getByTestId(TESTID.docList)).toContainText('agent message');
   expect(ui.errors).toEqual([]);
+});
+
+test('web page and piped-text snapshots: strict sandbox, no inline script, the Home row names the page host', async (/** @type {any} */ { page, ui, real }) => {
+  /** @type {Real} */
+  const r = real;
+  const { doc: web } = await r.ops.openSnapshot(r.ctx, {
+    source: '# Token Service\n\nSee [the RFC](https://example.org/rfc).\n\n![Flow](https://cdn.example.com/flow.png)\n',
+    origin: { type: 'url', key: 'url:https://docs.example.com/spec', url: 'https://docs.example.com/spec', finalUrl: 'https://docs.example.com/spec', private: false },
+    slug: 'docs.example.com spec',
+    render: { network: 'block' },
+  });
+  expect(web.path).toBe('web/docs-example-com-spec.md');
+  await ui.open(web.id);
+  await expect(page.getByTestId(TESTID.docFrame)).toHaveAttribute('sandbox', FRAME_SANDBOX_STRICT);
+  const frame = await ui.frame();
+  await expect(frame.locator('h1')).toHaveText('Token Service');
+
+  // a snapshot's raw HTML cannot run script: the content origin's strict policy allows only /__sr/ scripts
+  const { doc: piped } = await r.ops.openSnapshot(r.ctx, {
+    source: '# Piped\n\n<script>window.__INLINE_RAN = 1</script>\n\n<img src="x" onerror="window.__ONERROR_RAN = 1">\n\nPlain text.\n',
+    origin: { type: 'stdin', key: null },
+  });
+  await ui.open(piped.id);
+  const pf = await ui.frame();
+  await expect(pf.locator('body')).toContainText('Plain text.');
+  expect(await pf.evaluate(() => [/** @type {any} */ (window).__INLINE_RAN, /** @type {any} */ (window).__ONERROR_RAN])).toEqual([undefined, undefined]);
+  expect(await pf.evaluate(() => typeof (/** @type {any} */ (window).__specreviewGuest))).toBe('object');
+
+  await page.goto(r.url());
+  await expect(page.locator('.doc-row', { hasText: 'Token Service' }).locator('.doc-path')).toHaveText('web page · docs.example.com');
 });

@@ -427,14 +427,17 @@ export class Store {
    * Creates a snapshot doc (see snapshot.js): no working file, synthetic path '<dir>/<id>.md', head 0 until the first
    * version is committed from bytes. With an origin key, an existing doc with that key is returned instead
    * (`created: false`); the check and the creation run under the workspace lock, so concurrent callers with the same
-   * key get one doc.
+   * key get one doc. `render: { network: 'allow' | 'block' }` overrides the workspace's render.network for this doc
+   * (a fetched web page blocks remote assets: doc.render).
    * @param {{ title?: string, format?: DocFormat, origin: { type: string, key?: string | null } & Record<string, unknown>,
-   *   slug?: string, createdBy?: Actor }} input
+   *   slug?: string, createdBy?: Actor, render?: { network?: 'allow' | 'block' } }} input
    * @returns {Promise<{ doc: Doc, created: boolean }>}
    */
-  async createSnapshotDoc({ title, format = 'markdown', origin, slug, createdBy }) {
+  async createSnapshotDoc({ title, format = 'markdown', origin, slug, createdBy, render = undefined }) {
     const o = normalizeOrigin(origin);
     if (format !== 'markdown' && format !== 'html') throw new UsageError(`unsupported snapshot format: ${format}`);
+    const network = render?.network;
+    if (network !== undefined && network !== 'allow' && network !== 'block') throw new UsageError(`invalid render.network: ${JSON.stringify(network)}`);
     return this.withWorkspaceLock(async () => {
       if (o.key) {
         const existing = await this.findDocByOrigin(o.key);
@@ -450,6 +453,7 @@ export class Store {
         origin: o,
         path: snapshotPath(o.type, id, format),
         format,
+        ...(network ? { render: { network } } : {}),
         title: title || id,
         createdAt: nowIso(),
         createdBy: createdBy ?? { kind: 'agent', name: 'agent' },
