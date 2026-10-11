@@ -118,6 +118,24 @@ describe('open -', () => {
   });
 });
 
+describe('docs of a kind this version does not know', () => {
+  test('a doc made by a newer SpecReview is left out of listings and refused by id, never taken for a file', async () => {
+    assert.equal((await cli(['open', 'docs/kitchen-sink.md'])).code, 0);
+    assert.equal((await cli(['open', '-', '--name', 'notes'], { input: NOTES })).code, 0);
+    const file = path.join(ws.root, '.specreview', 'docs', 'notes', 'doc.json');
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), kind: 'code' }));
+    const status = await cli(['status']);
+    assert.equal(status.code, 0, status.stderr);
+    assert.match(status.stdout, /^kitchen-sink /m);
+    assert.doesNotMatch(status.stdout, /^notes /m);
+    for (const argv of [['wait', 'notes', '--timeout', '1s'], ['feedback', 'notes']]) {
+      const r = await cli(argv);
+      assert.equal(r.code, 3, `${argv.join(' ')}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /notes is a "code" doc, made by a newer SpecReview than this one \(file, snapshot\): run the specreview that made it, or update this one/);
+    }
+  });
+});
+
 describe('open <dir>', () => {
   test('tracks the spec files recursively, skips dot-dirs, node_modules and outside symlinks, prints the home URL', async () => {
     const d = (/** @type {string} */ rel, text = '# T\n\ntext\n') => {
