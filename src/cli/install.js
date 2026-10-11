@@ -106,6 +106,40 @@ export function isOurHook(hook) {
 }
 
 /**
+ * @param {any} hook a hook handler ({type, command, ...})
+ * @returns {boolean} whether it is SpecReview's plan-mode gate (`specreview plan-gate`)
+ */
+export function isPlanGateHook(hook) {
+  return PLAN_GATE_RE.test(String(hook?.command ?? ''));
+}
+
+/**
+ * Which SpecReview hooks a Claude Code settings file already has: the regular hooks (pre-write, prompt) and the
+ * plan-mode gate. An unreadable or invalid file has none.
+ * @param {string} file
+ * @returns {{ hooks: boolean, planGate: boolean }}
+ */
+export function installedHooks(file) {
+  const found = { hooks: false, planGate: false };
+  let settings;
+  try {
+    settings = readJsonFile(file, undefined)?.value;
+  } catch {
+    return found;
+  }
+  const events = settings?.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks) ? settings.hooks : {};
+  for (const groups of Object.values(events)) {
+    for (const g of Array.isArray(groups) ? groups : []) {
+      for (const h of Array.isArray(g?.hooks) ? g.hooks : []) {
+        if (isPlanGateHook(h)) found.planGate = true;
+        else if (isOurHook(h)) found.hooks = true;
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * Whether an executable named `name` is on $PATH.
  * @param {string} name
  * @param {string} [pathEnv]
@@ -232,14 +266,20 @@ export function planClaude(o) {
       ` Run \`npm link\` in ${PACKAGE_ROOT} (then re-run this install) to use the short command.`);
   }
 
-  if (o.withHooks || o.withPlanGate) {
-    const settingsPath = path.join(base, 'settings.json');
-    const entries = hookEntries({ execPath: o.execPath, binPath: o.binPath, planGate: Boolean(o.withPlanGate), hooks: Boolean(o.withHooks) });
+  // Hooks: the ones asked for, plus SpecReview hooks already in settings.json, which are re-pointed at this CLI so a
+  // re-install (from another checkout, or after the old one moved) never leaves them running a stale path.
+  const settingsPath = path.join(base, 'settings.json');
+  const present = installedHooks(settingsPath);
+  const withHooks = Boolean(o.withHooks) || present.hooks;
+  const withPlanGate = Boolean(o.withPlanGate) || present.planGate;
+  if (withHooks || withPlanGate) {
+    const entries = hookEntries({ execPath: o.execPath, binPath: o.binPath, planGate: withPlanGate, hooks: withHooks });
     const action = jsonFileAction(settingsPath, (current) => mergeHooks(current, entries));
-    action.note = `hooks: ${describeHookEntries(entries)} (other settings kept)`;
+    const kept = (!o.withHooks && present.hooks) || (!o.withPlanGate && present.planGate) ? '; updates the SpecReview hooks already there' : '';
+    action.note = `hooks: ${describeHookEntries(entries)} (other settings kept${kept})`;
     action.detail = JSON.stringify(entries, null, 2);
     files.push(action);
-    notes.push('Use either the Claude Code plugin or `install claude --with-hooks`, not both: the hooks would run twice.');
+    if (withHooks) notes.push('Use either the Claude Code plugin or these settings.json hooks, not both: the hooks would run twice.');
   }
 
   if (o.withMcp) {

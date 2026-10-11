@@ -58,6 +58,11 @@ test('blockAction / removeBlockAction: create, update with a backup, unchanged; 
   const c = blockAction(fresh, MD_BLOCK, MD_MARKERS, { what: 'the block' });
   assert.equal(c.action, 'create');
   assert.equal(c.backup, undefined);
+  assert.match(String(c.note), /^new file with the block \(\d+ lines\)$/);
+  const empty = blockAction(file('empty.md', '\n'), MD_BLOCK, MD_MARKERS, { what: 'the block' });
+  assert.equal(empty.action, 'update', 'an existing empty file is updated, not created');
+  assert.match(String(empty.note), /^fills the empty file with the block \(\d+ lines\)$/);
+  assert.equal(empty.backup, undefined, 'nothing to back up');
   const existing = file('AGENTS.md', '# Mine\n');
   const u = blockAction(existing, MD_BLOCK, MD_MARKERS, { what: 'the block' });
   assert.equal(u.action, 'update');
@@ -141,7 +146,7 @@ test('copies: recognised by content, template (any invocation note) or a manifes
   const c = copyAction(f, template, { template });
   assert.equal(c.action, 'update');
   assert.equal(c.backupPath, `${f}.specreview-backup`);
-  assert.match(String(c.note), /replaces a file SpecReview did not write \(backed up to \d+-SKILL\.md\.specreview-backup\)/);
+  assert.match(String(c.note), /replaces an older or edited copy \(backed up to \d+-SKILL\.md\.specreview-backup\)/);
   // A backup with this content exists: none needed. One with other content: a timestamped one.
   fs.writeFileSync(`${f}.specreview-backup`, 'mine\n');
   assert.equal(copyAction(f, template, { template }).backupPath, undefined);

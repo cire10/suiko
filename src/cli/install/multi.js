@@ -58,7 +58,7 @@ export const MANIFEST_FILE = 'install-manifest.json';
  * Builds the installer context from the runtime. HOME must be known (deps.home, $HOME or $USERPROFILE): the
  * installer never guesses which home directory to write into.
  * @param {import('../runtime.js').Runtime} rt
- * @param {{ scope: 'user' | 'project' }} o
+ * @param {{ scope: 'user' | 'project', planGate?: boolean }} o
  * @returns {Ctx}
  */
 export function buildContext(rt, o) {
@@ -82,6 +82,7 @@ export function buildContext(rt, o) {
     pathEnv,
     manifest: loadManifest(manifestPath(env)),
     ...(rt.deps.claudeHome ? { claudeHome: rt.deps.claudeHome } : {}),
+    ...(o.planGate ? { planGate: true } : {}),
   };
 }
 

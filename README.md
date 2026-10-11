@@ -103,7 +103,7 @@ What it configures (user scope; `--project` writes the project-level equivalents
 
 | Agent | Detected by | What `specreview install` writes |
 |---|---|---|
-| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and three hooks in `settings.json` with absolute paths: `PreToolUse` on `Write`, `UserPromptSubmit`, and the plan-mode gate (`PermissionRequest` on `ExitPlanMode`, which opens Claude's plan in SpecReview). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
 | Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
 | Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
 | Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
@@ -161,8 +161,9 @@ The plugin adds:
 - the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
 - the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
 - the **`/specreview-last`** command: opens Claude's previous message for review (see [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text));
-- two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up;
-- the **plan-mode gate**: `specreview plan-gate` (PermissionRequest on `ExitPlanMode`) sends every plan through SpecReview before Claude may leave plan mode (see [Plan-mode gate](#plan-mode-gate)).
+- two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
+
+The plugin leaves plan mode alone. The [plan-mode gate](#plan-mode-gate) is opt-in.
 
 The plugin's hooks run `specreview` from your `PATH`. That works when Claude Code starts from a terminal. If you use nvm, asdf or Volta and start Claude Code from the Dock or the desktop app, it may not see your shell's `PATH`, so the hooks fail with `command not found` (non-blocking, but they do nothing). Use 2b instead.
 
@@ -173,7 +174,7 @@ specreview install claude --user                        # prints exactly what it
 specreview install claude --user --with-hooks --apply   # writes it
 ```
 
-This installs the skill and the commands (and with `--with-hooks`, the hooks; with `--with-plan-gate`, the plan-mode gate) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). `specreview install` (no target) does all of this for Claude Code, plus the other agents it finds. The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
+This installs the skill and the commands (and with `--with-hooks`, the hooks; with `--with-plan-gate`, the plan-mode gate) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). `specreview install` (no target) does the same for Claude Code, hooks included (the plan gate only with `--with-plan-gate`), plus the other agents it finds. The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
 
 ### 2c. MCP (Claude Code, Claude Desktop, Cursor, and other MCP clients)
 
@@ -364,14 +365,16 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 
 ## Plan-mode gate
 
-With the plugin installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in SpecReview and Claude waits for your review. Comment on it as on any spec, then submit:
+This is optional, and off unless you install it. SpecReview is meant for the reviews you ask for: run `/review-spec`, `/specreview-last` or `specreview open` when a plan, spec or doc is worth getting right, then iterate on it with Claude and implement from it. The gate is for people who want every Claude Code plan reviewed that way.
+
+With the gate installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in SpecReview and Claude waits for your review. Comment on it as on any spec, then submit:
 
 - **Approve**: Claude leaves plan mode and starts on the plan.
 - **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed, and the threads it changed are marked addressed for **Verify**.
 
 Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so request changes when they matter.
 
-The plugin registers the gate in `hooks/hooks.json`. `specreview install` (every detected agent) adds it for Claude Code with absolute paths. The single-agent `specreview install claude --with-hooks` leaves it out unless you add `--with-plan-gate`, since it changes how plan mode works. To add it by hand, put this in your Claude Code settings (with nvm and friends, use absolute paths: `"\"/path/to/node\" \"/path/to/specreview/bin/specreview.js\" plan-gate"`):
+Neither the plugin nor `specreview install` adds the gate by default. Add it with `specreview install --with-plan-gate --apply` (or `specreview install claude --with-plan-gate --apply`), which writes it into `settings.json` with absolute paths. Later installs keep it, and `specreview uninstall` removes it. To add it by hand, for example next to the plugin, put this in your Claude Code settings (with nvm and friends, use absolute paths: `"\"/path/to/node\" \"/path/to/specreview/bin/specreview.js\" plan-gate"`):
 
 ```json
 {"hooks": {"PermissionRequest": [{"matcher": "ExitPlanMode", "hooks": [{"type": "command", "command": "specreview plan-gate", "timeout": 345600}]}]}}

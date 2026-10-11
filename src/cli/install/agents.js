@@ -4,10 +4,11 @@
 // COPILOT_HOME) and plans FileActions for install and uninstall through a Planner. Only surfaces verified in the
 // agent's official docs are written (sources below); everything else is listed as unverified and never touched.
 //
-//   claude          skill + every command file + hooks (PreToolUse Write, UserPromptSubmit) + plan-mode gate
-//                   (PermissionRequest/ExitPlanMode) in settings.json (--project: .claude/settings.local.json, which is
-//                   not committed), absolute node/script paths; skipped when the SpecReview plugin is installed for
-//                   this scope/project (the hooks would run twice), with a warning when settings hooks are left over
+//   claude          skill + every command file + hooks (PreToolUse Write, UserPromptSubmit) in settings.json
+//                   (--project: .claude/settings.local.json, which is not committed), absolute node/script paths; the
+//                   plan-mode gate (PermissionRequest/ExitPlanMode) only with --with-plan-gate or when one is already
+//                   there. Skipped when the SpecReview plugin is installed for this scope/project (the hooks would run
+//                   twice), with a warning when settings hooks are left over
 //   codex           protocol block in $CODEX_HOME/AGENTS.md (AGENTS.override.md when that is in use), the shared skill
 //                   in ~/.agents/skills, [mcp_servers.specreview] in a marked block of config.toml (toml.js)
 //   gemini          protocol block in ~/.gemini/GEMINI.md (or the configured context file), /specreview-review TOML
@@ -26,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PACKAGE_ROOT } from '../daemon-client.js';
-import { AGENTS_SNIPPET, claudeCopies, describeHookEntries, hookEntries, isOnPath, isOurHook, mergeHooks, removeOurHooks } from '../install.js';
+import { AGENTS_SNIPPET, claudeCopies, describeHookEntries, hookEntries, installedHooks, isOnPath, isOurHook, isPlanGateHook, mergeHooks, removeOurHooks } from '../install.js';
 import {
   GEMINI_COMMAND, OPENCODE_COMMAND, SKILL_NAME, SKILL_TEMPLATE, agentSkill, codexTomlBlock, geminiCommand, kiroSteering,
   opencodeCommand, protocolBlock,
@@ -54,6 +55,7 @@ import { definitionsOutside } from './toml.js';
  * @property {string} pathEnv PATH used for detection
  * @property {import('./files.js').Manifest} manifest
  * @property {string} [claudeHome] override of the Claude Code config dir
+ * @property {boolean} [planGate] --with-plan-gate: also install Claude Code's plan-mode gate (opt-in)
  */
 
 /**
@@ -445,7 +447,8 @@ const claudeSettings = (c) => path.join(claudeBase(c), c.scope === 'project' ? '
 const claudeSettingsFiles = (c) => (c.scope === 'project' ? [claudeSettings(c), path.join(claudeBase(c), 'settings.json')] : [claudeSettings(c)]);
 
 /**
- * SpecReview hook commands found in the settings files of this scope (an earlier settings install).
+ * SpecReview hook commands found in the settings files of this scope (an earlier settings install), except the
+ * plan-mode gate: the plugin does not include it, so a gate in settings.json next to the plugin runs once.
  * @param {Ctx} c
  * @returns {Array<{ file: string, commands: string[] }>}
  */
@@ -457,7 +460,7 @@ function settingsHooks(c) {
     const commands = [];
     for (const groups of Object.values(hooks)) {
       for (const g of Array.isArray(groups) ? groups : []) {
-        for (const h of Array.isArray(g?.hooks) ? g.hooks : []) if (isOurHook(h)) commands.push(String(h.command));
+        for (const h of Array.isArray(g?.hooks) ? g.hooks : []) if (isOurHook(h) && !isPlanGateHook(h)) commands.push(String(h.command));
       }
     }
     if (commands.length) out.push({ file, commands });
@@ -512,7 +515,10 @@ const claude = {
     for (const cp of claudeCopies(base, c)) {
       p.add(() => copyAction(cp.target, cp.content, { source: cp.source, template: cp.template, manifest: c.manifest }));
     }
-    const entries = hookEntries({ execPath: c.execPath, binPath: c.binPath, planGate: true, hooks: true });
+    // The plan-mode gate is opt-in (--with-plan-gate): SpecReview is for the reviews you ask for, not every plan. A gate
+    // already in the settings file (an earlier opt-in) is kept and re-pointed at this CLI like the other hooks.
+    const planGate = Boolean(c.planGate) || installedHooks(claudeSettings(c)).planGate;
+    const entries = hookEntries({ execPath: c.execPath, binPath: c.binPath, planGate, hooks: true });
     p.add(() =>
       jsonAction(claudeSettings(c), (s) => mergeHooks(s, entries), {
         note: `hooks: ${describeHookEntries(entries)}; other settings kept`,
@@ -520,7 +526,7 @@ const claude = {
         fix: 'add the hooks shown above under "hooks" by hand',
       }),
     );
-    p.note('Plan mode: when Claude calls ExitPlanMode, the plan opens in SpecReview; approving it there approves the plan, and the terminal dialog stays usable.');
+    if (planGate) p.note('Plan mode: when Claude calls ExitPlanMode, the plan opens in SpecReview; approving it there approves the plan, and the terminal dialog stays usable.');
     if (c.scope === 'project') p.note('The hooks go to .claude/settings.local.json, Claude Code\'s personal project settings: keep it out of git.');
   },
   uninstall(c, p) {

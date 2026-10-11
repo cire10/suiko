@@ -1,5 +1,5 @@
 {
-  "description": "SpecReview: deny Write calls that would rewrite most of a spec under review (use Edit instead), surface submitted reviews that no background wait picked up, and gate ExitPlanMode: the plan opens in SpecReview and the hook blocks until the reviewer submits (Approve allows it, Request changes or Comment denies it with the feedback). Every hook prints nothing on error and exits 0, so Claude Code's own prompt still works. `specreview install claude --with-hooks` leaves the plan gate out unless --with-plan-gate is given.",
+  "description": "SpecReview: deny Write calls that would rewrite most of a spec under review (use Edit instead), and surface submitted reviews that no background wait picked up. Every hook prints nothing on error and exits 0, so Claude Code's own prompt still works. The plan-mode gate is opt-in and not part of the plugin: `specreview install claude --with-plan-gate` adds it to settings.json (or copy the hook that `specreview plan-gate --help` prints).",
   "hooks": {
     "PreToolUse": [
       {
@@ -20,18 +20,6 @@
             "type": "command",
             "command": "specreview hook prompt",
             "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "specreview plan-gate",
-            "timeout": 345600
           }
         ]
       }
