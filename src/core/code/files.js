@@ -98,14 +98,15 @@ function pairRounds(A, B) {
 }
 
 /**
- * The new-side text of a file of a pair (a dropped file: its base text; a missing side: ''); null for a stub.
+ * The new-side text of a file of a pair (a dropped file: its base text; a file new to the review: the base text of
+ * its path, or of its old path for a rename; an added file: ''); null for a stub.
  * @param {Reader} r
  * @param {CodeFile | null} f
  * @param {CodeFile | null} other the paired file (a file new to the review: its base text was its content)
  */
 async function newText(r, f, other) {
   if (!f) {
-    if (!other || other.status === 'A' || other.status === 'R') return '';
+    if (!other || other.status === 'A') return '';
     return other.binary || !hasText(other, 'old') ? null : r.text(other.old);
   }
   if (f.status === 'D') return '';
@@ -162,7 +163,7 @@ export async function codeFiles(ctx, ref, q) {
   for (const p of pairRounds(A.code, B.code)) {
     /** @type {'changed' | 'added' | 'dropped' | 'renamed' | null} */
     let change = null;
-    if (!p.h) change = p.n?.status === '=' ? null : 'added';
+    if (!p.h) change = p.n?.status === '=' ? null : p.n?.status === 'R' ? 'renamed' : 'added';
     else if (!p.n) change = 'dropped';
     else if (p.n.path !== p.h.path) change = 'renamed';
     else if (identity(p.h) !== identity(p.n)) change = 'changed';
@@ -183,7 +184,8 @@ export async function codeFiles(ctx, ref, q) {
         if (ch.version > from && ch.version <= to && typeof ch.hunk === 'string' && (ch.hunk.startsWith(`${p.path}#`) || (p.h && ch.hunk.startsWith(`${p.h.path}#`)))) linked.add(t.id);
       }
     }
-    out.push({ path: p.path, ...(p.n && p.h && p.n.path !== p.h.path ? { oldPath: p.h.path } : {}), change, added, removed, threads: [...linked].sort(compareIds) });
+    const oldPath = p.n && p.h && p.n.path !== p.h.path ? p.h.path : p.n && !p.h && p.n.status === 'R' ? p.n.oldPath : null;
+    out.push({ path: p.path, ...(oldPath ? { oldPath } : {}), change, added, removed, threads: [...linked].sort(compareIds) });
   }
   return { from, to, files: out };
 }
@@ -428,13 +430,18 @@ export async function codeUnifiedDiff(ctx, ref, range) {
   const parts = [];
   if (from !== to) {
     for (const p of pairRounds(A.code, B.code)) {
-      const hPath = p.h?.path ?? p.path;
+      const hPath = p.h?.path ?? (p.n?.status === 'R' ? p.n.oldPath : p.path);
       const [a, b] = await Promise.all([newText(r, p.h, p.n), newText(r, p.n, p.h)]);
       if (a === null || b === null) {
         if (identity(p.h) !== identity(p.n)) parts.push(`Binary or too-large file ${p.path} changed (v${from} -> v${to})\n`);
         continue;
       }
-      const patch = unifiedPatch(a, b, { fromLabel: `a/${hPath}@v${from}`, toLabel: `b/${p.path}@v${to}`, context });
+      if (a === b && hPath !== p.path) {
+        parts.push(`--- a/${hPath}@v${from}\n+++ b/${p.path}@v${to}\n(renamed, content unchanged)\n`);
+        continue;
+      }
+      const fromLabel = !p.h && p.n?.status === 'A' ? '/dev/null' : `a/${hPath}@v${from}`;
+      const patch = unifiedPatch(a, b, { fromLabel, toLabel: `b/${p.path}@v${to}`, context });
       if (patch) parts.push(patch);
     }
   }
