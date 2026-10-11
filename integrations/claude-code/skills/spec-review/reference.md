@@ -13,6 +13,7 @@
 - [Anchor states](#anchor-states)
 - [Locks and decisions](#locks-and-decisions)
 - [Hooks](#hooks)
+- [Snapshot docs](#snapshot-docs)
 - [MCP tools](#mcp-tools)
 - [Writing specs that review well](#writing-specs-that-review-well)
 
@@ -30,6 +31,9 @@
 | Command | What it does | Exit |
 |---|---|---|
 | `open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track the doc, record v1 if new, start the local server, print the UI URL. Warns if the working copy differs from head. | 0 |
+| `open <dir>` | Every `.md`/`.markdown`/`.html`/`.htm` file below the folder (no dot-directories or `node_modules`, at most 200; says what it skipped): one line per doc, then the UI's home URL listing them. | 0 |
+| `open - [--name N] [--title T]` | Review Markdown piped on stdin (at most 5 MB) as a snapshot doc: a new doc each time, or with `--name` the doc of that name (piping it again records a new version). | 0 |
+| `last [--session <id>] [--transcript <path>] [--title T]` | Open your last message (Claude Code transcript of `$CLAUDE_CODE_SESSION_ID`) as a snapshot doc; prints the URL and the background `wait` command and returns. Codex transcripts are not supported. | 0 / 4 |
 | `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted, print the packet for **all** undelivered reviews, mark them delivered. Returns at once if one is already waiting. Exits 3 at once if the working copy differs from head (unless `--allow-dirty`). | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The same packet without blocking. Marks it delivered unless `--peek`. `--all-open` also lists threads waiting on the reviewer. | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestion threads verbatim to the working copy (staged, not recorded). | 0 / 3 |
@@ -37,6 +41,7 @@
 | `edit <doc> --stdin` | Batch: `[{"threads":["t1"],"old":"...","new":"...","all":false}]` on stdin. | 0 / 3 |
 | `reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without recording a version. | 0 / 4 |
 | `revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record the working copy as a new version, with replies; runs the guards. | 0 / 3 |
+| `revise <doc> --source <file\|-> [--replies <file\|->]` | Snapshot docs: record the given text as the new version (guards only warn). With `--source -` the replies must come from a file. | 0 |
 | `revert <doc> (--hunk hN \| --lock L1)` | Reverse one head-to-working hunk, or write a lock's agreed text back. | 0 / 3 |
 | `reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor. Applies to head when the working copy is clean, else staged until the next revise. | 0 / 3 |
 | `ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | Ask the reviewer a question anchored on the doc (status `needs_input`). | 0 / 3 |
@@ -51,6 +56,7 @@
 | `serve [--foreground] [--port N]`, `stop [--rotate]`, `doctor [--fix]` | Local server control and health checks. | |
 | `mcp` | stdio MCP server. | |
 | `hook pre-write`, `hook prompt` | Claude Code hook entry points. | always 0 |
+| `plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (PermissionRequest hook, matcher ExitPlanMode). | always 0 |
 | `install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]`, `install agents-md [--apply]` | Print (or with `--apply`, write) the integration files. | 0 |
 
 Exit codes: 0 ok or delivered · 1 error or bad usage · 2 wait timed out · 3 refused (guard, dirty working copy, conflict, `old` not unique) · 4 doc, thread or version not found · 5 session closed · 6 superseded by a newer `wait` for the same doc and agent.
@@ -265,6 +271,14 @@ If an anchor is wrong, move it: `specreview reanchor <doc> tN --lines A-B` or `-
 - **`hook pre-write`** (PreToolUse, matcher `Write`): if the target is a tracked doc that has at least one review and is not closed, and the Write would change more than 40% of its lines, it denies the Write with a reason pointing to Edit, `specreview apply` and `specreview edit` (in `warn` mode it asks the user instead). Small Writes are allowed.
 - **`hook prompt`** (UserPromptSubmit): adds a note to the prompt when a submitted review on a doc in this workspace was not delivered and nothing is waiting for it, or was delivered more than about 5 minutes ago but never acted on. Example: `specreview: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run specreview feedback token-service and address it per the spec-review skill.` When the current directory has no workspace of its own, the registered workspaces below it are checked and the command names them (`specreview feedback token-service --workspace notes/specs`).
 - Both always exit 0 and print nothing on error.
+- **`plan-gate`** (PermissionRequest, matcher `ExitPlanMode`, timeout 345600): records the plan (the plan file, else the inline plan) as a snapshot doc, a new version on each ExitPlanMode of the same plan file in the session, opens the UI and blocks until the review (`wait --all` never takes a plan review). Threads your new version changed are marked addressed (`Changed in vN.`). Approved: allows ExitPlanMode. Request changes or Comment: denies it with feedback citing the plan file and its lines (`YOUR PLAN WAS NOT APPROVED ...`): make targeted Edit-tool changes to the plan file and call ExitPlanMode again. On any error, or when the user answers in the terminal, it prints nothing and exits 0. Comments sent with an approval are not passed on.
+
+## Snapshot docs
+
+A plan, your last message or piped text is a **snapshot doc**: no working file (its synthetic path, e.g. `plans/<slug>.md`, is never read or written), versions recorded from text. Threads, re-anchoring, attribution, Changes and History work as for files. Differences:
+- `apply`, `edit` and `revert` are refused; revise with `revise <doc> --source <file> --replies -` (or, for a plan, edit the plan file and call ExitPlanMode again).
+- Guards still run, but their errors are recorded as warnings: nothing is refused.
+- When the current directory cannot be a workspace (your home directory or `/`), the doc goes to a scratch workspace under `$SPECREVIEW_HOME/scratch/`, and every printed command carries `--workspace <dir>`: keep it.
 
 ## MCP tools
 

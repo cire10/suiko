@@ -22,6 +22,7 @@ import { readLastJsonLine } from '../../store/jsonl.js';
 import { renderSource } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { autoCommit } from '../git.js';
+import { docRefFor, isSnapshot, originType, planFileOf } from '../../store/snapshot.js';
 import { pathFromCwd } from '../packet-data.js';
 import { anchorAt, isActionable, isOutdated } from '../threadstate.js';
 import {
@@ -170,6 +171,8 @@ export async function listDocsAcrossWorkspaces(_ctx) {
         root: ws.root,
         id: doc.id,
         path: doc.path,
+        kind: isSnapshot(doc) ? 'snapshot' : 'file',
+        origin: originType(doc) || null,
         title: doc.title,
         format: doc.format,
         head: doc.head,
@@ -284,11 +287,15 @@ export async function status(ctx, ref = null) {
         working = 'missing';
       }
     }
+    const snapshot = isSnapshot(doc);
     out.push({
       doc: doc.id,
       path: doc.path,
-      file: path.join(ctx.root, ...doc.path.split('/')),
-      pathFromCwd: pathFromCwd(doc.path, ctx.root, ctx.cwd),
+      // a snapshot doc has no working file (its path is synthetic): say what it is instead
+      ...(snapshot ? { kind: 'snapshot', origin: originType(doc), ref: docRefFor(doc.id, ctx.root) } : {}),
+      // (a plan snapshot names its plan file; other snapshots have no file to reach)
+      file: snapshot ? planFileOf(doc) : path.join(ctx.root, ...doc.path.split('/')),
+      pathFromCwd: snapshot ? planFileOf(doc) : pathFromCwd(doc.path, ctx.root, ctx.cwd),
       title: doc.title,
       head: doc.head,
       headAuthor: headM?.author?.name ?? null,

@@ -47,6 +47,7 @@ import { HttpError, notFound, sendFile, sendText } from './http-util.js';
 import { contentTypeOf } from './mime.js';
 import { encodeRelPath, encodeSegments, isAllowedHost, isSafeMethod, loopbackOrigins, parseTarget, setBaseHeaders } from './security.js';
 import { DOC_KEY_RE } from './workspaces.js';
+import { isSnapshot } from '../core/store/snapshot.js';
 
 const log = createLogger('daemon.content');
 
@@ -365,6 +366,8 @@ export class ContentOrigin {
         }
       }
     }
+    // a snapshot doc (piped text, an agent message, a plan) is not a workspace file: it never reaches workspace files
+    if (!listed && isSnapshot(doc)) throw notFound();
     const abs = realpathWithin(store.root, rel);
     if (!abs) throw notFound();
     // the real file must not be a denied path either (a symlink into .git/, a key file...)

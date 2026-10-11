@@ -25,6 +25,7 @@ export { feedback, buildDocPacket } from './ops/feedback.js';
 export { waitForFeedback } from './ops/wait.js';
 export { applySuggestions, taggedEdit, taggedEdits, revert } from './ops/edits.js';
 export { revise, parseReviseInput } from './ops/revise.js';
+export { openSnapshot, recordSnapshot, takeSnapshot } from './ops/snapshot.js';
 export { reply, ask, reanchorThread } from './ops/threads.js';
 export { finalize } from './ops/final.js';
 

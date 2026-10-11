@@ -4,21 +4,22 @@
 //   spec    { name, usage, summary, options }          options are node:util parseArgs specs (global ones added)
 //   parse(parsed, rt) -> input                          argv -> normalised input (may read stdin)
 //   execute(rt, input) -> CommandResult                 shared with the MCP server (same text, same JSON)
-// Daemon/installer commands (serve, stop, doctor, mcp, install) only implement parse + execute for the CLI.
+// Daemon/installer commands (serve, stop, doctor, mcp, install, uninstall) only implement parse + execute for the CLI.
 
 /** @type {Record<string, { load: () => Promise<any>, summary: string, group: string }>} */
 export const COMMANDS = {
-  open: { load: () => import('./open.js'), summary: 'Track a spec, record v1, start the server and print the review URL', group: 'loop' },
+  open: { load: () => import('./open.js'), summary: 'Track a spec (a file, a folder, or - for stdin), start the server, print the URL', group: 'loop' },
   wait: { load: () => import('./wait.js'), summary: 'Block until the reviewer submits a review; print the feedback packet', group: 'loop' },
   feedback: { load: () => import('./feedback.js'), summary: 'Print the feedback packet now (marks it delivered unless --peek)', group: 'loop' },
   apply: { load: () => import('./apply.js'), summary: 'Apply suggestion threads verbatim to the working copy', group: 'loop' },
   edit: { load: () => import('./edit.js'), summary: 'Thread-tagged exact replace (or a JSON batch with --stdin)', group: 'loop' },
   reply: { load: () => import('./reply.js'), summary: 'Reply on a thread without recording a version', group: 'loop' },
-  revise: { load: () => import('./revise.js'), summary: 'Record the working copy as a new version, with replies', group: 'loop' },
+  revise: { load: () => import('./revise.js'), summary: 'Record the working copy (or --source text) as a new version, with replies', group: 'loop' },
   revert: { load: () => import('./revert.js'), summary: 'Undo one unrecorded hunk, or restore a locked range', group: 'loop' },
   reanchor: { load: () => import('./reanchor.js'), summary: "Move a thread's anchor to other lines or text", group: 'loop' },
   ask: { load: () => import('./ask.js'), summary: 'Ask the reviewer a question anchored on the doc', group: 'loop' },
   snip: { load: () => import('./snip.js'), summary: 'Reviewer: snip the screen (macOS) into a draft comment, or --send it now', group: 'loop' },
+  last: { load: () => import('./last.js'), summary: "Review the agent's last message (Claude Code transcript)", group: 'loop' },
   threads: { load: () => import('./threads.js'), summary: 'List threads, one line each', group: 'inspect' },
   show: { load: () => import('./show.js'), summary: 'Show a thread with its timeline, or old source lines', group: 'inspect' },
   diff: { load: () => import('./diff.js'), summary: 'What changed between versions (default: last reviewed..head)', group: 'inspect' },
@@ -31,7 +32,9 @@ export const COMMANDS = {
   doctor: { load: () => import('./doctor.js'), summary: 'Check the installation, server and stores (--fix repairs)', group: 'admin' },
   mcp: { load: () => import('./mcp.js'), summary: 'Run the stdio MCP server', group: 'admin' },
   hook: { load: () => import('./hook.js'), summary: 'Claude Code hook entry points: hook pre-write | hook prompt', group: 'admin' },
-  install: { load: () => import('./install.js'), summary: 'install claude [--user|--project] [--with-hooks] [--with-mcp] [--apply] | install agents-md [--apply]', group: 'admin' },
+  'plan-gate': { load: () => import('./plan-gate.js'), summary: 'Claude Code plan-mode gate (PermissionRequest hook for ExitPlanMode)', group: 'admin' },
+  install: { load: () => import('./install.js'), summary: 'Configure SpecReview for the agents found here (dry run; --apply writes). Also: install claude | agents-md', group: 'admin' },
+  uninstall: { load: () => import('./uninstall.js'), summary: 'Remove what install added, per agent (dry run; --apply removes)', group: 'admin' },
 };
 
 /**

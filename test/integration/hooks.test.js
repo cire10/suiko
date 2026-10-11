@@ -193,6 +193,18 @@ describe('hook prompt', () => {
     assert.match(hook('prompt', payload()).stdout, /not delivered/);
   });
 
+  test('a doc of a kind this version does not know (a newer SpecReview made it) is ignored, not taken for a file', () => {
+    const file = path.join(ws.root, '.specreview', 'docs', 'token-service', 'doc.json');
+    const text = fs.readFileSync(file, 'utf8');
+    try {
+      fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(text), kind: 'code' }));
+      assert.equal(hook('prompt', payload()).stdout, '');
+    } finally {
+      fs.writeFileSync(file, text);
+    }
+    assert.match(hook('prompt', payload()).stdout, /not delivered/);
+  });
+
   test('delivered recently -> silent; delivered > 5 min ago and not acked -> reminder; acked -> silent', async () => {
     await ws.store.saveReview('token-service', review({ deliveredTo: { claude: new Date().toISOString() } }));
     assert.equal(hook('prompt', payload()).stdout, '');

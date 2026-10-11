@@ -3,9 +3,11 @@
 //
 // ensureDaemon():
 //   1. Read <SPECREVIEW_HOME>/daemon.json and GET http://127.0.0.1:<uiPort>/api/health (500 ms timeout).
-//   2. Healthy specreview daemon with our package version -> reuse it (fast path, no lock).
+//   2. Healthy specreview daemon with our package version and code (`build`, core/util/build.js: the package folder
+//      and its code files) -> reuse it (fast path, no lock). Every checkout reports the same version, so a daemon
+//      started from another checkout, or before the code changed, is told apart by its build.
 //   3. Otherwise, under a home-level start lock (so concurrent CLIs spawn at most one daemon): re-check; if a
-//      daemon of another version answers, POST /api/shutdown (Bearer token + same-origin Origin) and wait for it to
+//      daemon of another version or build answers, POST /api/shutdown (Bearer token + same-origin Origin) and wait for it to
 //      exit; then spawn `process.execPath bin/specreview.js serve --foreground` detached with stdout/stderr
 //      appended to daemon.log, unref() it, and poll daemon.json + /api/health for up to 5 s.
 //   Token, secret and ports persist in daemon.json across restarts (the daemon reuses them); `stop --rotate`
@@ -21,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { SpecReviewError } from '../core/store/errors.js';
 import { daemonLogPath, ensureHome, homeDir, homePath, readDaemonInfo, removeDaemonInfo } from '../core/store/home.js';
 import { withLock } from '../core/store/lock.js';
+import { codeIdentity } from '../core/util/build.js';
 import { createLogger } from '../core/util/log.js';
 import { pidAlive } from '../core/util/proc.js';
 import { APP_NAME, EXIT } from '../shared/protocol.js';
@@ -50,13 +53,23 @@ export function packageVersion() {
 }
 
 /**
+ * The code this CLI runs: the real path of the package folder and the fingerprint of its code files. A running
+ * daemon is reused only when its /api/health reports the same build.
+ * @returns {{ root: string, build: string }}
+ */
+export function packageIdentity() {
+  return codeIdentity(PACKAGE_ROOT);
+}
+
+/**
  * @typedef {import('../shared/types.js').DaemonInfo} DaemonInfo
- * @typedef {{ ok: boolean, name?: string, version?: string, pid?: number }} Health
+ * @typedef {{ ok: boolean, name?: string, version?: string, build?: string, pid?: number }} Health
  */
 
 /**
  * @typedef {object} EnsureOptions
  * @property {string} [version] expected daemon version (default: package version)
+ * @property {string} [build] expected daemon build (default: packageIdentity().build)
  * @property {string[]} [command] argv of the daemon process (default: [execPath, bin, 'serve', '--foreground'])
  * @property {Record<string, string | undefined>} [env] environment of the spawned daemon
  * @property {number} [startTimeoutMs] how long to wait for a spawned daemon to become healthy (default 5000)
@@ -64,35 +77,48 @@ export function packageVersion() {
  */
 
 /**
- * Makes sure a daemon of our version is running and returns its info (from daemon.json).
+ * Makes sure a daemon running our code (same version and build) is running and returns its info (from daemon.json).
  * @param {EnsureOptions} [opts]
  * @returns {Promise<DaemonInfo>}
  */
 export async function ensureDaemon(opts = {}) {
   const version = opts.version ?? packageVersion();
+  const build = opts.build ?? packageIdentity().build;
+  /** @param {Health} h */
+  const ours = (h) => h.version === version && h.build === build;
   const healthTimeoutMs = opts.healthTimeoutMs ?? 500;
   const fast = await liveDaemon(healthTimeoutMs);
-  if (fast && fast.health.version === version) return fast.info;
+  if (fast && ours(fast.health)) return fast.info;
 
   ensureHome();
   return withLock(
     homePath('locks', 'daemon-start'),
     async () => {
       const current = await liveDaemon(healthTimeoutMs);
-      if (current && current.health.version === version) return current.info;
+      if (current && ours(current.health)) return current.info;
       if (current) {
-        log.info(`daemon version ${current.health.version} != ${version}; restarting it`);
+        log.info(`the daemon runs ${codeOf(current.health, current.info)}, this CLI ${version} build ${build} at ${PACKAGE_ROOT}; restarting it`);
         await shutdownAndWait(current.info, current.health, 5000);
       }
       const spawned = await spawnDaemon(opts);
-      if (spawned.health.version !== version) {
+      if (!ours(spawned.health)) {
         // Never loop restarting: a freshly started daemon is what this installation runs.
-        log.warn(`the started daemon reports version ${spawned.health.version}, expected ${version}`);
+        log.warn(`the started daemon runs ${codeOf(spawned.health, spawned.info)}, expected ${version} build ${build}`);
       }
       return spawned.info;
     },
     { timeoutMs: (opts.startTimeoutMs ?? 5000) + 15000 },
   );
+}
+
+/**
+ * "0.1.0 build 1a2b… at /path" for log lines (a daemon from before builds were reported has none).
+ * @param {Health} health
+ * @param {DaemonInfo} info
+ * @returns {string}
+ */
+export function codeOf(health, info) {
+  return `${health.version ?? '?'} build ${health.build ?? '(none)'}${info.root ? ` at ${info.root}` : ''}`;
 }
 
 /**

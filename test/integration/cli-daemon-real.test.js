@@ -66,7 +66,8 @@ function run(args, env) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [BIN, ...args], {
       cwd: WS,
-      env: { PATH: /** @type {string} */ (process.env.PATH), HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, ...env },
+      // HOME is a temp dir too: `doctor` lists the agent integrations it finds under HOME (never the real ~/.claude).
+      env: { PATH: /** @type {string} */ (process.env.PATH), HOME: path.join(HOME, 'user-home'), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

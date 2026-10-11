@@ -50,6 +50,8 @@ export {};
  * @property {string} token Bearer token for /api/*
  * @property {string} secret HMAC key for per-doc content capability paths
  * @property {string} version package version
+ * @property {string} [root] real path of the package folder the daemon runs from
+ * @property {string} [build] fingerprint of the daemon's code files (core/util/build.js)
  * @property {string} startedAt
  */
 
@@ -60,7 +62,10 @@ export {};
  * @typedef {object} Doc
  * @property {number} schema
  * @property {string} id slug of the basename ('-2' suffix on collision)
- * @property {string} path workspace-relative POSIX path of the working copy
+ * @property {string} path workspace-relative POSIX path of the working copy (synthetic for a snapshot doc:
+ *   '<dir>/<slug>.md', never read or written; see core/store/snapshot.js)
+ * @property {'file' | 'snapshot'} [kind] absent = 'file'
+ * @property {DocOrigin} [origin] where a snapshot doc's content comes from
  * @property {DocFormat} format
  * @property {string} title
  * @property {string} createdAt
@@ -73,6 +78,13 @@ export {};
  */
 
 /** @typedef {{ version: number, review: string, at: string, by: string }} DocFinal */
+
+/**
+ * Provenance of a snapshot doc (doc.json) or of one of its versions (manifest): `type` 'plan' | 'message' |
+ * 'stdin' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
+ * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...).
+ * @typedef {{ type: string, key: string | null } & Record<string, unknown>} DocOrigin
+ */
 
 /**
  * A hunk as recorded in a version manifest (head -> new version), with its attribution.
@@ -101,7 +113,8 @@ export {};
  * @property {Actor} author
  * @property {string} summary
  * @property {string | null} respondsTo review id
- * @property {'open' | 'revise' | 'ui-record' | 'ui-apply'} capturedBy
+ * @property {'open' | 'revise' | 'ui-record' | 'ui-apply' | 'snapshot'} capturedBy
+ * @property {DocOrigin} [origin] snapshot docs: provenance of this version
  * @property {Record<string, string>} assets workspace-relative path -> 'sha256:<hex>' | 'live'
  * @property {{ added: number, removed: number, hunks: number, rewriteRatio: number }} [stats]
  * @property {ManifestHunk[]} [hunks]

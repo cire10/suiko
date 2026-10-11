@@ -37,6 +37,7 @@ const MAX_FRAGMENT_CHARS = 1_000_000;
  * @property {import('./engine.js').Engine} engine
  * @property {import('./sse.js').SseManager} sse
  * @property {string} version package version
+ * @property {string} [build] fingerprint of the code the daemon loaded (core/util/build.js)
  * @property {() => { uiPort: number, contentPort: number }} ports
  * @property {(reason: string) => void} shutdown
  */
@@ -68,7 +69,7 @@ export function registerApiRoutes(router, deps) {
   // ---------------------------------------------------------------- daemon
 
   router.get('/api/health', ({ res }) => {
-    sendJson(res, 200, { ok: true, name: APP_NAME, version: deps.version, pid: process.pid });
+    sendJson(res, 200, { ok: true, name: APP_NAME, version: deps.version, build: deps.build, pid: process.pid });
   });
 
   router.post('/api/shutdown', ({ res }) => {
@@ -388,6 +389,9 @@ async function docSummary(store, wsId, root, doc, allListening) {
     root,
     id: doc.id,
     path: doc.path,
+    // snapshot docs (a plan, an agent message, piped text) have no working file: the UI labels them by origin
+    kind: doc.kind === 'snapshot' ? 'snapshot' : 'file',
+    origin: doc.kind === 'snapshot' ? doc.origin?.type ?? null : null,
     title: doc.title ?? doc.path,
     format: doc.format,
     head: doc.head ?? 0,

@@ -32,6 +32,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DOC_KINDS } from '../shared/protocol.js';
 
 const STORE_DIR = '.specreview';
 const WAITER_LIVE_MS = 30000;
@@ -110,7 +111,8 @@ export function preWrite(input, o) {
   if (!store) return null;
   const rel = path.relative(realpath(store.root), realpath(file)).split(path.sep).join('/');
   if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  const doc = findDoc(store.storeDir, (d) => d.path === rel);
+  // a snapshot doc's path is synthetic: it never stands for a file on disk
+  const doc = findDoc(store.storeDir, (d) => d.path === rel && d.kind !== 'snapshot');
   if (!doc || doc.state === 'closed') return null;
   const reviewIds = listIds(path.join(store.storeDir, 'docs', doc.id, 'reviews'), 'rv');
   if (!reviewIds.length) return null;
@@ -215,6 +217,8 @@ function storeNotes(store, agent, o) {
   const notes = [];
   for (const doc of listDocs(store.storeDir)) {
     if (doc.state === 'closed') continue;
+    // plan snapshots are answered through the plan gate (ExitPlanMode), never by `specreview feedback`
+    if (doc.kind === 'snapshot' && doc.origin?.type === 'plan') continue;
     const reviewsDir = path.join(store.storeDir, 'docs', doc.id, 'reviews');
     // the id is the file name (rvN), never the JSON body's own `id` field
     const reviews = listIds(reviewsDir, 'rv')
@@ -392,9 +396,9 @@ function specreviewHome(env) {
 }
 
 /**
- * Tracked docs (doc.json contents with the directory name as id). Directories whose name is not a valid doc id
- * and doc.json files without a string path or a safe-integer head are skipped (their values would otherwise reach
- * the agent's context verbatim).
+ * Tracked docs (doc.json contents with the directory name as id). Directories whose name is not a valid doc id,
+ * doc.json files without a string path or a safe-integer head (their values would otherwise reach the agent's
+ * context verbatim), and docs of a kind this version does not know (made by a newer SpecReview) are skipped.
  * @param {string} storeDir
  * @returns {any[]}
  */
@@ -405,6 +409,7 @@ function listDocs(storeDir) {
     if (!DOC_ID_RE.test(id)) continue;
     const doc = readJsonFile(path.join(docsDir, id, 'doc.json'));
     if (!isRecord(doc) || typeof doc.path !== 'string' || !Number.isSafeInteger(doc.head) || doc.head < 0) continue;
+    if (doc.kind !== undefined && !DOC_KINDS.includes(doc.kind)) continue;
     out.push({ ...doc, id });
   }
   return out;

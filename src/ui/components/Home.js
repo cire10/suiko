@@ -46,6 +46,9 @@ export function Home() {
   </div>`;
 }
 
+/** What a snapshot doc (no file on disk: store/snapshot.js) shows in place of its path. */
+const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code plan', message: 'agent message', stdin: 'piped text' });
+
 /** @param {{ d: any }} props */
 function DocRow({ d }) {
   const href = docPath(d.ws, d.id);
@@ -57,7 +60,7 @@ function DocRow({ d }) {
       navigate(href);
     }}>
       <span class="doc-title">${d.title || d.id}</span>
-      <span class="doc-path">${d.path}</span>
+      <span class="doc-path">${d.kind === 'snapshot' ? ORIGIN_LABEL[d.origin] || 'snapshot' : d.path}</span>
     </a>
     <span class="doc-meta">
       <${Chip} tone="muted">v${d.head}<//>

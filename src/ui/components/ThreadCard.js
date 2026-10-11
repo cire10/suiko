@@ -240,7 +240,7 @@ function SuggestionBlock({ t, ds, canAct, busy = false }) {
     ${sug.mode === 'text' && oldLines.length === 1 && newLines.length === 1
       ? html`<${WordDiff} before=${sug.old} after=${sug.new} class="mono" />`
       : html`<pre class="diff-lines">${oldLines.map((l) => html`<span class="del">- ${l}\n</span>`)}${newLines.map((l) => html`<span class="ins">+ ${l}\n</span>`)}</pre>`}
-    ${canAct && t.status !== 'resolved' && (sug.status === 'pending' || sug.status === 'conflict') ? html`<div class="card-actions">
+    ${canAct && ds.doc?.kind !== 'snapshot' && t.status !== 'resolved' && (sug.status === 'pending' || sug.status === 'conflict') ? html`<div class="card-actions">
       <button type="button" class="btn btn-sm" disabled=${!clean || busy} onClick=${() => applySuggestion(t.id)}
         title=${clean ? 'Apply the suggestion to the file and record a version' : 'The working copy has unrecorded changes'}>Apply now</button>
     </div>` : null}

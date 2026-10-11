@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { NotFoundError, SpecReviewError, UsageError } from '../core/store/errors.js';
 import { isWithin } from '../core/util/paths.js';
+import { isGated } from '../core/store/snapshot.js';
 import { loadEngine } from './engine.js';
 
 /**
@@ -267,26 +268,27 @@ export async function resolveDoc(engine, ctx, key, shown = key) {
 /**
  * Ids of the tracked docs of a context's workspace (empty when unknown).
  * @param {any} ctx
+ * @param {{ skipGated?: boolean }} [opts] skipGated: leave out plan snapshots (store/snapshot.js isGated)
  * @returns {Promise<string[]>}
  */
-export async function listDocIds(ctx) {
+export async function listDocIds(ctx, { skipGated = false } = {}) {
   try {
     const docs = ctx?.store?.listDocs ? await ctx.store.listDocs() : [];
-    return docs.map((/** @type {any} */ d) => d.id);
+    return docs.filter((/** @type {any} */ d) => !skipGated || !isGated(d)).map((/** @type {any} */ d) => d.id);
   } catch {
     return [];
   }
 }
 
 /**
- * The id of the workspace's only doc (for tools whose doc argument is optional). Throws NotFoundError when no doc
- * is tracked and UsageError when several are.
+ * The id of the workspace's only doc (for tools whose doc argument is optional; plan snapshots, which belong to the
+ * plan gate, do not count). Throws NotFoundError when no doc is tracked and UsageError when several are.
  * @param {Runtime} rt
  * @returns {Promise<string>}
  */
 export async function defaultDocId(rt) {
   const { ctx } = await openContext(rt);
-  const ids = await listDocIds(ctx);
+  const ids = await listDocIds(ctx, { skipGated: true });
   if (ids.length === 1) return ids[0];
   if (!ids.length) throw new NotFoundError('no tracked docs in this workspace; open one first');
   throw new UsageError(`several docs are tracked (${ids.join(', ')}); pass the doc`);

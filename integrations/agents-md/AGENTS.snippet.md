@@ -39,6 +39,11 @@ JSON
 - Exit 3 means refused and nothing was recorded: follow the printed `fix:` lines (`specreview revert <doc> --hunk hN`, an `other` entry, or an `at` hint), then revise again. `--dry-run` previews.
 - Then summarise one line per thread for the user and get the next review (step 3).
 
+### Text that is not a file
+
+- Piped Markdown: `<command> | specreview open - [--name N]` opens it as a snapshot doc; piping the same `--name` again records a new version. A folder: `specreview open <dir>` opens every spec below it.
+- A snapshot doc has no file, so `apply`, `edit` and `revert` are refused. Write the complete revised text to a temporary file (`specreview show <doc>` prints the current version) and record it with `specreview revise <doc> --source <file> --replies -`. Keep any `--workspace <dir>` the printed commands include.
+
 ### Finish and recover
 
 - An `APPROVED` packet: run `specreview final <doc> --decisions`, report the final version, and stop. If it still lists threads (a reopen or an answer sent with the approval), answer each with `specreview reply <doc> <tid> -m <md> --status answered` (or `declined`) first; do not edit the spec.

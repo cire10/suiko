@@ -2,7 +2,7 @@
 // WP4 daemon-client tests (design 10.1, amendments 2.5) against a fake daemon process that behaves like
 // `specreview serve --foreground`: binds 127.0.0.1 on port 0 (never the default ports), writes daemon.json into
 // SPECREVIEW_HOME, answers /api/health and POST /api/shutdown (Bearer token + same-origin Origin required).
-// Covers spawn + health poll, reuse, version-mismatch restart, stop/--rotate, and startup failures.
+// Covers spawn + health poll, reuse, version- and build-mismatch restarts, stop/--rotate, and startup failures.
 
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +16,7 @@ process.env.SPECREVIEW_HOME = HOME;
 const client = await import('../../src/cli/daemon-client.js');
 const { pidAlive } = await import('../../src/core/util/proc.js');
 const { runCli } = await import('./helpers/cli-harness.js');
+const { codeIdentity } = await import('../../src/core/util/build.js');
 
 const FAKE = path.join(HOME, 'fake-daemon.mjs');
 /** @type {Set<number>} */
@@ -27,10 +28,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 const home = process.env.SPECREVIEW_HOME;
 const version = process.env.FAKE_VERSION || '0.1.0';
+const build = process.env.FAKE_BUILD || undefined; // unset: a daemon from before builds were reported
 const token = 'tok-' + process.pid;
 const server = http.createServer((req, res) => {
   const send = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
-  if (req.method === 'GET' && req.url === '/api/health') return send(200, { ok: true, name: 'specreview', version, pid: process.pid });
+  if (req.method === 'GET' && req.url === '/api/health') return send(200, { ok: true, name: 'specreview', version, build, pid: process.pid });
   if (req.method === 'POST' && req.url === '/api/shutdown') {
     const port = server.address().port;
     if (req.headers.authorization !== 'Bearer ' + token) return send(401, { error: 'unauthorized' });
@@ -64,11 +66,15 @@ after(() => {
   fs.rmSync(HOME, { recursive: true, force: true });
 });
 
-/** @param {string} [version] */
-const opts = (version = '0.1.0') => ({
+/**
+ * @param {string} [version]
+ * @param {string} [build] '' starts a fake that reports no build (as daemons did before builds existed)
+ */
+const opts = (version = '0.1.0', build = 'build-a') => ({
   version,
+  build,
   command: [process.execPath, FAKE],
-  env: { ...process.env, SPECREVIEW_HOME: HOME, FAKE_VERSION: version },
+  env: { ...process.env, SPECREVIEW_HOME: HOME, FAKE_VERSION: version, FAKE_BUILD: build },
   startTimeoutMs: 5000,
 });
 
@@ -98,6 +104,64 @@ describe('daemon client', () => {
     assert.notEqual(info.pid, before.pid);
     assert.equal(info.version, '9.9.9');
     assert.equal(pidAlive(before.pid), false, 'old daemon exited');
+  });
+
+  test('a daemon of the same version but other code (another checkout, or changed files) is replaced', async () => {
+    const a = await client.ensureDaemon(opts('0.1.0', 'build-a'));
+    spawned.add(a.pid);
+    assert.equal((await client.ensureDaemon(opts('0.1.0', 'build-a'))).pid, a.pid, 'same version and build: reused');
+    const b = await client.ensureDaemon(opts('0.1.0', 'build-b'));
+    spawned.add(b.pid);
+    assert.notEqual(b.pid, a.pid);
+    assert.equal(pidAlive(a.pid), false, 'the daemon running other code exited');
+    assert.equal((await client.daemonStatus()).health?.build, 'build-b');
+  });
+
+  test('a daemon that reports no build (started by an older CLI) is replaced', async () => {
+    const old = await client.ensureDaemon(opts('0.1.0', ''));
+    spawned.add(old.pid);
+    assert.equal((await client.daemonStatus()).health?.build, undefined);
+    const ours = await client.ensureDaemon(opts('0.1.0', 'build-a'));
+    spawned.add(ours.pid);
+    assert.notEqual(ours.pid, old.pid);
+    assert.equal(pidAlive(old.pid), false);
+  });
+
+  test('by default the expected build is this package\'s code identity', async () => {
+    assert.deepEqual(client.packageIdentity(), codeIdentity(client.PACKAGE_ROOT));
+    const live = /** @type {any} */ (await client.daemonStatus()).health;
+    assert.notEqual(live.build, client.packageIdentity().build, 'the fake runs "build-a", not this package');
+    const info = await client.ensureDaemon({ ...opts(), build: undefined, env: { ...opts().env, FAKE_BUILD: client.packageIdentity().build } });
+    spawned.add(info.pid);
+    assert.notEqual(info.pid, live.pid, 'replaced by a daemon reporting this package\'s build');
+    assert.equal((await client.daemonStatus()).health?.build, client.packageIdentity().build);
+  });
+
+  test('doctor says when the running server is another checkout\'s code, or code that changed since it started', async () => {
+    const version = client.packageVersion();
+    const { root, build } = client.packageIdentity();
+    /** @param {any} info @param {any} health */
+    const status = (info, health) => async () => ({
+      running: true,
+      info: { pid: 1, uiPort: 5801, contentPort: 5802, token: 't', secret: 's', version, startedAt: '', ...info },
+      health: { ok: true, name: 'specreview', version, pid: 1, ...health },
+    });
+    const userHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-user-'));
+    /** @param {() => Promise<any>} daemonStatus */
+    const doctor = async (daemonStatus) => (await runCli(['doctor'], { env: { SPECREVIEW_HOME: HOME, HOME: userHome }, daemonStatus })).stdout;
+    try {
+      assert.match(await doctor(status({ root, build }, { build })), /^ok {4}review server running at /m);
+      const esc = (/** @type {string} */ t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      assert.match(
+        await doctor(status({ root: '/elsewhere/checkout', build: 'b' }, { build: 'b' })),
+        new RegExp(`^WARN {2}review server .* runs the code in /elsewhere/checkout, not ${esc(root)} \\(restarts on next open\\)$`, 'm'),
+      );
+      assert.match(await doctor(status({ root, build: 'old' }, { build: 'old' })), /^WARN {2}review server .* runs code that has changed since it started \(restarts on next open\)$/m);
+      assert.match(await doctor(status({ root }, {})), /runs code that has changed since it started/, 'a server reporting no build (an older CLI started it)');
+      assert.match(await doctor(status({}, { version: '9.9.9', build })), /runs version 9\.9\.9, this CLI is /);
+    } finally {
+      fs.rmSync(userHome, { recursive: true, force: true });
+    }
   });
 
   test('stop, then stop --rotate deletes daemon.json', async () => {

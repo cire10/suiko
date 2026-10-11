@@ -58,7 +58,18 @@ export function writeAll(stream, text) {
  * @param {{ maxBytes?: number }} [opts]
  * @returns {Promise<string>}
  */
-export async function readAll(stream, { maxBytes = 64 * 1024 * 1024 } = {}) {
+export async function readAll(stream, opts = {}) {
+  return (await readAllBytes(stream, opts)).toString('utf8').replace(/^﻿/, '');
+}
+
+/**
+ * Reads a stream to the end as bytes (for text whose encoding is detected later, e.g. a UTF-16 BOM). `maxBytes`
+ * guards against unbounded input (RangeError).
+ * @param {NodeJS.ReadableStream} stream
+ * @param {{ maxBytes?: number }} [opts]
+ * @returns {Promise<Buffer>}
+ */
+export async function readAllBytes(stream, { maxBytes = 64 * 1024 * 1024 } = {}) {
   /** @type {Buffer[]} */
   const chunks = [];
   let size = 0;
@@ -68,7 +79,7 @@ export async function readAll(stream, { maxBytes = 64 * 1024 * 1024 } = {}) {
     if (size > maxBytes) throw new RangeError(`input larger than ${maxBytes} bytes`);
     chunks.push(buf);
   }
-  return Buffer.concat(chunks).toString('utf8').replace(/^﻿/, '');
+  return Buffer.concat(chunks);
 }
 
 /**

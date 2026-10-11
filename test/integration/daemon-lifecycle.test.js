@@ -22,6 +22,7 @@ delete process.env.SPECREVIEW_PORT;
 
 const { startDaemon } = await import('../../src/daemon/main.js');
 const { readDaemonInfo } = await import('../../src/core/store/home.js');
+const { codeIdentity } = await import('../../src/core/util/build.js');
 const { Store } = await import('../../src/core/store/store.js');
 
 /**
@@ -79,6 +80,13 @@ test('daemon.json is written 0600 and token, secret and ports survive a restart'
   assert.match(info1.token, /^[0-9a-f]{32}$/);
   assert.match(info1.secret, /^[0-9a-f]{64}$/);
   assert.equal(info1.version, JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version);
+  // The code identity: the package folder in daemon.json, its build there and in /api/health (which never shows the path).
+  const identity = codeIdentity(ROOT);
+  assert.equal(info1.root, fs.realpathSync(ROOT));
+  assert.equal(info1.build, identity.build);
+  const health = JSON.parse((await request(d1.uiPort, '/api/health')).text);
+  assert.equal(health.build, identity.build);
+  assert.equal(JSON.stringify(health).includes(info1.root), false, 'health does not reveal the package path');
   assert.ok(!Number.isNaN(Date.parse(info1.startedAt)));
   if (process.platform !== 'win32') {
     assert.equal(fs.statSync(path.join(HOME, 'daemon.json')).mode & 0o777, 0o600);

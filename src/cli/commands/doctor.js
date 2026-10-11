@@ -10,6 +10,8 @@
 // (or --workspace): config readable, and per doc: working copy present, versions sequential and matching
 // doc.head, leftovers of interrupted writes (fixed with --fix via the store's recoverDoc), unrecorded edits.
 // --fix also chmods daemon.json to 0600 and (re)starts a missing or outdated server.
+// Last, the agent integrations: per detected (or configured) agent, whether `specreview install` configured it and
+// whether that configuration is current (a dry run of the installer; nothing is written).
 // Exit 0 when no ERR remains, else 1.
 
 import fs from 'node:fs';
@@ -21,7 +23,8 @@ import { findWorkspace } from '../../core/store/workspace.js';
 import { EXIT } from '../../shared/protocol.js';
 import { VENDOR_DOC, VENDOR_UI, listVendorDirs } from '../../shared/vendor.js';
 import { expectPositionals } from '../args.js';
-import { PACKAGE_ROOT, daemonStatus, ensureDaemon, packageVersion, stopDaemon } from '../daemon-client.js';
+import { PACKAGE_ROOT, daemonStatus, ensureDaemon, packageIdentity, packageVersion, stopDaemon } from '../daemon-client.js';
+import { isSnapshot, snapshotNoun } from '../../core/store/snapshot.js';
 
 export const spec = {
   name: 'doctor',
@@ -70,6 +73,7 @@ export async function execute(rt, input) {
   checkFiles(add);
   await checkWorkspaces(add);
   await checkStore(rt, add, fix);
+  await checkIntegrations(rt, add);
 
   const tag = /** @type {Record<Check['level'], string>} */ ({ ok: 'ok   ', warn: 'WARN ', err: 'ERR  ', fixed: 'fixed' });
   const errors = checks.filter((c) => c.level === 'err').length;
@@ -129,15 +133,23 @@ function checkHome(add, fix) {
 async function checkServer(rt, add, fix) {
   const status = await (rt.deps.daemonStatus ?? daemonStatus)();
   const version = packageVersion();
+  const { root, build } = packageIdentity();
   if (status.running && status.info) {
     const where = `http://127.0.0.1:${status.info.uiPort} (content ${status.info.contentPort}, pid ${status.health?.pid ?? status.info.pid})`;
-    if (status.health?.version && status.health.version !== version) {
+    const otherVersion = Boolean(status.health?.version && status.health.version !== version);
+    if (otherVersion || status.health?.build !== build) {
+      // Same version but another build: another checkout (daemon.json `root`), or this one before its code changed.
+      const other = otherVersion
+        ? `version ${status.health?.version}, this CLI is ${version}`
+        : status.info.root && status.info.root !== root
+          ? `the code in ${status.info.root}, not ${root}`
+          : 'code that has changed since it started';
       if (fix) {
         await (rt.deps.stopDaemon ?? stopDaemon)({});
         const info = await rt.ensureDaemon();
-        add('fixed', 'server', `restarted the review server (was ${status.health.version}, now ${version}) at http://127.0.0.1:${info.uiPort}`);
+        add('fixed', 'server', `restarted the review server (it ran ${other}) at http://127.0.0.1:${info.uiPort}`);
       } else {
-        add('warn', 'server', `review server ${where} runs version ${status.health.version}, this CLI is ${version} (restarts on next open)`);
+        add('warn', 'server', `review server ${where} runs ${other} (restarts on next open)`);
       }
     } else {
       add('ok', 'server', `review server running at ${where}`);
@@ -177,6 +189,34 @@ async function checkWorkspaces(add) {
   const all = await listWorkspaces();
   const gone = all.filter((w) => !w.exists);
   add(gone.length ? 'warn' : 'ok', 'workspaces', `${all.length} registered workspace${all.length === 1 ? '' : 's'}${gone.length ? `; ${gone.length} no longer exist: ${gone.map((w) => w.root).join(', ')}` : ''}`);
+}
+
+/**
+ * Which agents have SpecReview configured (user scope), from a dry run of the multi-agent installer. Skipped when the
+ * home directory is unknown (the installer never guesses it).
+ * @param {import('../runtime.js').Runtime} rt
+ * @param {(level: Check['level'], check: string, message: string) => void} add
+ */
+async function checkIntegrations(rt, add) {
+  if (!(rt.deps.home ?? rt.env.HOME ?? rt.env.USERPROFILE)) return;
+  try {
+    const { buildContext, integrationStatus } = await import('../install/multi.js');
+    const list = integrationStatus(buildContext(rt, { scope: 'user' }));
+    if (!list.length) {
+      add('ok', 'integrations', 'agents: none detected (`specreview install --only <agent>` configures one anyway)');
+      return;
+    }
+    for (const s of list) {
+      const check = `integration:${s.id}`;
+      if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
+      else if (s.plugin) add('ok', check, `${s.name}: SpecReview plugin installed (${s.plugin})`);
+      else if (s.configured && s.upToDate) add('ok', check, `${s.name}: SpecReview configured`);
+      else if (s.configured) add('warn', check, `${s.name}: SpecReview configuration is incomplete or outdated (run \`specreview install --only ${s.id} --apply\`)`);
+      else add('ok', check, `${s.name}: detected, SpecReview not configured (\`specreview install --only ${s.id}\` shows what it would add)`);
+    }
+  } catch (err) {
+    add('warn', 'integrations', `could not check the agent integrations: ${/** @type {Error} */ (err).message}`);
+  }
 }
 
 /**
@@ -242,6 +282,11 @@ async function checkDoc(store, doc, add, fix) {
     } else {
       add('warn', `doc:${id}`, `${id}: doc.json head v${doc.head} but the newest version is v${last}`);
     }
+  }
+  if (isSnapshot(doc)) {
+    // no working file: its versions are its content
+    add('ok', `doc:${id}`, `${id}: ${snapshotNoun(doc)} head v${doc.head} (${doc.state})`);
+    return;
   }
   /** @type {string} */
   let abs;

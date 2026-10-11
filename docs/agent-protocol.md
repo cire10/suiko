@@ -24,6 +24,7 @@ Contents:
 16. [Command reference](#16-command-reference)
 17. [Rules summary](#17-rules-summary)
 18. [Writing specs that review well](#18-writing-specs-that-review-well)
+19. [Snapshot docs: plans, messages, piped text](#19-snapshot-docs-plans-messages-piped-text)
 
 ## 1. Model
 
@@ -113,7 +114,7 @@ next: the URL was opened in the system browser; run `specreview wait token-servi
 
 - It exits 3 immediately if the working copy differs from head (`run specreview revise first`), unless `--allow-dirty`.
 - It returns immediately if undelivered reviews exist; otherwise it blocks until a review is submitted or the session is closed (exit 5). The packet covers **all** undelivered reviews for that doc.
-- `wait --all` waits on every doc in the workspace.
+- `wait --all` waits on every doc in the workspace, except Claude Code plans (their reviews go to the plan gate).
 - While it runs, the UI shows "**claude is listening**" (presence comes from a heartbeat file). On stderr it prints `specreview: waiting for a review of <doc> vN (as claude). Safe to interrupt; nothing is lost.`
 - Only one `wait` per doc and agent is live. Starting a new one makes the older one print `specreview: superseded by pid N (a newer wait is listening); ignore this.` and exit 6.
 - **Single comments.** The reviewer can send one comment at once instead of a whole review (**Send now** in the UI, or `specreview snip --send`). It arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again.
@@ -482,7 +483,25 @@ Both hooks read the hook JSON on stdin, print nothing on any error, always exit 
 
   The note is capped at 1,000 characters. When the current directory has no workspace at or above it, the workspaces registered by `open` below it are checked instead, and the suggested command names the workspace (`specreview feedback token-service --workspace notes/specs`).
 
-The plugin registers the hooks as `specreview hook pre-write` and `specreview hook prompt` (the binary on `PATH`). `specreview install claude --with-hooks --apply` writes them into settings with absolute paths instead.
+The plugin registers the hooks as `specreview hook pre-write` and `specreview hook prompt` (the binary on `PATH`). `specreview install claude --with-hooks --apply` writes them into settings with absolute paths instead. The plan gate below is opt-in: neither the plugin nor `specreview install` registers it unless asked with `--with-plan-gate` (on `install` or `install claude`). A gate already in settings is kept, and re-pointed, by later installs.
+
+**Plan-mode gate.** `specreview plan-gate` is a PermissionRequest hook (matcher `ExitPlanMode`, timeout 345600 s) that runs the full CLI, not the fast hook path:
+
+- It reads the plan from `tool_input.planFilePath` when that is an absolute path to a regular `.md` file under 2 MB (a symlink only when its target is one too), else from `tool_input.plan`, and records it as a snapshot doc (section 19) with the origin key `claude-plan:<session_id>:<planFilePath or "inline">`, in the workspace of `$CLAUDE_PROJECT_DIR` (else the hook's `cwd`). The first ExitPlanMode records v1; each later one for the same plan file records the next version, so the reviewer sees a diff. Open threads that the new version's changes are linked to get the reply `Changed in vN.` (status addressed), since Claude has no reply channel at the gate.
+- It opens the review UI in the system browser (unless `--browser none` or `$SPECREVIEW_BROWSER=none`; `pane` means the system browser here, since a hook cannot drive the agent's pane) and blocks until a review of that version is submitted (`--timeout` gives up; by default it waits until Claude Code cancels it). Plan reviews belong to the gate: `wait --all` and a `wait` without a doc skip plan docs. A gate whose version is no longer the doc's head (a newer ExitPlanMode recorded a later one) steps aside.
+- **Approve** prints the allow decision, whose `updatedInput` is the tool input with `plan` set to the reviewed text:
+
+  ```json
+  {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedInput":{"plan":"# Plan: cache\n…","planFilePath":"/Users/me/.claude/plans/cache.md"}}}}
+  ```
+
+- **Request changes** or **Comment** prints a deny decision whose `message` is the feedback: the packet's threads and `src>` lines, citing the plan file and its line numbers, then what to do: make targeted Edit-tool changes to that file (never rewrite it), address every thread, call ExitPlanMode again.
+
+  ```json
+  {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (SpecReview rv1 on v1).\nPlan file: /Users/me/.claude/plans/cache.md   (line numbers below are lines of this file)\n…"}}}
+  ```
+
+- The review is marked delivered only after the decision reached stdout. On any error (bad input, the server not starting), on SIGTERM/SIGINT/SIGHUP (the user answered in the terminal first, and Claude Code discards the hook) or on a closed stdout, it prints nothing, exits 0 and marks nothing delivered: Claude Code then decides as if there were no hook. Comments sent with an approval are not passed on: the allow decision has no field for them.
 
 ## 15. MCP tools
 
@@ -513,6 +532,9 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | Command | Behaviour | Exit |
 |---|---|---|
 | `open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track the doc and record v1 if new; start the server; print the URL; warn if dirty | 0 |
+| `open <dir>` | Open every `.md`/`.markdown`/`.html`/`.htm` file below the folder (at most 200); one line per doc and the UI's home URL | 0 |
+| `open - [--name N] [--title T]` | Piped Markdown (at most 5 MB) as a snapshot doc; the same `--name` records a new version | 0 |
+| `last [--session <id>] [--transcript <path>] [--title T] [--browser pane\|system\|none]` | The agent's last message (Claude Code transcript) as a snapshot doc; prints the URL and the wait command | 0 / 4 |
 | `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review arrives; print the packet; mark it delivered | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The packet, without blocking; marks delivered unless `--peek` | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim; stage tagged edits | 0 / 3 |
@@ -520,6 +542,7 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `edit <doc> --stdin` | Batch of `{threads, old, new, all?}` on stdin | 0 / 3 |
 | `reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without a version | 0 / 4 |
 | `revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies | 0 / 3 |
+| `revise <doc> --source <file\|-> [--replies <file\|->]` | Snapshot docs: record the given text as the new version | 0 |
 | `revert <doc> (--hunk hN \| --lock L1)` | Restore part of the working copy | 0 / 3 |
 | `reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor | 0 / 3 |
 | `ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | Ask the reviewer a question | 0 / 3 |
@@ -534,6 +557,7 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `serve [--foreground] [--port N]` · `stop [--rotate]` · `doctor [--fix]` | Server control and checks | |
 | `mcp` | stdio MCP server | |
 | `hook pre-write` · `hook prompt` | Claude Code hooks | always 0 |
+| `plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (section 14) | always 0 |
 | `install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]` · `install agents-md [--apply]` | Print, or with `--apply` write, the integration files | 0 |
 
 ## 17. Rules summary
@@ -567,3 +591,14 @@ Do not:
 - **When editing:** never re-wrap existing paragraphs; keep heading text stable unless asked.
 
 The longer version, with reasons, is in [`integrations/claude-code/skills/spec-review/reference.md`](../integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
+
+## 19. Snapshot docs: plans, messages, piped text
+
+A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code) or Markdown piped to `specreview open -`. Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
+
+- The packet header names the kind (`token-plan (Claude Code plan)`), line numbers are lines of the head version, and no thread offers `specreview apply`.
+- `apply`, `edit` and `revert` are refused (exit 3) with what to do instead, and so is `revise` without `--source` (exit 1).
+- **Revising a message or piped text:** write the complete revised text to a temporary file (`specreview show <doc>` prints the current version), address every thread in it, and run `specreview revise <doc> --source <file> --replies -` with the replies JSON (section 8.1) on stdin. With `--source -` the text comes from stdin, so `--replies` must name a file. The guards run, but their errors are recorded as warnings: a snapshot revision is never refused.
+- **Revising a plan:** edit the plan file with targeted Edit-tool changes and call ExitPlanMode again; the plan gate records the version.
+- **Workspace:** found from the current directory as usual. When that is your home directory or `/`, the doc goes to the scratch workspace `$SPECREVIEW_HOME/scratch/<8 hex>/`, and every printed command carries `--workspace <dir>`: keep it on every command for that doc.
+- `specreview last` reads `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<session>.jsonl` (session from `--session`, else `$CLAUDE_CODE_SESSION_ID`; else the newest transcript of the current directory), takes the newest assistant message with text (skipping sidechains, tool results and command echoes), and returns at once. When the newest assistant message is still running a tool call (you ran `specreview last` yourself, maybe after a sentence), that whole turn is skipped. The text is stored with a final newline, as `show` prints it. Running it again for the same message reopens the same doc and records nothing, so your revisions stay. Codex transcripts are not supported.

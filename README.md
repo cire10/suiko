@@ -19,6 +19,9 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Snipping](#snipping)
 - [The review loop, step by step](#the-review-loop-step-by-step)
+- [Plan-mode gate](#plan-mode-gate)
+- [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text)
+- [Folders](#folders)
 - [Command reference](#command-reference)
 - [Storage layout and git](#storage-layout-and-git)
 - [Configuration](#configuration)
@@ -66,6 +69,76 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
+### Quick install
+
+On a new machine:
+
+```bash
+git clone https://github.com/cire10/html_documentation_annotator.git specreview
+cd specreview
+./install.sh                   # installs the CLI, then lists what it would configure for each coding agent it finds
+specreview install --apply     # writes that configuration (same as ./install.sh --yes)
+```
+
+Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
+
+`install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `specreview` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `specreview install`. Options after `--yes` go to `specreview install`, e.g. `./install.sh --yes --only claude,codex`.
+
+Without a checkout, give it the repository's git URL. There is no public download, and the npm name `specreview` belongs to another package:
+
+```bash
+curl -fsSL <raw URL of install.sh> | SPECREVIEW_REPO=<git URL> sh -s -- --yes
+```
+
+That clones into `~/.specreview/app` (or `SPECREVIEW_APP_DIR`; `SPECREVIEW_REF` picks a branch or tag) and updates the clone when you run it again (a run without `SPECREVIEW_REF` moves a pinned clone back to the default branch).
+
+Once the CLI is installed, configure or reconfigure the agents with `specreview install`:
+
+```bash
+specreview install                         # dry run: per detected agent, the exact files, entries and blocks
+specreview install --apply                 # writes them
+specreview install --only claude,codex --apply
+specreview uninstall                       # dry run of the removal
+specreview uninstall --apply               # removes exactly what install added
+specreview doctor                          # includes which agents have SpecReview configured
+```
+
+What it configures (user scope; `--project` writes the project-level equivalents where an agent has them):
+
+| Agent | Detected by | What `specreview install` writes |
+|---|---|---|
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
+| Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
+| Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
+| Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
+| OpenCode | `~/.config/opencode` (`$XDG_CONFIG_HOME`), or `opencode` on PATH | The protocol block in `~/.config/opencode/AGENTS.md`, `/specreview-review` in `commands/`, and `mcp.specreview` in `opencode.json`. |
+| GitHub Copilot CLI | `~/.copilot` (`$COPILOT_HOME`), or `copilot` on PATH | The protocol block in `~/.copilot/copilot-instructions.md`, and the skill in `~/.agents/skills/`. |
+| Amp | `~/.config/amp`, or `amp` on PATH | The protocol block in `~/.config/amp/AGENTS.md`, and the skill in `~/.agents/skills/`. |
+| Factory Droid | `~/.factory`, or `droid` on PATH | The skill in `~/.agents/skills/` (Droid documents no global instructions file). |
+| Kiro CLI | `~/.kiro`, or `kiro-cli` on PATH | `~/.kiro/steering/specreview.md` (always included) and `~/.kiro/skills/specreview-review/`. |
+| Claude Desktop | its config folder (macOS, Windows) | `mcpServers.specreview` in `claude_desktop_config.json`. |
+
+Google Antigravity and Devin Desktop (Windsurf) are listed as not configured: their config files are not documented well enough to write safely.
+
+How it edits your config:
+
+- **JSON** files are parsed and only the `specreview` entry (or the hooks that run `specreview`) is added or replaced, keeping the file's indentation. A file that is not valid JSON is refused and never rewritten.
+- **Markdown** files get a block between `<!-- specreview:begin -->` and `<!-- specreview:end -->`; everything outside the markers is kept as is. If the markers are damaged (a begin line without its end line, or two blocks), the file is refused rather than guessed at.
+- **Codex's `config.toml`** gets a block between `# specreview:begin` and `# specreview:end` that holds only the `[mcp_servers.specreview]` table. Codex itself writes into `config.toml` (project trust when you open a folder, `codex mcp add`) and may put its tables inside those markers; they are kept: a reinstall moves them below the block, `uninstall` leaves them. A `specreview` server you defined yourself is left alone, and a file that does not parse is refused.
+- The first time it changes an existing file, it saves a copy as `<file>.specreview-backup`. A file of yours that a skill or command copy replaces is backed up every time it changed, to `<file>.specreview-backup-<time>` once the first backup exists.
+- Writes are atomic and go through symlinks (a config managed by stow, home-manager or chezmoi stays a link). Re-running is idempotent. If one file cannot be written, the others still are, and the failure is reported.
+- `uninstall` removes only what install added. It deletes a config file only when install created it; one you already had (even `{}`) is kept. A skill or command copy you edited after installing is kept too.
+
+`--only` configures an agent even when it is not detected; `--skip` leaves agents out.
+
+`--project` writes the project-level files. Claude Code's hooks then go to `.claude/settings.local.json`, its personal, uncommitted settings file. The project files hold paths that exist only on your machine, so keep them out of version control (the dry run lists them); each teammate runs `specreview install --project` for themselves. A project that has a `CLAUDE.md` but no `AGENTS.md` gets no `AGENTS.md`: OpenCode and Amp read `CLAUDE.md` only while `AGENTS.md` does not exist.
+
+The commands written into the agents' configs use absolute paths. For node, that is the `node` on your `PATH` when it is the one running the install (for example Homebrew's `/opt/homebrew/bin/node`, which keeps working after `brew upgrade`). With nvm, asdf or Volta the path names one Node version: re-run `specreview install --apply` after you switch versions (`specreview doctor` flags outdated entries).
+
+When `specreview` is not on the `PATH` the agents see, the installed instructions use the absolute command (`"<path to node>" "<path to specreview>/bin/specreview.js"`) instead.
+
+The sections below install one piece at a time.
+
 ### 1. The CLI
 
 ```bash
@@ -91,7 +164,10 @@ The plugin adds:
 
 - the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
 - the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
+- the **`/specreview-last`** command: opens Claude's previous message for review (see [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text));
 - two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
+
+The plugin leaves plan mode alone. The [plan-mode gate](#plan-mode-gate) is opt-in.
 
 The plugin's hooks run `specreview` from your `PATH`. That works when Claude Code starts from a terminal. If you use nvm, asdf or Volta and start Claude Code from the Dock or the desktop app, it may not see your shell's `PATH`, so the hooks fail with `command not found` (non-blocking, but they do nothing). Use 2b instead.
 
@@ -102,7 +178,7 @@ specreview install claude --user                        # prints exactly what it
 specreview install claude --user --with-hooks --apply   # writes it
 ```
 
-This installs the skill (and with `--with-hooks`, the hooks) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
+This installs the skill and the commands (and with `--with-hooks`, the hooks; with `--with-plan-gate`, the plan-mode gate) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). `specreview install` (no target) does the same for Claude Code, hooks included (the plan gate only with `--with-plan-gate`), plus the other agents it finds. The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
 
 ### 2c. MCP (Claude Code, Claude Desktop, Cursor, and other MCP clients)
 
@@ -110,12 +186,13 @@ This installs the skill (and with `--with-hooks`, the hooks) into `~/.claude` (`
 claude mcp add specreview -- specreview mcp
 ```
 
-Other clients: register a stdio server with command `specreview` and args `["mcp"]` (with nvm, use the absolute path to `node` as the command and `["/path/to/specreview/bin/specreview.js", "mcp"]` as args). `specreview install claude --with-mcp` prints the `claude mcp add` line. In Claude Code the background CLI `wait` is preferred over MCP; MCP is for agents without a shell.
+`specreview install` writes the MCP entry for Codex, Cursor, OpenCode and Claude Desktop. Other clients: register a stdio server with command `specreview` and args `["mcp"]` (with nvm, use the absolute path to `node` as the command and `["/path/to/specreview/bin/specreview.js", "mcp"]` as args). `specreview install claude --with-mcp` prints the `claude mcp add` line. In Claude Code the background CLI `wait` is preferred over MCP; MCP is for agents without a shell.
 
 ### 2d. Codex, Gemini CLI and other CLI agents
 
 ```bash
-specreview install agents-md --apply    # appends the protocol to AGENTS.md
+specreview install --only codex,gemini --apply   # the global instructions, skill/commands and MCP entry of each
+specreview install agents-md --apply             # appends the protocol to the project's AGENTS.md
 ```
 
 See [`integrations/agents-md/README.md`](integrations/agents-md/README.md) for Gemini CLI (`GEMINI.md`) and the two waiting modes for agents that cannot run background tasks.
@@ -290,6 +367,38 @@ If the edit touched agreed text, deleted content no thread asked about, or rewro
 
 The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP tools) is in [docs/agent-protocol.md](docs/agent-protocol.md).
 
+## Plan-mode gate
+
+This is optional, and off unless you install it. SpecReview is meant for the reviews you ask for: run `/review-spec`, `/specreview-last` or `specreview open` when a plan, spec or doc is worth getting right, then iterate on it with Claude and implement from it. The gate is for people who want every Claude Code plan reviewed that way.
+
+With the gate installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in SpecReview and Claude waits for your review. Comment on it as on any spec, then submit:
+
+- **Approve**: Claude leaves plan mode and starts on the plan.
+- **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed, and the threads it changed are marked addressed for **Verify**.
+
+Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so request changes when they matter.
+
+Neither the plugin nor `specreview install` adds the gate by default. Add it with `specreview install --with-plan-gate --apply` (or `specreview install claude --with-plan-gate --apply`), which writes it into `settings.json` with absolute paths. Later installs keep it, and `specreview uninstall` removes it. To add it by hand, for example next to the plugin, put this in your Claude Code settings (with nvm and friends, use absolute paths: `"\"/path/to/node\" \"/path/to/specreview/bin/specreview.js\" plan-gate"`):
+
+```json
+{"hooks": {"PermissionRequest": [{"matcher": "ExitPlanMode", "hooks": [{"type": "command", "command": "specreview plan-gate", "timeout": 345600}]}]}}
+```
+
+The gate always uses the system browser (a hook cannot open Claude's browser pane, so `SPECREVIEW_BROWSER=pane` counts as `system` here); `--browser none` (or `SPECREVIEW_BROWSER=none`) keeps it closed and prints the URL on stderr. `specreview plan-gate --timeout 30m` gives up after that long. Plans are recorded in the workspace of the project Claude Code was started in (`$CLAUDE_PROJECT_DIR`), and a background `specreview wait --all` never takes a plan review away from the gate.
+
+## Reviewing the last message and piped text
+
+Not everything worth reviewing is a file. SpecReview can review text as a **snapshot**: each version is recorded from the text itself, and threads, **Review changes** and **History** work as usual.
+
+- **Claude's last message:** type `/specreview-last` in Claude Code (or run `specreview last` in the session). The message opens in the review UI and Claude waits in the background. After you submit, Claude revises its answer and records it as the next version (`specreview revise <doc> --source <file>`), so you can review the changes.
+- **Piped text:** `pbpaste | specreview open -` reviews whatever you pipe in (Markdown, up to 5 MB). Give it a name to keep iterating on one doc: `some-command | specreview open - --name notes` records a new version each time you pipe to the same name.
+
+When you run these from your home directory (which can never be a workspace), the doc goes to a scratch workspace under `~/.specreview/scratch/`, and every command SpecReview prints includes the `--workspace` flag it needs. Running `/specreview-last` again for the same message reopens its doc without touching Claude's revisions. Only Claude Code transcripts are supported by `last` for now.
+
+## Folders
+
+`specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
+
 ## Command reference
 
 `<doc>` is a doc id (`token-service`) or a file path. Line numbers are always lines of the current file on disk.
@@ -297,12 +406,16 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | Command | What it does |
 |---|---|
 | `specreview open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track a spec, record v1, start the server, print the UI URL |
+| `specreview open <dir>` | Open every spec file below a folder (at most 200); print the home URL listing them |
+| `specreview open - [--name N] [--title T]` | Review piped Markdown; the same `--name` records a new version |
+| `specreview last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
 | `specreview wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted; print the packet |
 | `specreview feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `specreview apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
 | `specreview edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Exact replace tagged to threads (`--stdin` for a JSON batch) |
 | `specreview reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without recording a version |
 | `specreview revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies; enforce guards |
+| `specreview revise <doc> --source <file\|-> [--replies <file\|->]` | Record a new version of a snapshot doc (a message or piped text) from a file |
 | `specreview revert <doc> (--hunk hN \| --lock L1)` | Undo one unrecorded hunk, or restore agreed text |
 | `specreview reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor |
 | `specreview ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | The agent asks the reviewer a question |
@@ -317,7 +430,10 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | `specreview serve [--foreground] [--port N]` · `specreview stop [--rotate]` · `specreview doctor [--fix]` | Server control and health checks |
 | `specreview mcp` | stdio MCP server |
 | `specreview hook pre-write` · `specreview hook prompt` | Claude Code hook entry points |
-| `specreview install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install integrations (prints only, unless `--apply`) |
+| `specreview plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (PermissionRequest hook on ExitPlanMode) |
+| `specreview install [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Configure every detected coding agent (prints only, unless `--apply`). See [Quick install](#quick-install) |
+| `specreview uninstall [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Remove what `install` added (prints only, unless `--apply`) |
+| `specreview install claude [--user\|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install one integration (prints only, unless `--apply`) |
 
 Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port).
 

@@ -7,7 +7,8 @@
 // - Prints the CommandResult: text (or JSON with --json) on stdout, `specreview: ...` notes on stderr.
 // - Errors print `specreview: <message>` on stderr (and {"error":{...}} on stdout with --json) and map to the EXIT
 //   codes of src/shared/protocol.js via the error's `exit` (SpecReviewError subclasses), else 1.
-// - `wait` gets an AbortSignal wired to SIGINT/SIGTERM so an interrupted wait cleans up and delivers nothing.
+// - `wait` and `plan-gate` get an AbortSignal wired to SIGINT/SIGTERM/SIGHUP so an interrupted wait cleans up and
+//   delivers nothing.
 // All collaborators are injectable (deps) so tests run the real argument handling against a stub engine.
 
 import { SpecReviewError } from '../core/store/errors.js';
@@ -19,7 +20,7 @@ import { toJson, withNewline, writeAll } from './io.js';
 import { createRuntime } from './runtime.js';
 
 /** Commands that run until interrupted and therefore handle SIGINT/SIGTERM themselves. */
-const SIGNAL_AWARE = new Set(['wait']);
+const SIGNAL_AWARE = new Set(['wait', 'plan-gate']);
 
 /**
  * @param {string[]} argv arguments after `specreview`

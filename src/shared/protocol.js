@@ -58,6 +58,12 @@ export const SEVERITIES = Object.freeze(['blocking', 'normal', 'nit']);
 export const THREAD_STATUS = Object.freeze(['open', 'addressed', 'answered', 'declined', 'needs_input', 'resolved']);
 export const AGENT_REPLY_STATUS = Object.freeze(['addressed', 'answered', 'declined', 'needs_input']);
 export const VERDICTS = Object.freeze(['comment', 'changes_requested', 'approved']);
+/**
+ * doc.json `kind` values this version understands (absent = 'file'). A doc of any other kind was made by a newer
+ * SpecReview: it is left out of listings and refused by id, never treated as a file doc (core/store/store.js,
+ * cli/hooks.js). A new kind must be added here.
+ */
+export const DOC_KINDS = Object.freeze(['file', 'snapshot']);
 export const ANCHOR_KINDS = Object.freeze(['text', 'element', 'cell', 'code', 'section', 'source', 'doc', 'snip']);
 export const ANCHOR_STATES = Object.freeze(['exact', 'moved', 'edited', 'changed', 'orphaned']);
 

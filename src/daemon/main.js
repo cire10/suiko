@@ -5,8 +5,9 @@
 // Both servers bind 127.0.0.1 only.
 //
 // Lifecycle:
-//   - daemon.json (SPECREVIEW_HOME, mode 0600) = {pid, uiPort, contentPort, token, secret, version, startedAt},
-//     written after both listeners are bound. Token and secret are reused from the previous daemon.json (rotated
+//   - daemon.json (SPECREVIEW_HOME, mode 0600) = {pid, uiPort, contentPort, token, secret, version, root, build,
+//     startedAt}, written after both listeners are bound. root/build (core/util/build.js) identify the code this
+//     daemon loaded; /api/health reports version and build so the CLI restarts a daemon running other code. Token and secret are reused from the previous daemon.json (rotated
 //     only with `rotate: true`); daemon.json is kept on shutdown so they survive restarts.
 //   - Ports: explicit `uiPort`/`contentPort` (or SPECREVIEW_PORT = the UI port, content = UI + 1, which is how
 //     `serve --port N` reaches a spawned daemon) are used as given (0 = random) and fail if busy. Otherwise the
@@ -26,6 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_NAME, PORTS } from '../shared/protocol.js';
 import { daemonLogPath, ensureHome, readDaemonInfo, writeDaemonInfo } from '../core/store/home.js';
+import { codeIdentity } from '../core/util/build.js';
 import { randomHex } from '../core/util/hash.js';
 import { configureLogger, createLogger } from '../core/util/log.js';
 import { pidAlive } from '../core/util/proc.js';
@@ -50,6 +52,8 @@ const FORCE_CLOSE_MS = 1000;
 
 /** Package version (daemon.json `version`, /api/health). */
 export const VERSION = readPackageVersion();
+/** The code this daemon loaded (daemon.json `root`/`build`; /api/health `build`), taken at startup. */
+const IDENTITY = codeIdentity(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
 
 /**
  * @typedef {object} StartOptions
@@ -170,7 +174,7 @@ export async function startDaemon(opts = {}) {
     router.get('/ui/*', ({ req, res, rest }) => ui.ui(req, res, rest));
     router.get('/vendor/*', ({ req, res, rest }) => ui.vendor(req, res, rest));
     router.get('/ui-shared/protocol.js', ({ req, res }) => ui.protocol(req, res));
-    registerApiRoutes(router, { index, engine, sse, version: VERSION, ports: getPorts, shutdown: (r) => void shutdown(r) });
+    registerApiRoutes(router, { index, engine, sse, version: VERSION, build: IDENTITY.build, ports: getPorts, shutdown: (r) => void shutdown(r) });
 
     // ---- listen, then publish daemon.json
     const bound = await bindPorts(uiServer, contentServer, opts, prev);
@@ -184,6 +188,8 @@ export async function startDaemon(opts = {}) {
       token,
       secret,
       version: VERSION,
+      root: IDENTITY.root,
+      build: IDENTITY.build,
       startedAt: new Date().toISOString(),
     };
     try {
