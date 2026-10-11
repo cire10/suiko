@@ -10,6 +10,8 @@
 // (or --workspace): config readable, and per doc: working copy present, versions sequential and matching
 // doc.head, leftovers of interrupted writes (fixed with --fix via the store's recoverDoc), unrecorded edits.
 // --fix also chmods daemon.json to 0600 and (re)starts a missing or outdated server.
+// Last, the agent integrations: per detected (or configured) agent, whether `specreview install` configured it and
+// whether that configuration is current (a dry run of the installer; nothing is written).
 // Exit 0 when no ERR remains, else 1.
 
 import fs from 'node:fs';
@@ -70,6 +72,7 @@ export async function execute(rt, input) {
   checkFiles(add);
   await checkWorkspaces(add);
   await checkStore(rt, add, fix);
+  await checkIntegrations(rt, add);
 
   const tag = /** @type {Record<Check['level'], string>} */ ({ ok: 'ok   ', warn: 'WARN ', err: 'ERR  ', fixed: 'fixed' });
   const errors = checks.filter((c) => c.level === 'err').length;
@@ -177,6 +180,34 @@ async function checkWorkspaces(add) {
   const all = await listWorkspaces();
   const gone = all.filter((w) => !w.exists);
   add(gone.length ? 'warn' : 'ok', 'workspaces', `${all.length} registered workspace${all.length === 1 ? '' : 's'}${gone.length ? `; ${gone.length} no longer exist: ${gone.map((w) => w.root).join(', ')}` : ''}`);
+}
+
+/**
+ * Which agents have SpecReview configured (user scope), from a dry run of the multi-agent installer. Skipped when the
+ * home directory is unknown (the installer never guesses it).
+ * @param {import('../runtime.js').Runtime} rt
+ * @param {(level: Check['level'], check: string, message: string) => void} add
+ */
+async function checkIntegrations(rt, add) {
+  if (!(rt.deps.home ?? rt.env.HOME ?? rt.env.USERPROFILE)) return;
+  try {
+    const { buildContext, integrationStatus } = await import('../install/multi.js');
+    const list = integrationStatus(buildContext(rt, { scope: 'user' }));
+    if (!list.length) {
+      add('ok', 'integrations', 'agents: none detected (`specreview install --only <agent>` configures one anyway)');
+      return;
+    }
+    for (const s of list) {
+      const check = `integration:${s.id}`;
+      if (s.plugin) add('ok', check, `${s.name}: SpecReview plugin installed (${s.plugin})`);
+      else if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
+      else if (s.configured && s.upToDate) add('ok', check, `${s.name}: SpecReview configured`);
+      else if (s.configured) add('warn', check, `${s.name}: SpecReview configuration is incomplete or outdated (run \`specreview install --only ${s.id} --apply\`)`);
+      else add('ok', check, `${s.name}: detected, SpecReview not configured (\`specreview install --only ${s.id}\` shows what it would add)`);
+    }
+  } catch (err) {
+    add('warn', 'integrations', `could not check the agent integrations: ${/** @type {Error} */ (err).message}`);
+  }
 }
 
 /**

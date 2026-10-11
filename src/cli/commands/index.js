@@ -4,7 +4,7 @@
 //   spec    { name, usage, summary, options }          options are node:util parseArgs specs (global ones added)
 //   parse(parsed, rt) -> input                          argv -> normalised input (may read stdin)
 //   execute(rt, input) -> CommandResult                 shared with the MCP server (same text, same JSON)
-// Daemon/installer commands (serve, stop, doctor, mcp, install) only implement parse + execute for the CLI.
+// Daemon/installer commands (serve, stop, doctor, mcp, install, uninstall) only implement parse + execute for the CLI.
 
 /** @type {Record<string, { load: () => Promise<any>, summary: string, group: string }>} */
 export const COMMANDS = {
@@ -31,7 +31,8 @@ export const COMMANDS = {
   doctor: { load: () => import('./doctor.js'), summary: 'Check the installation, server and stores (--fix repairs)', group: 'admin' },
   mcp: { load: () => import('./mcp.js'), summary: 'Run the stdio MCP server', group: 'admin' },
   hook: { load: () => import('./hook.js'), summary: 'Claude Code hook entry points: hook pre-write | hook prompt', group: 'admin' },
-  install: { load: () => import('./install.js'), summary: 'install claude [--user|--project] [--with-hooks] [--with-mcp] [--apply] | install agents-md [--apply]', group: 'admin' },
+  install: { load: () => import('./install.js'), summary: 'Configure SpecReview for the agents found here (dry run; --apply writes). Also: install claude | agents-md', group: 'admin' },
+  uninstall: { load: () => import('./uninstall.js'), summary: 'Remove what install added, per agent (dry run; --apply removes)', group: 'admin' },
 };
 
 /**
