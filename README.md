@@ -66,6 +66,59 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
+### Quick install
+
+From a checkout of this repository:
+
+```bash
+./install.sh          # installs the CLI, then lists what it would configure for each coding agent it finds
+./install.sh --yes    # the same, and writes it
+```
+
+`install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `specreview` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `specreview install`. Options after `--yes` go to `specreview install`, e.g. `./install.sh --yes --only claude,codex`.
+
+Without a checkout, give it the repository's git URL. There is no public download, and the npm name `specreview` belongs to another package:
+
+```bash
+curl -fsSL <raw URL of install.sh> | SPECREVIEW_REPO=<git URL> sh -s -- --yes
+```
+
+That clones into `~/.specreview/app` (or `SPECREVIEW_APP_DIR`; `SPECREVIEW_REF` picks a branch or tag) and updates the clone when you run it again.
+
+Once the CLI is installed, configure or reconfigure the agents with `specreview install`:
+
+```bash
+specreview install                         # dry run: per detected agent, the exact files, entries and blocks
+specreview install --apply                 # writes them
+specreview install --only claude,codex --apply
+specreview uninstall                       # dry run of the removal
+specreview uninstall --apply               # removes exactly what install added
+specreview doctor                          # includes which agents have SpecReview configured
+```
+
+What it configures (user scope; `--project` writes the project-level equivalents where an agent has them):
+
+| Agent | Detected by | What `specreview install` writes |
+|---|---|---|
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and three hooks in `settings.json` with absolute paths: `PreToolUse` on `Write`, `UserPromptSubmit`, and the plan-mode gate (`PermissionRequest` on `ExitPlanMode`, which opens Claude's plan in SpecReview). Skipped when the SpecReview plugin is installed, because the hooks would run twice. |
+| Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
+| Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
+| Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
+| OpenCode | `~/.config/opencode` (`$XDG_CONFIG_HOME`), or `opencode` on PATH | The protocol block in `~/.config/opencode/AGENTS.md`, `/specreview-review` in `commands/`, and `mcp.specreview` in `opencode.json`. |
+| GitHub Copilot CLI | `~/.copilot` (`$COPILOT_HOME`), or `copilot` on PATH | The protocol block in `~/.copilot/copilot-instructions.md`, and the skill in `~/.agents/skills/`. |
+| Amp | `~/.config/amp`, or `amp` on PATH | The protocol block in `~/.config/amp/AGENTS.md`, and the skill in `~/.agents/skills/`. |
+| Factory Droid | `~/.factory`, or `droid` on PATH | The skill in `~/.agents/skills/` (Droid documents no global instructions file). |
+| Kiro CLI | `~/.kiro`, or `kiro-cli` on PATH | `~/.kiro/steering/specreview.md` (always included) and `~/.kiro/skills/specreview-review/`. |
+| Claude Desktop | its config folder (macOS, Windows) | `mcpServers.specreview` in `claude_desktop_config.json`. |
+
+Google Antigravity and Devin Desktop (Windsurf) are listed as not configured: their config files are not documented well enough to write safely.
+
+How it edits your config: JSON files are parsed and only the `specreview` entry (or the hooks that run `specreview`) is added or replaced, keeping the file's indentation; a file that is not valid JSON is refused and never rewritten. Markdown files get a block between `<!-- specreview:begin -->` and `<!-- specreview:end -->`, and Codex's `config.toml` a block between `# specreview:begin` and `# specreview:end`; everything outside the markers is kept as is. The first time it changes an existing file, it saves a copy as `<file>.specreview-backup`. Writes are atomic, and re-running is idempotent. `--only` configures an agent even when it is not detected; `--skip` leaves agents out. A skill or command copy you edited after installing is kept by `uninstall`.
+
+When `specreview` is not on the `PATH` the agents see, the installed instructions use the absolute command (`"<path to node>" "<path to specreview>/bin/specreview.js"`) instead.
+
+The sections below install one piece at a time.
+
 ### 1. The CLI
 
 ```bash
@@ -102,7 +155,7 @@ specreview install claude --user                        # prints exactly what it
 specreview install claude --user --with-hooks --apply   # writes it
 ```
 
-This installs the skill (and with `--with-hooks`, the hooks) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
+This installs the skill and the commands (and with `--with-hooks`, the hooks; with `--with-plan-gate`, the plan-mode gate) into `~/.claude` (`--user`) or the project's `.claude/` (`--project`). `specreview install` (no target) does all of this for Claude Code, plus the other agents it finds. The hook commands use absolute paths, `"<path to node>" "<path to specreview>/bin/specreview.js" hook …`, so they work whatever `PATH` Claude Code starts with. That makes this the right choice for nvm users. Use either the plugin or `install claude`, not both, or the hooks run twice. Without `--apply`, nothing is written.
 
 ### 2c. MCP (Claude Code, Claude Desktop, Cursor, and other MCP clients)
 
@@ -110,12 +163,13 @@ This installs the skill (and with `--with-hooks`, the hooks) into `~/.claude` (`
 claude mcp add specreview -- specreview mcp
 ```
 
-Other clients: register a stdio server with command `specreview` and args `["mcp"]` (with nvm, use the absolute path to `node` as the command and `["/path/to/specreview/bin/specreview.js", "mcp"]` as args). `specreview install claude --with-mcp` prints the `claude mcp add` line. In Claude Code the background CLI `wait` is preferred over MCP; MCP is for agents without a shell.
+`specreview install` writes the MCP entry for Codex, Cursor, OpenCode and Claude Desktop. Other clients: register a stdio server with command `specreview` and args `["mcp"]` (with nvm, use the absolute path to `node` as the command and `["/path/to/specreview/bin/specreview.js", "mcp"]` as args). `specreview install claude --with-mcp` prints the `claude mcp add` line. In Claude Code the background CLI `wait` is preferred over MCP; MCP is for agents without a shell.
 
 ### 2d. Codex, Gemini CLI and other CLI agents
 
 ```bash
-specreview install agents-md --apply    # appends the protocol to AGENTS.md
+specreview install --only codex,gemini --apply   # the global instructions, skill/commands and MCP entry of each
+specreview install agents-md --apply             # appends the protocol to the project's AGENTS.md
 ```
 
 See [`integrations/agents-md/README.md`](integrations/agents-md/README.md) for Gemini CLI (`GEMINI.md`) and the two waiting modes for agents that cannot run background tasks.
@@ -317,7 +371,9 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | `specreview serve [--foreground] [--port N]` · `specreview stop [--rotate]` · `specreview doctor [--fix]` | Server control and health checks |
 | `specreview mcp` | stdio MCP server |
 | `specreview hook pre-write` · `specreview hook prompt` | Claude Code hook entry points |
-| `specreview install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install integrations (prints only, unless `--apply`) |
+| `specreview install [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Configure every detected coding agent (prints only, unless `--apply`). See [Quick install](#quick-install) |
+| `specreview uninstall [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Remove what `install` added (prints only, unless `--apply`) |
+| `specreview install claude [--user\|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install one integration (prints only, unless `--apply`) |
 
 Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port).
 

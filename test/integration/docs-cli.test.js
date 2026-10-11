@@ -18,6 +18,8 @@ const { GLOBAL_OPTIONS } = await import('../../src/cli/args.js');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SUBCOMMANDS = { hook: ['pre-write', 'prompt'], install: ['claude', 'agents-md'] };
+/** Commands whose subcommand is optional: `specreview install --apply` runs the agent installer. */
+const OPTIONAL_SUB = new Set(['install']);
 /** Words that end a documented command (prose or shell glue after it). */
 const STOP = new Set(['or', '->', '|', 'then', '&&', 'and', '·', '/', ';']);
 
@@ -84,11 +86,12 @@ test('every documented specreview command and flag exists in the CLI', async () 
         const subs = /** @type {Record<string, string[]>} */ (SUBCOMMANDS)[cmd];
         if (subs) {
           const sub = (toks[0] ?? '').replace(/[\\|].*$/, '');
-          if (!subs.includes(sub)) {
+          if (subs.includes(sub)) i = 1;
+          else if (OPTIONAL_SUB.has(cmd) && (sub === '' || /^[-[]/.test(sub) || STOP.has(sub) || sub.startsWith('#'))) i = 0;
+          else {
             errors.push(`${rel}: unknown subcommand "specreview ${cmd} ${sub}"`);
             continue;
           }
-          i = 1;
         }
         checked++;
         for (; i < toks.length; i++) {
