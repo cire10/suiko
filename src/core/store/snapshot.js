@@ -11,6 +11,10 @@
 // exists); writeWorking refuses; findDoc never matches a snapshot by path or basename, so a synthetic path can never
 // shadow a real file; findDocByOrigin(key) is the identity used to record re-snapshots as vN+1 of the same doc.
 // Versions are recorded from bytes (ops/snapshot.js openSnapshot / recordSnapshot), never from the workspace.
+//
+// Code docs (doc.json `kind: "code"`, origin type 'diff', format 'text', path 'code/<id>.diff') are the other
+// VIRTUAL kind: they share every no-working-file rule above (isVirtual), but are reviewed and revised through the
+// code engine (src/core/code/*, dispatched by src/core/review/kinds.js), never through the snapshot ops.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +23,7 @@ import { homeDir } from './home.js';
 import { isWithin } from '../util/paths.js';
 
 export const SNAPSHOT_KIND = 'snapshot';
+export const CODE_KIND = 'code';
 
 /**
  * @typedef {object} OriginInfo
@@ -56,6 +61,34 @@ const MAX_KEY = 1024;
  */
 export function isSnapshot(doc) {
   return Boolean(doc) && typeof doc === 'object' && /** @type {any} */ (doc).kind === SNAPSHOT_KIND;
+}
+
+/**
+ * Whether a doc is a code review doc (doc.json `kind: "code"`).
+ * @param {unknown} doc
+ * @returns {boolean}
+ */
+export function isCode(doc) {
+  return Boolean(doc) && typeof doc === 'object' && /** @type {any} */ (doc).kind === CODE_KIND;
+}
+
+/**
+ * Whether a doc has no working file of its own (snapshot and code docs): its working copy is its head version
+ * (store), it is never matched by path, never watched, never auto-committed as a workspace file.
+ * @param {unknown} doc
+ * @returns {boolean}
+ */
+export function isVirtual(doc) {
+  return isSnapshot(doc) || isCode(doc);
+}
+
+/**
+ * Synthetic workspace-relative path of a code doc: 'code/<slug>.diff' (the extension names the version files).
+ * @param {string} slug a doc id
+ * @returns {string}
+ */
+export function codePath(slug) {
+  return `code/${slug}.diff`;
 }
 
 /**
@@ -216,4 +249,15 @@ export function snapshotRefusal(doc, what, ref) {
  */
 export function snapshotNoun(doc) {
   return `a snapshot (${originInfo(originType(doc)).label})`;
+}
+
+/**
+ * Why an edit command is refused for a code doc: the agent edits the repo files itself and records a round.
+ * @param {unknown} doc
+ * @param {string} [ref] the doc as follow-up commands name it
+ * @returns {string}
+ */
+export function codeEditRefusal(doc, ref) {
+  const d = /** @type {any} */ (doc);
+  return `code docs: edit the files with your own tools; \`specreview revise ${ref ?? d?.id ?? '<doc>'}\` records the round`;
 }

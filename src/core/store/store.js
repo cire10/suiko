@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { ID_PREFIX } from '../../shared/protocol.js';
+import { CODE_MODES, ID_PREFIX } from '../../shared/protocol.js';
 import { ConflictError, NotFoundError, RefusedError, UsageError } from './errors.js';
 import { exists, readJson, writeFileAtomic, writeJson } from './atomic.js';
 import { appendJsonLine, readJsonLines, readLastJsonLine } from './jsonl.js';
@@ -32,7 +32,7 @@ import { countLines, decodeText, encodeText, roundTrips, stableRead } from '../u
 import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
-import { isSnapshot, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
+import { CODE_KIND, codeEditRefusal, codePath, isCode, isVirtual, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
 
 const log = createLogger('store');
 
@@ -222,13 +222,15 @@ export class Store {
 
   /**
    * Absolute path of a doc's working copy. RefusedError when doc.path (e.g. a hand-edited or malicious doc.json)
-   * would resolve outside the workspace root, and for a snapshot doc (its path is synthetic: there is no file).
+   * would resolve outside the workspace root, and for a snapshot or code doc (its path is synthetic: there is no
+   * file).
    * @param {Pick<Doc, 'path'> & { kind?: string }} doc
    * @returns {string}
    */
   workingPath(doc) {
-    if (isSnapshot(doc)) {
-      throw new RefusedError(`${/** @type {any} */ (doc).id ?? doc.path} is a snapshot doc: it has no working file`, { details: { path: doc.path, kind: SNAPSHOT_KIND } });
+    if (isVirtual(doc)) {
+      const kind = isCode(doc) ? CODE_KIND : SNAPSHOT_KIND;
+      throw new RefusedError(`${/** @type {any} */ (doc).id ?? doc.path} is a ${kind} doc: it has no working file`, { details: { path: doc.path, kind } });
     }
     const rel = String(doc?.path ?? '');
     const abs = path.resolve(this.root, ...rel.split('/'));
@@ -317,7 +319,7 @@ export class Store {
 
   /**
    * Finds a doc by id, by path (absolute, relative to the cwd, or relative to the root), or by a unique basename.
-   * Snapshot docs match by id only: their synthetic path must never shadow (or be taken for) a real file.
+   * Snapshot and code docs match by id only: their synthetic path must never shadow (or be taken for) a real file.
    * @param {string} idOrPath
    * @returns {Promise<Doc | null>}
    */
@@ -325,7 +327,7 @@ export class Store {
     if (typeof idOrPath !== 'string' || !idOrPath) return null;
     const byId = await this.getDoc(idOrPath);
     if (byId) return byId;
-    const docs = (await this.listDocs()).filter((d) => !isSnapshot(d));
+    const docs = (await this.listDocs()).filter((d) => !isVirtual(d));
     const candidates = path.isAbsolute(idOrPath)
       ? [idOrPath]
       : [path.resolve(process.cwd(), idOrPath), path.resolve(this.root, idOrPath)];
@@ -367,7 +369,7 @@ export class Store {
       throw new UsageError(`unsupported spec type: ${rel} (expected .md, .markdown, .html or .htm)`, { details: { path: rel } });
     }
     return this.withWorkspaceLock(async () => {
-      const existing = (await this.listDocs()).find((d) => d.path === rel && !isSnapshot(d));
+      const existing = (await this.listDocs()).find((d) => d.path === rel && !isVirtual(d));
       if (existing) {
         throw new ConflictError(`${rel} is already tracked as ${existing.id}`, { details: { doc: existing.id, path: rel } });
       }
@@ -414,13 +416,13 @@ export class Store {
   }
 
   /**
-   * The snapshot doc with this origin key, or null (see snapshot.js).
+   * The snapshot or code doc with this origin key, or null (see snapshot.js).
    * @param {string} key
    * @returns {Promise<Doc | null>}
    */
   async findDocByOrigin(key) {
     if (typeof key !== 'string' || !key) return null;
-    return (await this.listDocs()).find((d) => isSnapshot(d) && /** @type {any} */ (d).origin?.key === key) ?? null;
+    return (await this.listDocs()).find((d) => isVirtual(d) && /** @type {any} */ (d).origin?.key === key) ?? null;
   }
 
   /**
@@ -428,13 +430,25 @@ export class Store {
    * version is committed from bytes. With an origin key, an existing doc with that key is returned instead
    * (`created: false`); the check and the creation run under the workspace lock, so concurrent callers with the same
    * key get one doc.
+   *
+   * `kind: 'code'` creates a code review doc instead: format 'text', origin type 'diff', `code` (the CodeSpec) kept
+   * in doc.json, synthetic path 'code/<id>.diff', and always ephemeral: the doc dir gets a '.gitignore' of '*' (its
+   * versions and blobs hold repo file contents and are never committed) and `doc.ephemeral` is set.
    * @param {{ title?: string, format?: DocFormat, origin: { type: string, key?: string | null } & Record<string, unknown>,
-   *   slug?: string, createdBy?: Actor }} input
+   *   slug?: string, createdBy?: Actor, kind?: 'snapshot' | 'code', code?: import('../../shared/types.js').CodeSpec }} input
    * @returns {Promise<{ doc: Doc, created: boolean }>}
    */
-  async createSnapshotDoc({ title, format = 'markdown', origin, slug, createdBy }) {
+  async createSnapshotDoc({ title, kind = SNAPSHOT_KIND, format = kind === CODE_KIND ? 'text' : 'markdown', origin, slug, createdBy, code = undefined }) {
     const o = normalizeOrigin(origin);
-    if (format !== 'markdown' && format !== 'html') throw new UsageError(`unsupported snapshot format: ${format}`);
+    if (kind === CODE_KIND) {
+      if (format !== 'text') throw new UsageError(`a code doc has format 'text', not ${JSON.stringify(format)}`);
+      if (o.type !== 'diff') throw new UsageError(`a code doc needs origin type 'diff', not ${JSON.stringify(o.type)}`);
+      assertCodeSpec(code);
+    } else if (kind !== SNAPSHOT_KIND) {
+      throw new UsageError(`unsupported doc kind: ${JSON.stringify(kind)}`);
+    } else if (format !== 'markdown' && format !== 'html') {
+      throw new UsageError(`unsupported snapshot format: ${format}`);
+    }
     return this.withWorkspaceLock(async () => {
       if (o.key) {
         const existing = await this.findDocByOrigin(o.key);
@@ -442,13 +456,17 @@ export class Store {
       }
       const base = slugify(String(slug || title || o.type).replace(/[\\/.]+/g, ' ')).slice(0, 60).replace(/-+$/, '') || o.type;
       const id = await this.#allocateDocDir(base);
+      const isCodeDoc = kind === CODE_KIND;
+      // the ignore file first: a crash between the two never leaves code contents committable
+      if (isCodeDoc) await writeFileAtomic(path.join(this.docDir(id), '.gitignore'), '*\n');
       /** @type {Doc} */
       const doc = /** @type {any} */ ({
         schema: 1,
         id,
-        kind: SNAPSHOT_KIND,
+        kind,
         origin: o,
-        path: snapshotPath(o.type, id, format),
+        ...(isCodeDoc ? { code: { ...code }, ephemeral: true } : {}),
+        path: isCodeDoc ? codePath(id) : snapshotPath(o.type, id, /** @type {'markdown' | 'html'} */ (format)),
         format,
         title: title || id,
         createdAt: nowIso(),
@@ -1106,12 +1124,13 @@ export class Store {
 
   /**
    * Stable read of the tracked file (see util/stable-read.js). NotFoundError when it does not exist.
-   * The working copy of a snapshot doc is its newest committed version (never dirty; NotFoundError before v1).
+   * The working copy of a snapshot or code doc is its newest committed version (never dirty; NotFoundError before
+   * v1). A code doc's real working state (its repo files) comes from kindOf(doc).workingState, not from here.
    * @param {Pick<Doc, 'path'> & { id?: string, kind?: string }} doc
    * @returns {Promise<StableReadResult>}
    */
   async readWorking(doc) {
-    if (isSnapshot(doc)) return this.#snapshotWorking(/** @type {Doc} */ (doc));
+    if (isVirtual(doc)) return this.#snapshotWorking(/** @type {Doc} */ (doc));
     try {
       return await stableRead(this.workingPath(doc));
     } catch (err) {
@@ -1123,7 +1142,7 @@ export class Store {
   }
 
   /**
-   * readWorking of a snapshot doc: the bytes of its newest committed version, in the StableReadResult shape.
+   * readWorking of a snapshot or code doc: the bytes of its newest committed version, in the StableReadResult shape.
    * @param {Doc} doc
    * @returns {Promise<StableReadResult>}
    */
@@ -1149,7 +1168,8 @@ export class Store {
    * @returns {Promise<{ sha256: string, bytes: number }>}
    */
   async writeWorking(doc, text, { expectSha256 }) {
-    if (isSnapshot(doc)) throw new RefusedError(snapshotRefusal(doc, 'write'), { details: { doc: /** @type {any} */ (doc).id, kind: SNAPSHOT_KIND } });
+    if (isCode(doc)) throw new RefusedError(codeEditRefusal(doc), { details: { doc: /** @type {any} */ (doc).id, kind: CODE_KIND } });
+    if (isVirtual(doc)) throw new RefusedError(snapshotRefusal(doc, 'write'), { details: { doc: /** @type {any} */ (doc).id, kind: SNAPSHOT_KIND } });
     if (typeof expectSha256 !== 'string' || !expectSha256) throw new UsageError('writeWorking requires expectSha256');
     const abs = this.workingPath(doc);
     let real;
@@ -1179,6 +1199,252 @@ export class Store {
       },
     });
     return { sha256: sha256(buf), bytes: buf.length };
+  }
+
+  // ---------------------------------------------------------------- code docs: per-doc blobs and repo files
+
+  /**
+   * Stores bytes in a doc's own content-addressed blob store (`docs/<id>/blobs/<hex[0..2]>/<hex>`): code docs keep
+   * the file sides of every round there. Idempotent and atomic. Never the shared `assets/` store: those blobs are
+   * served by the content origin and meant to be committed, these hold repo contents of an ephemeral doc.
+   * @param {string} docId
+   * @param {Buffer | Uint8Array | string} buf strings are stored as UTF-8
+   * @returns {Promise<string>} 'sha256:<hex>'
+   */
+  async putDocBlob(docId, buf) {
+    const data = Buffer.isBuffer(buf) ? buf : typeof buf === 'string' ? Buffer.from(buf, 'utf8') : Buffer.from(buf);
+    const hex = sha256(data);
+    const file = this.#docBlobFile(docId, hex);
+    try {
+      const st = await fsp.stat(file);
+      if (st.isFile() && st.size === data.length) return `sha256:${hex}`;
+    } catch {
+      // not stored yet
+    }
+    await writeFileAtomic(file, data);
+    return `sha256:${hex}`;
+  }
+
+  /**
+   * Bytes of a doc blob stored with putDocBlob. NotFoundError when it is absent; UsageError for a malformed ref.
+   * @param {string} docId
+   * @param {string} ref 'sha256:<hex>'
+   * @returns {Promise<Buffer>}
+   */
+  async readDocBlob(docId, ref) {
+    const m = typeof ref === 'string' ? BLOB_REF_RE.exec(ref) : null;
+    if (!m) throw new UsageError(`invalid blob reference: ${JSON.stringify(ref)}`, { details: { doc: docId, ref } });
+    try {
+      return await fsp.readFile(this.#docBlobFile(docId, m[1]));
+    } catch (err) {
+      const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') throw new NotFoundError(`blob ${ref} of ${docId} is missing`, { details: { doc: docId, ref } });
+      throw err;
+    }
+  }
+
+  /**
+   * @param {string} docId
+   * @param {string} hex
+   * @returns {string}
+   */
+  #docBlobFile(docId, hex) {
+    return path.join(this.docDir(docId), 'blobs', hex.slice(0, 2), hex);
+  }
+
+  /**
+   * Reads one repo file (a path relative to the workspace root, which for code reviews is the repo top level),
+   * NEVER through a symlink: the last component is lstat'ed and opened with O_NOFOLLOW, and a symlink returns its
+   * link text only. Refuses (RefusedError) a path whose parent directory's real path leaves the root (a symlinked
+   * directory), any component equal to '.git' or '.specreview' (case-insensitive; covers the .git file of a
+   * worktree), and '..' / empty / absolute forms. Returns null when the file does not exist.
+   * @param {string} rel POSIX path relative to the root
+   * @returns {Promise<import('../../shared/types.js').RepoRead | null>}
+   */
+  async readRepoFile(rel) {
+    const abs = await this.#repoFilePath(rel, { mustExist: false });
+    if (!abs) return null;
+    let st;
+    try {
+      st = await fsp.lstat(abs);
+    } catch (err) {
+      if (isMissing(err)) return null;
+      throw err;
+    }
+    if (st.isSymbolicLink()) return { kind: 'symlink', target: await fsp.readlink(abs) };
+    if (!st.isFile()) return { kind: 'other' };
+    const read = await readNoFollow(abs);
+    if (read === 'symlink') return { kind: 'symlink', target: await fsp.readlink(abs) };
+    if (read === null) return null;
+    return read;
+  }
+
+  /**
+   * Compare-and-swap write of a repo file, with writeWorking's rules: the file's current sha256 (hex of its bytes;
+   * a 'sha256:' prefix is accepted) must equal `expectSha256`, checked before writing and again just before the
+   * atomic rename (ConflictError otherwise); the file mode and the encoding/BOM are kept; text is written as given
+   * (callers match the file's line endings, see review/apply.js matchEol); a file that does not decode losslessly
+   * is refused. Refuses the paths readRepoFile refuses, a symlink (never written through), anything that is not a
+   * regular file, and any `rel` not in `allowed` (the head manifest's file list). NotFoundError when it is missing.
+   * @param {string} rel POSIX path relative to the root
+   * @param {string | Buffer} text
+   * @param {{ expectSha256: string, allowed: Iterable<string> }} opts
+   * @returns {Promise<{ sha256: string, bytes: number }>}
+   */
+  async writeRepoFile(rel, text, { expectSha256, allowed } = /** @type {any} */ ({})) {
+    const expect = typeof expectSha256 === 'string' ? expectSha256.replace(/^sha256:/, '') : '';
+    if (!expect) throw new UsageError('writeRepoFile requires expectSha256');
+    if (!allowed || typeof allowed !== 'object' || typeof /** @type {any} */ (allowed)[Symbol.iterator] !== 'function') {
+      throw new UsageError('writeRepoFile requires the allowed file list');
+    }
+    if (!new Set(allowed).has(rel)) {
+      throw new RefusedError(`${rel} is not a file of this review; SpecReview only writes files listed in the reviewed round`, { details: { path: rel } });
+    }
+    const abs = /** @type {string} */ (await this.#repoFilePath(rel, { mustExist: true }));
+    const missing = () => new NotFoundError(`${rel} is missing`, { details: { path: rel } });
+    const conflict = () => new ConflictError(`${rel} changed since it was read; re-read it and retry`, { details: { path: rel, expectSha256: expect } });
+    const current = await this.#regularRepoFile(rel, abs);
+    if (!current) throw missing();
+    if (current.sha256 !== expect) throw conflict();
+    if (typeof text === 'string' && !roundTrips(current.buf)) {
+      throw new RefusedError(
+        `${rel} is not valid UTF-8 or UTF-16 (a legacy charset such as windows-1252?); SpecReview cannot rewrite it without corrupting its non-ASCII characters. Make the change with your editor, or convert the file to UTF-8 first.`,
+        { details: { path: rel, encoding: 'legacy' } },
+      );
+    }
+    const buf = typeof text === 'string' ? encodeText(text, decodeText(current.buf).encoding) : Buffer.from(text);
+    await writeFileAtomic(abs, buf, {
+      mode: current.mode,
+      mkdir: false,
+      beforeRename: async () => {
+        const again = await this.#regularRepoFile(rel, abs);
+        if (!again || again.sha256 !== expect) throw conflict();
+      },
+    });
+    return { sha256: sha256(buf), bytes: buf.length };
+  }
+
+  /**
+   * readRepoFile for a writer: the regular file's bytes, null when missing; RefusedError for a symlink or a
+   * non-file.
+   * @param {string} rel
+   * @param {string} abs
+   * @returns {Promise<{ buf: Buffer, text: string, sha256: string, mode: number } | null>}
+   */
+  async #regularRepoFile(rel, abs) {
+    let st;
+    try {
+      st = await fsp.lstat(abs);
+    } catch (err) {
+      if (isMissing(err)) return null;
+      throw err;
+    }
+    const refuse = (/** @type {string} */ what) => new RefusedError(`${rel} is ${what}; SpecReview does not write it`, { details: { path: rel } });
+    if (st.isSymbolicLink()) throw refuse('a symlink');
+    if (!st.isFile()) throw refuse('not a regular file');
+    const read = await readNoFollow(abs);
+    if (read === 'symlink') throw refuse('a symlink');
+    return read;
+  }
+
+  /**
+   * Validates a repo-relative path and returns its absolute path (see readRepoFile for the refusals). With
+   * `mustExist: false`, a missing parent directory returns null.
+   * @param {string} rel
+   * @param {{ mustExist: boolean }} opts
+   * @returns {Promise<string | null>}
+   */
+  async #repoFilePath(rel, { mustExist }) {
+    if (typeof rel !== 'string' || !rel || rel.includes('\0') || rel.includes('\\')) {
+      throw new UsageError(`invalid repo path: ${JSON.stringify(rel)}`, { details: { path: rel } });
+    }
+    const segs = rel.split('/');
+    if (rel.startsWith('/') || /^[A-Za-z]:/.test(rel) || segs.some((s) => s === '' || s === '.' || s === '..')) {
+      throw new RefusedError(`${rel} is not a plain path relative to the repository root`, { details: { path: rel } });
+    }
+    const refuseInternal = () =>
+      new RefusedError(`${rel} is inside .git or .specreview; SpecReview never reads or writes there`, { details: { path: rel } });
+    if (segs.some(isInternalSegment)) throw refuseInternal();
+    const abs = path.join(this.root, ...segs);
+    let realParent;
+    try {
+      realParent = await fsp.realpath(path.dirname(abs));
+    } catch (err) {
+      if (!mustExist && isMissing(err)) return null;
+      if (isMissing(err)) throw new NotFoundError(`${rel} is missing`, { details: { path: rel } });
+      throw err;
+    }
+    if (!isWithin(this.root, realParent)) {
+      throw new RefusedError(`${rel} resolves outside the repository (through a symlinked directory)`, { details: { path: rel, root: this.root } });
+    }
+    const relParent = path.relative(this.root, realParent);
+    if (relParent && relParent.split(path.sep).some(isInternalSegment)) throw refuseInternal();
+    return path.join(realParent, segs[segs.length - 1]);
+  }
+}
+
+/**
+ * @param {string} s a path component
+ * @returns {boolean}
+ */
+function isInternalSegment(s) {
+  const l = s.toLowerCase();
+  return l === '.git' || l === STORE_DIR.toLowerCase();
+}
+
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isMissing(err) {
+  const code = /** @type {NodeJS.ErrnoException} */ (err)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/**
+ * Stable read of a regular file through a handle opened with O_NOFOLLOW (where the platform has it): 'symlink'
+ * when the last component turned into a symlink, null when it vanished.
+ * @param {string} abs
+ * @returns {Promise<{ kind: 'file', buf: Buffer, text: string, sha256: string, mode: number } | 'symlink' | null>}
+ */
+async function readNoFollow(abs) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  for (let attempt = 0; ; attempt += 1) {
+    let handle;
+    try {
+      handle = await fsp.open(abs, flags);
+    } catch (err) {
+      const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+      if (code === 'ELOOP' || code === 'EMLINK') return 'symlink';
+      if (isMissing(err)) return null;
+      throw err;
+    }
+    try {
+      const before = await handle.stat();
+      if (!before.isFile()) return null;
+      const buf = await handle.readFile();
+      const after = await handle.stat();
+      const stable = before.size === after.size && before.mtimeMs === after.mtimeMs && buf.length === after.size;
+      if (stable || attempt >= 4) {
+        return { kind: 'file', buf, text: decodeText(buf).text, sha256: sha256(buf), mode: after.mode & 0o7777 };
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
+/**
+ * Shape check of a code doc's CodeSpec (the engine validates the refs).
+ * @param {unknown} code
+ */
+function assertCodeSpec(code) {
+  const c = /** @type {any} */ (code);
+  if (!c || typeof c !== 'object' || Array.isArray(c)) throw new UsageError('a code doc needs its code spec {mode, context, ...}');
+  if (!CODE_MODES.includes(c.mode)) throw new UsageError(`invalid code review mode: ${JSON.stringify(c.mode)} (expected ${CODE_MODES.join(', ')})`);
+  if (!Number.isSafeInteger(c.context) || c.context < 0) throw new UsageError(`invalid code review context: ${JSON.stringify(c.context)}`);
+  if (c.paths !== undefined && (!Array.isArray(c.paths) || c.paths.some((/** @type {unknown} */ p) => typeof p !== 'string' || !p))) {
+    throw new UsageError('code review paths must be non-empty strings');
   }
 }
 

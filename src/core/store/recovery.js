@@ -13,11 +13,15 @@
 //     after its commit point leaves no thread without an anchor at head, no lost reply and no stale pending edit;
 //   - otherwise the journal is dropped (the commit never happened);
 // repairs `doc.head` to the highest committed manifest, and drops a `doc.final` whose review was never committed.
+// Code docs also keep per-doc blobs (`blobs/<hex[0..2]>/<hex>`, swept for temp files like the other subdirs), and
+// their recovery removes stale `code-index-*` temp dirs (git index copies of the code engine) older than an hour
+// from the workspace cache (`$SPECREVIEW_HOME/ws/<wsId>/cache/`). Dotfiles in a doc dir ('.gitignore') are kept.
 // Idempotent and cheap (a few readdirs plus reading thread files).
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { parseTmpName, readJson } from './atomic.js';
+import { isCode } from './snapshot.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
 
@@ -25,7 +29,11 @@ const log = createLogger('recovery');
 
 /** Temp files older than this are removed even if their pid looks alive (pid reuse). */
 const TMP_MAX_AGE_MS = 60 * 60 * 1000;
-const DOC_SUBDIRS = ['', 'versions', 'threads', 'reviews', 'locks', 'attachments'];
+const DOC_SUBDIRS = ['', 'versions', 'threads', 'reviews', 'locks', 'attachments', 'blobs'];
+/** Subdirs whose files sit one fan-out level deeper ('blobs/ab/ab12...'). */
+const FANOUT_SUBDIRS = ['blobs'];
+/** Temp dirs of the code engine's index copies, in the workspace cache (fs.mkdtemp prefix). */
+const CODE_INDEX_RE = /^code-index-/;
 
 /**
  * @typedef {object} RecoveryReport
@@ -36,6 +44,7 @@ const DOC_SUBDIRS = ['', 'versions', 'threads', 'reviews', 'locks', 'attachments
  * @property {{ version?: number, review?: string, applied: boolean } | null} journal interrupted commit rolled
  *   forward (applied) or dropped
  * @property {{ review: string } | null} final doc.final dropped because its review file does not exist
+ * @property {string[]} [removedIndexDirs] code docs: stale `code-index-*` cache dirs removed
  */
 
 /**
@@ -50,7 +59,11 @@ export async function recoverDoc(store, docId) {
     const docDir = store.docDir(docId);
 
     // 1. stale temp files
-    for (const sub of DOC_SUBDIRS) {
+    const dirs = [...DOC_SUBDIRS];
+    for (const sub of FANOUT_SUBDIRS) {
+      for (const name of await names(path.join(docDir, sub))) if (/^[0-9a-f]{2}$/.test(name)) dirs.push(path.posix.join(sub, name));
+    }
+    for (const sub of dirs) {
       const dir = path.join(docDir, sub);
       for (const name of await names(dir)) {
         const tmp = parseTmpName(name);
@@ -121,7 +134,19 @@ export async function recoverDoc(store, docId) {
       report.removedThreads.push(name.slice(0, -5));
     }
 
-    if (report.removedSources.length || report.removedTmp.length || report.removedThreads.length || report.head || report.journal || report.final) {
+    // 6. code docs: stale index copies of the code engine (each removed in a finally; a killed process leaves one)
+    if (isCode(doc)) {
+      const cache = store.cacheDir();
+      for (const name of await names(cache)) {
+        if (!CODE_INDEX_RE.test(name)) continue;
+        const dir = path.join(cache, name);
+        if (!(await olderThan(dir, TMP_MAX_AGE_MS))) continue;
+        await fsp.rm(dir, { recursive: true, force: true });
+        (report.removedIndexDirs ??= []).push(name);
+      }
+    }
+
+    if (report.removedSources.length || report.removedTmp.length || report.removedThreads.length || report.head || report.journal || report.final || report.removedIndexDirs) {
       log.info(`recovered ${docId}`, report);
     }
     return report;

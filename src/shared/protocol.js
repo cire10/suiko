@@ -160,6 +160,38 @@ export const LIMITS = Object.freeze({
   threadSrcChars: 1200,
   maxAttachmentBytes: 5 * 1024 * 1024,
   maxServeBytes: 200 * 1024 * 1024,
+  // Code reviews (doc kind 'code'). Soft limits are config-tunable defaults; the *Hard ones are never exceeded.
+  codeFileMaxBytes: 5 * 1024 * 1024,      // a changed file above this (either side) is listed as a tooLarge stub
+  codeFileMaxLines: 20000,                // ...or above this many lines
+  codeMaxFiles: 500,                      // `review` refuses a change set with more files unless --max-files
+  codeContext: 3,                         // unified-diff context lines shown and stored
+  codeMaxFilesHard: 5000,
+  codeFileMaxBytesHard: 20 * 1024 * 1024,
+  untrackedExcludeMax: 1000,              // untracked files listed before the rest are summarised as excluded
+  codePollMs: 5000,                       // daemon poll of a code doc's working tree (no chokidar on a repo)
+});
+
+/** Doc kinds (doc.json `kind`; absent means 'file'). 'snapshot' and 'code' are virtual: no working file of their own. */
+export const DOC_KINDS = Object.freeze(['file', 'snapshot', 'code']);
+
+/** CodeSpec.mode values: what a code review compares (see types.js CodeSpec). */
+export const CODE_MODES = Object.freeze(['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit', 'pr']);
+
+/** Oldest git the code-review engine supports (`git diff --merge-base`, `ls-files --format`). */
+export const GIT_MIN_VERSION = '2.32.0';
+
+/**
+ * data-testid values of the code-review UI (kind 'code'). Kept apart from TESTID so the TESTID coverage test only
+ * demands them once the code view exists.
+ */
+export const CODE_TESTID = Object.freeze({
+  view: 'code-view',                   // the code review main pane; carries data-view="code" and data-ready when loaded
+  fileTree: 'code-file-tree',
+  fileRow: 'code-file-row',            // plus data-path
+  fileDiff: 'code-file-diff',          // plus data-path
+  lineBtn: 'code-line-btn',            // plus data-side="new|old" data-line
+  stub: 'code-file-stub',              // binary / too-large / submodule placeholder
+  resnapshot: 'code-resnapshot',       // "Re-snapshot" (record a round of the working tree)
 });
 
 /**
