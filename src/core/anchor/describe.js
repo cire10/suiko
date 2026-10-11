@@ -320,7 +320,7 @@ function longLineIn(text, li, a, b) {
  * @param {number} maxChars
  * @returns {{ text: string, unique: boolean, window: boolean } | null} null when windowing is needed
  */
-function linesAround(working, li, a0, b0, maxChars) {
+export function linesAround(working, li, a0, b0, maxChars) {
   const slice = (/** @type {number} */ a, /** @type {number} */ b) => working.slice(li.startOf(a), li.endOf(b));
   let a = a0;
   let b = b0;
@@ -352,7 +352,7 @@ function linesAround(working, li, a0, b0, maxChars) {
  * @param {string} working @param {number} ws @param {number} we @param {number} maxChars
  * @returns {{ text: string, unique: boolean, window: boolean }}
  */
-function windowAround(working, ws, we, maxChars) {
+export function windowAround(working, ws, we, maxChars) {
   let lo = ws;
   let hi = we;
   let text = working.slice(lo, hi);

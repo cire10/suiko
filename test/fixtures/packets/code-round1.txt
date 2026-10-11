@@ -1,0 +1,32 @@
+SPECREVIEW FEEDBACK · cr-feat-token-refresh (code review: since-base origin/main, merge-base 1a2b3c4) · review rv1 on v1 · CHANGES REQUESTED
+Repo root: /Users/me/repo (paths below are relative to it)
+Line numbers = files in your working tree now (all identical to v1).
+Reviewer summary: Mostly good. Fix the reuse race before merging.
+4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
+
+[t2] suggestion · src/auth/refresh.js:L88 · apply verbatim: specreview apply cr-feat-token-refresh t2
+  - const ttlSec = 30 * 24 * 3600;
+  + const ttlSec = config.refreshTtlSec;
+  Eric: Read it from config.
+
+[t1] blocking · comment · src/auth/refresh.js:L41-44
+  src> if (stored.used) {
+  src>   await revokeFamily(stored.family);
+  src>   throw new TokenReuseError();
+  src> }
+  Eric: Two tabs refreshing at once will trip this. Allow reuse within 30 s before revoking the family.
+
+[t3] question · src/auth/store.js (old side) base L12-14, now between L11-12
+  was> export function legacyLookup(id) {
+  was>   return db.tokens.findOne({ id });
+  was> }
+  Eric: scripts/migrate.js still calls legacyLookup. Was removing it intended?
+
+[t4] comment · test/refresh.test.js:L1 (new file)
+  src> import { test } from 'node:test';
+  Eric: Add a test for the grace window.
+
+DECISIONS to keep true: (none yet)
+PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
+  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+NEXT: edit the files -> specreview revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> specreview wait cr-feat-token-refresh (background)
