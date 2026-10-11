@@ -13,7 +13,7 @@ process.env.SPECREVIEW_HOME = HOME;
 
 const { runCli, tempDir } = await import('./helpers/cli-harness.js');
 const { BIN_PATH, PACKAGE_ROOT } = await import('../../src/cli/daemon-client.js');
-const { hookCommand, insertSnippet, mergeHooks } = await import('../../src/cli/install.js');
+const { claudeCommandFiles, hookCommand, insertSnippet, mergeHooks, planGateCommand, PLAN_GATE_TIMEOUT } = await import('../../src/cli/install.js');
 
 /** @type {string} */
 let project;
@@ -89,6 +89,7 @@ describe('install claude', () => {
       { matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] },
     ]);
     assert.deepEqual(s.hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: hookCommand('prompt'), timeout: 5 }] }]);
+    assert.equal(s.hooks.PermissionRequest, undefined, '--with-hooks alone does not add the plan gate');
     const again = await runCli(['install', 'claude', '--project', '--with-hooks', '--apply', '--json'], {
       cwd: path.join(project, 'src'), claudeHome, env: { SPECREVIEW_HOME: HOME, PATH: binDir },
     });
@@ -126,9 +127,26 @@ describe('install claude', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  test('--with-plan-gate registers the plan-mode gate; every command file is copied', async () => {
+    const dir = tempDir('plangate');
+    fs.mkdirSync(path.join(dir, '.git'));
+    const r = await runCli(['install', 'claude', '--project', '--with-plan-gate', '--apply'], { cwd: dir, env: { SPECREVIEW_HOME: HOME } });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(readJson(path.join(dir, '.claude', 'settings.json')), {
+      hooks: { PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: planGateCommand(), timeout: PLAN_GATE_TIMEOUT }] }] },
+    });
+    assert.equal(planGateCommand(), `"${process.execPath}" "${BIN_PATH}" plan-gate`);
+    assert.equal(PLAN_GATE_TIMEOUT, 345600);
+    assert.ok(claudeCommandFiles().includes('review-spec.md'));
+    for (const name of claudeCommandFiles()) assert.ok(fs.existsSync(path.join(dir, '.claude', 'commands', name)), name);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   test('usage errors', async () => {
-    assert.equal((await run(['install'])).code, 1);
     assert.equal((await run(['install', 'vim'])).code, 1);
+    assert.equal((await run(['install', '--with-hooks'])).code, 1, '--with-hooks belongs to `install claude`');
+    assert.equal((await run(['install', 'claude', '--only', 'codex'])).code, 1);
+    assert.equal((await run(['install', 'agents-md', '--file', 'X.md', '--with-plan-gate'])).code, 1);
     assert.equal((await run(['install', 'claude', '--user', '--project'])).code, 1);
     assert.equal((await run(['install', 'agents-md', '--with-hooks'])).code, 1);
   });
