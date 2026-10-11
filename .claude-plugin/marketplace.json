@@ -8,7 +8,7 @@
     {
       "name": "specreview",
       "source": "./integrations/claude-code",
-      "description": "Review AI-written specs in a local UI, send located feedback to Claude, get targeted edits and see exactly what changed. Adds the spec-review skill, /review-spec, and the Write and prompt hooks.",
+      "description": "Review AI-written specs in a local UI, send located feedback to Claude, get targeted edits and see exactly what changed. Adds the spec-review skill, /review-spec, /specreview-last, the Write and prompt hooks, and the plan-mode gate.",
       "category": "productivity",
       "tags": ["review", "specs", "documentation", "markdown", "html", "design-docs"]
     }
