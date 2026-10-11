@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 !`specreview last --session ${CLAUDE_SESSION_ID} $ARGUMENTS`
 
-The output above opened your previous message in SpecReview as a snapshot doc (`tracking agent message as "<doc>"`, or `… is unchanged` when it was already open) and printed its `review UI:` URL and a `next:` line.
+The output above opened your previous message in SpecReview as a snapshot doc (`tracking agent message as "<doc>"`, or `… is already tracked …; reopened it` when it was open already) and printed its `review UI:` URL and a `next:` line.
 
 1. **Wait.** Run the exact `specreview wait …` command from the `next:` line with Bash, `run_in_background: true` (keep any `--workspace <dir>` it includes).
 2. **Hand over and end the turn.** Tell the user in one line that the message is open for review (select text and press c to comment, then click **Submit review**). Do not poll: you are re-invoked when the wait exits.

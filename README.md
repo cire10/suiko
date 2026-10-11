@@ -300,17 +300,17 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 With the plugin installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in SpecReview and Claude waits for your review. Comment on it as on any spec, then submit:
 
 - **Approve**: Claude leaves plan mode and starts on the plan.
-- **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed.
+- **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed, and the threads it changed are marked addressed for **Verify**.
 
 Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so request changes when they matter.
 
-Without the plugin, add the hook to your Claude Code settings:
+The plugin loads the gate from `hooks/plan-gate.json`. `specreview install claude --with-hooks` does not add it (it blocks plan mode, so it is opt-in). Without the plugin, add the hook to your Claude Code settings yourself; with nvm and friends, use absolute paths as `install claude` does (`"\"/path/to/node\" \"/path/to/specreview/bin/specreview.js\" plan-gate"`):
 
 ```json
 {"hooks": {"PermissionRequest": [{"matcher": "ExitPlanMode", "hooks": [{"type": "command", "command": "specreview plan-gate", "timeout": 345600}]}]}}
 ```
 
-`specreview plan-gate --timeout 30m` gives up after that long; `--browser none` (or `SPECREVIEW_BROWSER=none`) keeps the browser closed and prints the URL on stderr.
+The gate always uses the system browser (a hook cannot open Claude's browser pane, so `SPECREVIEW_BROWSER=pane` counts as `system` here); `--browser none` (or `SPECREVIEW_BROWSER=none`) keeps it closed and prints the URL on stderr. `specreview plan-gate --timeout 30m` gives up after that long. Plans are recorded in the workspace of the project Claude Code was started in (`$CLAUDE_PROJECT_DIR`), and a background `specreview wait --all` never takes a plan review away from the gate.
 
 ## Reviewing the last message and piped text
 
@@ -319,11 +319,11 @@ Not everything worth reviewing is a file. SpecReview can review text as a **snap
 - **Claude's last message:** type `/specreview-last` in Claude Code (or run `specreview last` in the session). The message opens in the review UI and Claude waits in the background. After you submit, Claude revises its answer and records it as the next version (`specreview revise <doc> --source <file>`), so you can review the changes.
 - **Piped text:** `pbpaste | specreview open -` reviews whatever you pipe in (Markdown, up to 5 MB). Give it a name to keep iterating on one doc: `some-command | specreview open - --name notes` records a new version each time you pipe to the same name.
 
-When you run these from your home directory (which can never be a workspace), the doc goes to a scratch workspace under `~/.specreview/scratch/`, and every command SpecReview prints includes the `--workspace` flag it needs. Only Claude Code transcripts are supported by `last` for now.
+When you run these from your home directory (which can never be a workspace), the doc goes to a scratch workspace under `~/.specreview/scratch/`, and every command SpecReview prints includes the `--workspace` flag it needs. Running `/specreview-last` again for the same message reopens its doc without touching Claude's revisions. Only Claude Code transcripts are supported by `last` for now.
 
 ## Folders
 
-`specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks that lead outside the folder, up to 200 files (it says what it skipped). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
+`specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
 
 ## Command reference
 
