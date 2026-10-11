@@ -82,6 +82,20 @@ describe('MCP specreview_review', () => {
     await assert.rejects(tool.toInput(tool.schema.parse({ mode: 'commit' }), rt), UsageError);
     assert.throws(() => tool.schema.parse({ mode: 'pr' }), 'PR mode is WP3b');
   });
+
+  test('ask / reanchor / show take the code-review file (and side) and pass them to the command input', async () => {
+    const rt = /** @type {any} */ ({ env: {}, cwd: '/' });
+    const byName = (/** @type {string} */ n) => /** @type {any} */ (TOOLS.find((t) => t.name === n));
+    const ask = byName('specreview_ask');
+    assert.deepEqual(await ask.toInput(ask.schema.parse({ doc: 'cr-x', file: 'src/a.js', lines: '3-4', body: 'why?' }), rt), { doc: 'cr-x', quote: undefined, lines: [3, 4], file: 'src/a.js', body: 'why?' });
+    assert.ok(!('file' in (await ask.toInput(ask.schema.parse({ doc: 'spec', lines: '3', body: 'b' }), rt))), 'no file key for a spec');
+    const re = byName('specreview_reanchor');
+    assert.equal((await re.toInput(re.schema.parse({ doc: 'cr-x', thread_id: 't1', file: 'src/a.js', lines: '7-9' }), rt)).file, 'src/a.js');
+    const show = byName('specreview_show');
+    const input = await show.toInput(show.schema.parse({ doc: 'cr-x', file: 'src/a.js', side: 'old', version: 2 }), rt);
+    assert.deepEqual([input.file, input.side, input.version], ['src/a.js', 'old', 2]);
+    assert.throws(() => show.schema.parse({ doc: 'cr-x', file: 'src/a.js', side: 'both' }));
+  });
 });
 
 describe('the `at` forms of code reviews in the CLI', () => {

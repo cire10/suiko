@@ -22,6 +22,7 @@ const threadId = z.string().regex(/^t\d+$/).describe('Thread id, e.g. "t3"');
 const linesArg = z.string().describe('Inclusive line range of the current file, e.g. "42-46" or "L42-46"');
 const versionArg = z.union([z.number().int().min(1), z.string().min(1)]).describe('Version: 3, "v3", "head" or "live"');
 const workspaceArg = z.string().optional().describe('Workspace root (optional; default: discovered from the path or the server cwd)');
+const fileArg = z.string().min(1).describe('Code reviews only: the repo file the lines are in (repo-root-relative, cwd-relative or a unique suffix)');
 
 /**
  * @typedef {object} ToolDef
@@ -184,19 +185,31 @@ export const TOOLS = [
   {
     name: 'specreview_reanchor',
     title: "Move a thread's anchor",
-    description: "Move a thread's anchor to other lines (\"42-46\") or to an exact quote of the current file.",
-    schema: z.object({ doc: docArg, thread_id: threadId, lines: linesArg.optional(), quote: z.string().optional(), workspace: workspaceArg }),
+    description: "Move a thread's anchor to other lines (\"42-46\") or to an exact quote of the current file. In a code review: file + lines of that file.",
+    schema: z.object({ doc: docArg, thread_id: threadId, lines: linesArg.optional(), quote: z.string().optional(), file: fileArg.optional(), workspace: workspaceArg }),
     command: 'reanchor',
-    toInput: async (a) => ({ doc: a.doc, thread: a.thread_id, lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined, quote: a.quote }),
+    toInput: async (a) => ({
+      doc: a.doc,
+      thread: a.thread_id,
+      lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      quote: a.quote,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
     name: 'specreview_ask',
     title: 'Ask the reviewer a question',
-    description: 'Create an agent-question thread anchored on a quote or lines of the doc; the answer arrives in a later packet as ANSWER.',
-    schema: z.object({ doc: docArg, quote: z.string().optional(), lines: linesArg.optional(), body: z.string().min(1), workspace: workspaceArg }),
+    description: 'Create an agent-question thread anchored on a quote or lines of the doc (in a code review: file + lines, or neither for the whole review); the answer arrives in a later packet as ANSWER.',
+    schema: z.object({ doc: docArg, quote: z.string().optional(), lines: linesArg.optional(), file: fileArg.optional(), body: z.string().min(1), workspace: workspaceArg }),
     command: 'ask',
-    toInput: async (a) => ({ doc: a.doc, quote: a.quote, lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined, body: a.body }),
+    toInput: async (a) => ({
+      doc: a.doc,
+      quote: a.quote,
+      lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+      body: a.body,
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -249,14 +262,24 @@ export const TOOLS = [
   {
     name: 'specreview_show',
     title: 'Show a thread or old source',
-    description: 'A thread with its full timeline (thread_id), or the exact source of a version (version + lines).',
-    schema: z.object({ doc: docArg, thread_id: threadId.optional(), version: versionArg.optional(), lines: linesArg.optional(), workspace: workspaceArg }),
+    description: 'A thread with its full timeline (thread_id), or the exact source of a version (version + lines); in a code review, a repo file of a round (file, side, version).',
+    schema: z.object({
+      doc: docArg,
+      thread_id: threadId.optional(),
+      version: versionArg.optional(),
+      lines: linesArg.optional(),
+      file: fileArg.optional(),
+      side: z.enum(['new', 'old']).optional().describe('Code reviews only, with file: which side of the change (default new)'),
+      workspace: workspaceArg,
+    }),
     command: 'show',
     toInput: async (a) => ({
       doc: a.doc,
       thread: a.thread_id,
       version: a.version !== undefined ? parseVersionRef(a.version, 'version') : undefined,
       lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+      ...(a.side !== undefined ? { side: a.side } : {}),
     }),
     annotations: { readOnlyHint: false, openWorldHint: false },
   },
