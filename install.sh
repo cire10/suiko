@@ -14,7 +14,8 @@
 #
 # Environment:
 #   SPECREVIEW_REPO      git URL to clone when not run from a checkout (there is no public default)
-#   SPECREVIEW_REF       branch or tag to check out (default: the repository's default branch)
+#   SPECREVIEW_REF       branch or tag to check out (default: the repository's default branch; a later run without it
+#                        moves the clone back to the default branch)
 #   SPECREVIEW_APP_DIR   where to clone (default: $HOME/.specreview/app)
 #   SPECREVIEW_BIN_DIR   where the fallback shim goes (default: $HOME/.local/bin)
 #   SPECREVIEW_NO_LINK=1 skip `npm link` and always use the shim
@@ -108,8 +109,13 @@ or clone it yourself and run ./install.sh from the clone.'
     if [ -n "$REF" ]; then
       git -C "$SRC" fetch --quiet origin "$REF" || die "git fetch of $REF failed in $SRC"
       git -C "$SRC" checkout --quiet --detach FETCH_HEAD || die "could not check out $REF in $SRC"
-    else
+    elif git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
       git -C "$SRC" pull --quiet --ff-only || die "git pull --ff-only failed in $SRC (local changes?); fix it or delete $SRC and re-run"
+    else
+      # Detached (an earlier run pinned SPECREVIEW_REF): `git pull` would do nothing, so go to the default branch.
+      say "  (the clone was pinned to a tag or commit; moving it to the repository's default branch)"
+      git -C "$SRC" fetch --quiet origin HEAD || die "git fetch of the default branch failed in $SRC"
+      git -C "$SRC" checkout --quiet --detach FETCH_HEAD || die "could not check out the default branch in $SRC (local changes?); fix it or delete $SRC and re-run"
     fi
   elif [ -e "$SRC" ] && [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
     die "$SRC exists and is not a SpecReview clone; move it away or set SPECREVIEW_APP_DIR"
@@ -180,6 +186,11 @@ EOF
   say "Wrote $SHIM"
 }
 
+# The real path of a file (symlinks resolved), or nothing.
+realpath_of() {
+  "$NODE" -e 'try { process.stdout.write(require("fs").realpathSync(process.argv[1])) } catch {}' "$1" 2>/dev/null || true
+}
+
 LINKED=0
 if [ "${SPECREVIEW_NO_LINK:-}" != 1 ] && [ -n "$NPM" ]; then
   if npm_quiet "$LOG" link --no-audit --no-fund; then
@@ -190,7 +201,13 @@ if [ "${SPECREVIEW_NO_LINK:-}" != 1 ] && [ -n "$NPM" ]; then
   fi
 fi
 FOUND=$(command -v specreview 2>/dev/null || true)
-if [ "$LINKED" = 0 ] || [ -z "$FOUND" ] || [ "$FOUND" = "$SHIM" ]; then
+# npm's link can live at the shim's own path (npm prefix ~/.local, so its bin is ~/.local/bin): that is npm's link
+# to this checkout, not a file to replace.
+NPM_LINK_AT_SHIM=0
+if [ "$LINKED" = 1 ] && [ -n "$FOUND" ] && [ "$FOUND" = "$SHIM" ] && [ "$(realpath_of "$FOUND")" = "$(realpath_of "$SRC/bin/specreview.js")" ]; then
+  NPM_LINK_AT_SHIM=1
+fi
+if [ "$NPM_LINK_AT_SHIM" = 0 ] && { [ "$LINKED" = 0 ] || [ -z "$FOUND" ] || [ "$FOUND" = "$SHIM" ]; }; then
   if [ "$LINKED" = 1 ] && [ -z "$FOUND" ]; then say "npm linked specreview into a directory that is not on PATH; adding a shim in $BIN_DIR"; fi
   write_shim
   # PATH is left as is for step 5: while BIN_DIR is not on it, `specreview install` writes the absolute invocation
@@ -208,7 +225,9 @@ if [ "$APPLY" = 1 ]; then
 fi
 STATUS=0
 eval "set -- $FORWARD"
-"$NODE" "$SRC/bin/specreview.js" install "$@" || STATUS=$?
+# SPECREVIEW_NODE: the node found on PATH (e.g. /opt/homebrew/bin/node), which the agent configs get instead of its
+# resolved, version-specific path.
+SPECREVIEW_NODE=$NODE "$NODE" "$SRC/bin/specreview.js" install "$@" || STATUS=$?
 case "$FORWARD" in *"'--json'"*) exit "$STATUS" ;; esac
 if [ "$APPLY" = 0 ] && [ "$STATUS" -eq 0 ]; then
   RUN=specreview

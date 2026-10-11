@@ -49,6 +49,7 @@ exit 0
 const STUB_CLI = `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.appendFileSync(process.env.STUB_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.env.STUB_ENV_LOG) fs.appendFileSync(process.env.STUB_ENV_LOG, (process.env.SPECREVIEW_NODE || '') + '\\n');
 console.log('stub specreview ' + process.argv.slice(2).join(' '));
 `;
 
@@ -148,6 +149,27 @@ describe('install.sh', { skip }, () => {
     assert.match(r.stdout, /To write these changes: specreview install --apply/);
   });
 
+  test('npm prefix ~/.local: npm links into the shim directory; that link is left alone, and re-runs work', () => {
+    const s = sandbox();
+    const src = stubCheckout();
+    const linkDir = path.join(s.home, '.local', 'bin');
+    fs.mkdirSync(linkDir, { recursive: true });
+    const envLog = path.join(s.home, 'env.log');
+    const env = { NPM_LINK_DIR: linkDir, PATH: `${linkDir}:${s.env.PATH}`, STUB_ENV_LOG: envLog };
+    for (const round of [1, 2]) {
+      const r = s.run([], { script: path.join(src, 'install.sh'), env });
+      assert.equal(r.code, 0, `round ${round}: ${r.out}`);
+      assert.match(r.stdout, /Linked specreview with npm link/);
+      assert.doesNotMatch(r.out, /was not written by this installer/);
+      assert.ok(fs.lstatSync(s.shim).isSymbolicLink(), 'npm\'s link is still there');
+      assert.equal(fs.realpathSync(s.shim), path.join(src, 'bin', 'specreview.js'));
+      assert.match(r.stdout, /To write these changes: specreview install --apply/);
+    }
+    assert.deepEqual(s.stubCalls(), [['install'], ['install']]);
+    // install.sh hands the node it found on PATH (not its resolved path) to `specreview install`.
+    assert.deepEqual(fs.readFileSync(envLog, 'utf8').trim().split('\n'), [path.join(s.bin, 'node'), path.join(s.bin, 'node')]);
+  });
+
   test('a file at the shim path that the installer did not write is never replaced', () => {
     const s = sandbox();
     const src = stubCheckout();
@@ -191,6 +213,35 @@ describe('install.sh', { skip }, () => {
     const r3 = s.run([], { stdin: script, cwd, env: { ...env, SPECREVIEW_REPO: `${repo}-other` } });
     assert.equal(r3.code, 1);
     assert.match(r3.stderr, /is a clone of .*, not .*-other; move it away or set SPECREVIEW_APP_DIR/);
+  });
+
+  test('curl | sh: a clone pinned with SPECREVIEW_REF moves back to the default branch on a later run without it', () => {
+    const s = sandbox();
+    const repo = stubCheckout(tmp('repo'));
+    const git = (/** @type {string[]} */ args, cwd = repo) => {
+      const g = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'init.defaultBranch=main', '-c', 'advice.detachedHead=false', ...args], { cwd, encoding: 'utf8', env: { ...s.env, GIT_CONFIG_NOSYSTEM: '1' } });
+      assert.equal(g.status, 0, g.stderr);
+      return g.stdout.trim();
+    };
+    git(['init', '-q']);
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'v1']);
+    git(['tag', 'v1']);
+    const script = fs.readFileSync(SCRIPT, 'utf8');
+    const cwd = tmp('cwd');
+    const env = { SPECREVIEW_REPO: repo, GIT_CONFIG_NOSYSTEM: '1' };
+    const app = path.join(s.home, '.specreview', 'app');
+    const r1 = s.run([], { stdin: script, cwd, env: { ...env, SPECREVIEW_REF: 'v1' } });
+    assert.equal(r1.code, 0, r1.out);
+    assert.equal(git(['rev-parse', 'HEAD'], app), git(['rev-parse', 'v1']));
+    fs.writeFileSync(path.join(repo, 'NEWS.md'), 'v2\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'v2']);
+    const r2 = s.run([], { stdin: script, cwd, env });
+    assert.equal(r2.code, 0, r2.out);
+    assert.match(r2.stdout, /pinned to a tag or commit; moving it to the repository's default branch/);
+    assert.equal(git(['rev-parse', 'HEAD'], app), git(['rev-parse', 'HEAD']), 'the clone is at the default branch tip');
+    assert.ok(fs.existsSync(path.join(app, 'NEWS.md')));
   });
 
   test('curl | sh without SPECREVIEW_REPO explains that there is no public download', () => {
