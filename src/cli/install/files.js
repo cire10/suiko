@@ -3,14 +3,19 @@
 // FileAction (src/cli/install.js) from the file on disk without writing anything; applyPlan() writes them.
 //
 // Ownership rules (what "ours" means, so install never clobbers and uninstall removes only what install added):
-//   - Markdown / TOML: the text between our marker comments (`<!-- specreview:begin ... -->` .. `<!-- specreview:end -->`,
-//     `# specreview:begin ...` .. `# specreview:end`). Nothing outside the markers is ever rewritten.
+//   - Markdown: the text between our marker comments (`<!-- specreview:begin ... -->` .. `<!-- specreview:end -->`).
+//     Nothing outside the markers is ever rewritten; markers that are not one well-formed pair are refused.
+//   - TOML (Codex's config.toml): the marker lines and the [mcp_servers.specreview] table between them, nothing else
+//     (Codex adds its own tables inside the markers; see toml.js).
 //   - JSON: one named entry (e.g. mcpServers.specreview) or the hook commands that run specreview. The file is parsed,
 //     only that entry changes, and a file that is not valid JSON is refused (InstallRefusal), never overwritten.
 //   - Whole files we copy (skills, commands): ours when the content is what we install now, or what an earlier install
 //     wrote (sha256 in the install manifest, $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user
 //     edited and says so.
-// A file we modify that existed before gets a one-time backup, <file>.specreview-backup (applyPlan with backups).
+// A file we modify that existed before gets a one-time backup, <file>.specreview-backup (applyPlan with backups); a
+// file of the user's that a copy replaces is backed up every time it differs from the last backup.
+// Files are written through symlinks (the link stays, its target changes), and uninstall deletes a config file only
+// when install created it (recorded in the manifest), never one that was there before or is a symlink.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -18,6 +23,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { SpecReviewError } from '../../core/store/errors.js';
 import { EXIT } from '../../shared/protocol.js';
+import { TomlScanError, definitionsOutside, findTomlBlock, removeTomlBlock, upsertTomlBlock } from './toml.js';
 
 export const MD_BEGIN = '<!-- specreview:begin';
 export const MD_END = '<!-- specreview:end -->';
@@ -70,7 +76,8 @@ export function sha256(text) {
 // Install manifest: sha256 of every whole file we wrote, so a later install or uninstall recognises our older copies.
 
 /**
- * @typedef {{ schema: 1, files: Record<string, { sha256: string[] }> }} Manifest
+ * @typedef {{ schema: 1, files: Record<string, { sha256: string[] }>, created: string[] }} Manifest
+ * `created`: config files install created (uninstall may delete them once only SpecReview's part is left).
  */
 
 /**
@@ -79,13 +86,16 @@ export function sha256(text) {
  */
 export function loadManifest(file) {
   /** @type {Manifest} */
-  const empty = { schema: 1, files: {} };
+  const empty = { schema: 1, files: {}, created: [] };
   if (!file) return empty;
   const text = readTextOrNull(file);
   if (!text) return empty;
   try {
     const value = JSON.parse(text);
-    if (value && typeof value === 'object' && value.files && typeof value.files === 'object') return { schema: 1, files: value.files };
+    if (value && typeof value === 'object' && value.files && typeof value.files === 'object') {
+      const created = Array.isArray(value.created) ? value.created.filter((/** @type {unknown} */ x) => typeof x === 'string') : [];
+      return { schema: 1, files: value.files, created };
+    }
   } catch {
     // a damaged manifest only costs us the "older copy" recognition
   }
@@ -93,9 +103,9 @@ export function loadManifest(file) {
 }
 
 /**
- * Records written copies and forgets deleted ones, then saves the manifest atomically.
+ * Records written copies and created files, forgets deleted ones, then saves the manifest atomically.
  * @param {string} file
- * @param {{ written: Array<{ path: string, content: string }>, deleted: string[] }} change
+ * @param {{ written: Array<{ path: string, content: string }>, deleted: string[], created?: string[] }} change
  */
 export function updateManifest(file, change) {
   const manifest = loadManifest(file);
@@ -104,16 +114,52 @@ export function updateManifest(file, change) {
     const h = sha256(w.content);
     manifest.files[w.path] = { sha256: [h, ...list.filter((x) => x !== h)].slice(0, 20) };
   }
-  for (const p of change.deleted) delete manifest.files[p];
+  const created = new Set([...manifest.created, ...(change.created ?? [])]);
+  for (const p of change.deleted) {
+    delete manifest.files[p];
+    created.delete(p);
+  }
+  manifest.created = [...created].sort();
   writeAtomic(file, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /**
- * mkdir -p + write to a temp file + rename.
+ * @param {string} file
+ * @returns {boolean}
+ */
+export function isSymlink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether install created this file (so uninstall may delete it): recorded in the manifest, and not a symlink (a
+ * symlinked config belongs to a dotfiles setup, whatever the manifest says).
+ * @param {string} file
+ * @param {Manifest | undefined} manifest
+ * @returns {boolean}
+ */
+export function createdByUs(file, manifest) {
+  return Boolean(manifest?.created.includes(file)) && !isSymlink(file);
+}
+
+/**
+ * mkdir -p + write to a temp file + rename. A symlink is written through: the temp file goes next to the link's
+ * target and replaces the target, so the link (stow, home-manager, chezmoi...) stays. A dangling link is refused.
  * @param {string} file
  * @param {string} content
  */
 export function writeAtomic(file, content) {
+  if (isSymlink(file)) {
+    try {
+      file = fs.realpathSync(file);
+    } catch {
+      throw new Error(`${file} is a symlink to a missing file (${fs.readlinkSync(file)}); SpecReview does not replace the link`);
+    }
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
   let mode;
@@ -182,10 +228,31 @@ export function copyAction(file, content, o = {}) {
     ...(o.note ? { note: o.note } : {}),
   };
   if (a.action === 'update' && current !== null && !isOurCopy(file, current, content, o)) {
-    a.backup = true;
-    a.note = `${a.note ? `${a.note}; ` : ''}replaces a file SpecReview did not write (backed up to ${path.basename(file)}${BACKUP_SUFFIX})`;
+    // The user's file is replaced: back it up, every time it differs from the last backup (not just once).
+    const once = `${file}${BACKUP_SUFFIX}`;
+    const prev = readTextOrNull(once);
+    let what;
+    if (prev === current) {
+      what = `its current content is already in ${path.basename(once)}`;
+    } else {
+      a.backupPath = prev === null ? once : stampedBackupPath(file);
+      what = `backed up to ${path.basename(a.backupPath)}`;
+    }
+    a.note = `${a.note ? `${a.note}; ` : ''}replaces a file SpecReview did not write (${what})`;
   }
   return a;
+}
+
+/**
+ * <file>.specreview-backup-<UTC timestamp>, unused.
+ * @param {string} file
+ * @returns {string}
+ */
+export function stampedBackupPath(file) {
+  const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/[-:]/g, '');
+  let p = `${file}${BACKUP_SUFFIX}-${stamp}`;
+  for (let k = 2; fs.existsSync(p); k++) p = `${file}${BACKUP_SUFFIX}-${stamp}-${k}`;
+  return p;
 }
 
 /**
@@ -229,6 +296,29 @@ export function findBlock(text, m) {
   const endHit = endRe.exec(rest);
   if (!endHit) return null;
   return { start, end: start + endHit.index + endHit[0].length };
+}
+
+/**
+ * Refuses markers that are not one well-formed pair: several begin lines, a begin line without an end line after it,
+ * or an end line without a begin line. Guessing where the block ends could delete the user's text.
+ * @param {string} file
+ * @param {string} text
+ * @param {Markers} m
+ */
+export function checkMarkers(file, text, m) {
+  const at = (/** @type {string} */ marker) => [...text.matchAll(new RegExp(`^[ \\t]*${escapeRe(marker)}`, 'gm'))].map((x) => x.index ?? 0);
+  const begins = at(m.begin);
+  const ends = at(m.end);
+  let problem = null;
+  if (begins.length > 1) problem = `it has ${begins.length} "${m.begin}" lines`;
+  else if (begins.length === 1 && !ends.some((e) => e > begins[0])) problem = `its "${m.begin}" line has no "${m.end}" line after it`;
+  else if (ends.length > (begins.length ? 1 : 0)) problem = begins.length ? `it has ${ends.length} "${m.end}" lines` : `it has a "${m.end}" line but no "${m.begin}" line`;
+  if (!problem) return;
+  throw new InstallRefusal(
+    file,
+    `${file}: ${problem}, so where SpecReview's block ends is unclear; the file is left as is`,
+    `repair the markers by hand (one "${m.begin} ... -->" line and one "${m.end}" line around the SpecReview block, or delete the block with both markers), then re-run`,
+  );
 }
 
 /**
@@ -279,6 +369,7 @@ export function removeBlock(current, m) {
  */
 export function blockAction(file, block, m, o = {}) {
   const current = readTextOrNull(file);
+  if (current !== null) checkMarkers(file, current, m);
   const content = upsertBlock(current, block, m);
   const what = o.what ?? 'the SpecReview block';
   const lines = block.split('\n').length;
@@ -303,20 +394,116 @@ export function blockAction(file, block, m, o = {}) {
 }
 
 /**
- * Uninstall our block. The file is deleted when nothing else is left in it.
+ * Uninstall our block. The file is deleted when nothing else is left in it and install created it.
  * @param {string} file
  * @param {Markers} m
- * @param {{ share?: string, what?: string }} [o]
+ * @param {{ share?: string, what?: string, manifest?: Manifest }} [o]
  * @returns {FileAction | null} null when there is no block
  */
 export function removeBlockAction(file, m, o = {}) {
   const current = readTextOrNull(file);
   if (current === null) return null;
+  checkMarkers(file, current, m);
   const next = removeBlock(current, m);
   if (next === null) return null;
-  const what = o.what ?? 'the SpecReview block';
-  if (next.trim() === '') return { path: file, action: 'delete', content: '', note: `only ${what} was left in it`, ...(o.share ? { share: o.share } : {}) };
-  return { path: file, action: 'update', content: next, note: `removes ${what}; the rest of the file is kept`, backup: true, ...(o.share ? { share: o.share } : {}) };
+  return removalAction(file, next, o.what ?? 'the SpecReview block', o);
+}
+
+/**
+ * The uninstall action for a file whose remaining text is `next`: delete it when nothing is left and install created
+ * it, else write what is left.
+ * @param {string} file
+ * @param {string} next
+ * @param {string} what
+ * @param {{ share?: string, manifest?: Manifest, extra?: string }} o
+ * @returns {FileAction}
+ */
+function removalAction(file, next, what, o) {
+  const share = o.share ? { share: o.share } : {};
+  const extra = o.extra ? `; ${o.extra}` : '';
+  if (next.trim() === '' && createdByUs(file, o.manifest)) return { path: file, action: 'delete', content: '', note: `only ${what} was left in it${extra}`, ...share };
+  const rest = next.trim() === '' ? `nothing else is in it, but ${isSymlink(file) ? 'it is a symlink' : 'it existed before SpecReview'}, so the file stays` : 'the rest of the file is kept';
+  return { path: file, action: 'update', content: next, note: `removes ${what}; ${rest}${extra}`, backup: true, ...share };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// TOML block (Codex config.toml): see toml.js for what is ours.
+
+/**
+ * Scans a TOML file for our block; a file that cannot be scanned, or holds several blocks, is refused.
+ * @param {string} file
+ * @param {string} text
+ * @param {string[]} ours
+ * @param {string} [fix]
+ * @returns {import('./toml.js').TomlBlock}
+ */
+export function scanTomlFile(file, text, ours, fix) {
+  try {
+    return findTomlBlock(text, ours);
+  } catch (err) {
+    const msg = /** @type {Error} */ (err).message;
+    if (err instanceof TomlScanError) throw new InstallRefusal(file, `${file} could not be parsed as TOML (${msg}); SpecReview never rewrites a file it cannot parse`, fix);
+    throw new InstallRefusal(file, `${file}: ${msg}; the file is left as is`, fix);
+  }
+}
+
+/**
+ * Install our TOML block: replace it in place (tables Codex added inside the markers move below them) or append it.
+ * The result is scanned again and refused unless it defines the table exactly once.
+ * @param {string} file
+ * @param {string | null} current
+ * @param {import('./toml.js').TomlBlock} blk
+ * @param {string} block
+ * @param {string[]} ours
+ * @param {{ what: string, fix?: string }} o
+ * @returns {FileAction}
+ */
+export function tomlBlockAction(file, current, blk, block, ours, o) {
+  const content = upsertTomlBlock(current ?? '', blk, block);
+  let after;
+  try {
+    after = findTomlBlock(content, ours);
+  } catch (err) {
+    throw new InstallRefusal(file, `${file}: adding ${o.what} would not give valid TOML (${/** @type {Error} */ (err).message}); the file is left as is`, o.fix);
+  }
+  const headers = after.statements.filter((s) => s.kind === 'header' && s.key?.length === ours.length && s.key.every((k, j) => k === ours[j])).length;
+  if (headers !== 1 || definitionsOutside(after, ours).defined) {
+    throw new InstallRefusal(file, `${file}: adding ${o.what} would define it twice; the file is left as is`, o.fix);
+  }
+  const moved = blk.foreignTables.length
+    ? `; moves ${blk.foreignTables.join(', ')} (found inside the markers, not SpecReview's) below them`
+    : '';
+  const lines = block.split('\n').length;
+  const note =
+    current === null || current.trim() === ''
+      ? `new file with ${o.what} (${lines} lines)`
+      : blk.region
+        ? `replaces ${o.what} between the specreview markers${moved}`
+        : `appends ${o.what} (${lines} lines); the rest of the file is kept`;
+  return {
+    path: file,
+    action: current === null ? 'create' : current === content ? 'unchanged' : 'update',
+    content,
+    note,
+    detail: block,
+    ...(current !== null && current.trim() !== '' ? { backup: true } : {}),
+  };
+}
+
+/**
+ * Uninstall our TOML block: the markers and our table go; other tables found inside the markers stay.
+ * @param {string} file
+ * @param {string} text
+ * @param {import('./toml.js').TomlBlock} blk
+ * @param {{ what: string, manifest?: Manifest }} o
+ * @returns {FileAction | null} null when there is nothing of ours
+ */
+export function removeTomlBlockAction(file, text, blk, o) {
+  const next = removeTomlBlock(text, blk);
+  if (next === null) return null;
+  const what = blk.region ? o.what : 'a leftover "# specreview:end" line';
+  const extra = blk.foreignTables.length ? `keeps ${blk.foreignTables.join(', ')} (found inside the markers, not SpecReview's)` : undefined;
+  return removalAction(file, next, what, { manifest: o.manifest, extra });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -364,11 +551,12 @@ export function stringifyLike(value, original) {
 }
 
 /**
- * Applies `mutate` to a JSON object file. Unchanged when the result is structurally equal to the file. When the
- * result is an empty object, a removal deletes the file (`deleteWhenEmpty`).
+ * Applies `mutate` to a JSON object file. Unchanged when the result is structurally equal to the file. A removal
+ * (`deleteWhenEmpty`) puts back the empty containers the file had before install (from its backup, e.g.
+ * `"mcpServers": {}`), and deletes the file when nothing is left in it and install created it (manifest).
  * @param {string} file
  * @param {(value: Record<string, any>) => Record<string, any>} mutate gets a deep copy
- * @param {{ note?: string, detail?: string, fix?: string, deleteWhenEmpty?: boolean, share?: string }} [o]
+ * @param {{ note?: string, detail?: string, fix?: string, deleteWhenEmpty?: boolean, share?: string, manifest?: Manifest }} [o]
  * @returns {FileAction | null} null for a removal from a missing file
  */
 export function jsonAction(file, mutate, o = {}) {
@@ -376,6 +564,7 @@ export function jsonAction(file, mutate, o = {}) {
   const exists = raw !== null;
   const parsed = readJsonFile(file, o.fix);
   const current = parsed?.value ?? {};
+  /** @type {Record<string, any>} */
   let next;
   try {
     next = mutate(structuredClone(current));
@@ -385,12 +574,13 @@ export function jsonAction(file, mutate, o = {}) {
   }
   const original = parsed?.text ?? null;
   if (!exists && o.deleteWhenEmpty) return null;
+  if (o.deleteWhenEmpty) next = restoreEmptyContainers(next, current, file);
   if (exists && isDeepStrictEqual(next, current)) {
     if (o.deleteWhenEmpty) return null;
     return { path: file, action: 'unchanged', content: /** @type {string} */ (raw), ...(o.note ? { note: o.note } : {}) };
   }
-  if (o.deleteWhenEmpty && Object.keys(next).length === 0) {
-    // Nothing but SpecReview's entries was in it (install created it): no backup worth keeping.
+  if (o.deleteWhenEmpty && Object.keys(next).length === 0 && createdByUs(file, o.manifest)) {
+    // Nothing but SpecReview's entries was in it, and install created it: no backup worth keeping.
     return { path: file, action: 'delete', content: '', note: 'only SpecReview\'s entries were left in it' };
   }
   return {
@@ -402,6 +592,35 @@ export function jsonAction(file, mutate, o = {}) {
     ...(exists ? { backup: true } : {}),
     ...(o.share ? { share: o.share } : {}),
   };
+}
+
+/**
+ * After a removal: top-level keys that held an empty object/array in the pre-install backup and that the removal
+ * dropped (deleteEntry/removeOurHooks drop emptied containers) come back, in the file's key order.
+ * @param {Record<string, any>} next
+ * @param {Record<string, any>} current
+ * @param {string} file
+ * @returns {Record<string, any>}
+ */
+function restoreEmptyContainers(next, current, file) {
+  let backup;
+  try {
+    backup = JSON.parse(readTextOrNull(`${file}${BACKUP_SUFFIX}`) ?? 'null');
+  } catch {
+    return next;
+  }
+  if (!backup || typeof backup !== 'object' || Array.isArray(backup)) return next;
+  const isEmpty = (/** @type {unknown} */ v) => v !== null && typeof v === 'object' && Object.keys(v).length === 0;
+  const restore = Object.keys(current).filter((k) => !(k in next) && Object.hasOwn(backup, k) && isEmpty(backup[k]));
+  if (!restore.length) return next;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const k of Object.keys(current)) {
+    if (k in next) out[k] = next[k];
+    else if (restore.includes(k)) out[k] = backup[k];
+  }
+  for (const k of Object.keys(next)) if (!(k in out)) out[k] = next[k];
+  return out;
 }
 
 /**

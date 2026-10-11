@@ -199,8 +199,8 @@ async function checkIntegrations(rt, add) {
     }
     for (const s of list) {
       const check = `integration:${s.id}`;
-      if (s.plugin) add('ok', check, `${s.name}: SpecReview plugin installed (${s.plugin})`);
-      else if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
+      if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
+      else if (s.plugin) add('ok', check, `${s.name}: SpecReview plugin installed (${s.plugin})`);
       else if (s.configured && s.upToDate) add('ok', check, `${s.name}: SpecReview configured`);
       else if (s.configured) add('warn', check, `${s.name}: SpecReview configuration is incomplete or outdated (run \`specreview install --only ${s.id} --apply\`)`);
       else add('ok', check, `${s.name}: detected, SpecReview not configured (\`specreview install --only ${s.id}\` shows what it would add)`);

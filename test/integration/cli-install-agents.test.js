@@ -453,7 +453,7 @@ describe('selection, scope and environment', () => {
     const r = await h.json(['install', '--project', '--apply'], { platform: 'darwin' });
     assert.equal(r.code, 0, r.stderr);
     const root = h.project;
-    for (const f of ['.claude/settings.json', '.claude/skills/spec-review/SKILL.md', 'AGENTS.md', '.agents/skills/specreview-review/SKILL.md', '.codex/config.toml',
+    for (const f of ['.claude/settings.local.json', '.claude/skills/spec-review/SKILL.md', 'AGENTS.md', '.agents/skills/specreview-review/SKILL.md', '.codex/config.toml',
       '.cursor/mcp.json', '.opencode/commands/specreview-review.md', 'opencode.json']) {
       assert.ok(fs.existsSync(path.join(root, f)), f);
     }
@@ -544,7 +544,9 @@ describe('doctor lists the agent integrations', () => {
   test('configured, outdated, detected-but-not-configured', async () => {
     const h = makeHome({ dirs: ['.codex/sessions', '.cursor', '.claude'] });
     await h.run(['install', '--apply', '--only', 'codex,cursor']);
-    fs.rmSync(h.p('.cursor/mcp.json'));
+    const mcp = readJson(h.p('.cursor/mcp.json'));
+    mcp.mcpServers.specreview.command = '/old/node';
+    fs.writeFileSync(h.p('.cursor/mcp.json'), JSON.stringify(mcp));
     const r = await h.run(['doctor'], { deps: { daemonStatus: async () => ({ running: false }) } });
     assert.match(r.stdout, /^ok {4}Codex CLI: SpecReview configured$/m);
     assert.match(r.stdout, /^WARN {2}Cursor: SpecReview configuration is incomplete or outdated \(run `specreview install --only cursor --apply`\)$/m);

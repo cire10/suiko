@@ -1,7 +1,9 @@
 // @ts-check
 // The installer's file helpers (src/cli/install/files.js): marker blocks in Markdown/TOML (add, replace, remove
-// byte for byte), JSON entries (structural compare, indentation kept, invalid or odd-shaped files refused), whole-file
-// copies recognised by content, template or manifest hash, atomic writes that keep the file mode.
+// byte for byte; damaged markers refused), JSON entries (structural compare, indentation kept, invalid or odd-shaped
+// files refused, deleted on uninstall only when install created them), whole-file copies recognised by content,
+// template or manifest hash (a replaced user file backed up every time), atomic writes that keep the file mode and
+// go through symlinks.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,9 +13,11 @@ import assert from 'node:assert/strict';
 process.env.SPECREVIEW_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-'));
 
 const {
-  InstallRefusal, MD_MARKERS, TOML_MARKERS, blockAction, copyAction, deleteEntry, detectIndent, findBlock, isOurCopy, jsonAction,
+  InstallRefusal, MD_MARKERS, TOML_MARKERS, blockAction, checkMarkers, copyAction, deleteEntry, detectIndent, findBlock, isOurCopy, jsonAction,
   loadManifest, removeBlock, removeBlockAction, removeCopyAction, setEntry, sha256, stringifyLike, updateManifest, upsertBlock, writeAtomic,
 } = await import('../../src/cli/install/files.js');
+/** @param {string[]} created @returns {import('../../src/cli/install/files.js').Manifest} */
+const manifestOf = (created) => ({ schema: 1, files: {}, created });
 const { withInvocationNote } = await import('../../src/cli/install.js');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-install-files-'));
@@ -49,7 +53,7 @@ test('upsertBlock / removeBlock: append, replace in place, remove back to the or
   assert.equal(removeBlock(t, TOML_MARKERS), toml);
 });
 
-test('blockAction / removeBlockAction: create, update with a backup, unchanged; delete a file that held only our block', () => {
+test('blockAction / removeBlockAction: create, update with a backup, unchanged; delete a file that held only our block (if install created it)', () => {
   const fresh = file('new.md');
   const c = blockAction(fresh, MD_BLOCK, MD_MARKERS, { what: 'the block' });
   assert.equal(c.action, 'create');
@@ -63,12 +67,16 @@ test('blockAction / removeBlockAction: create, update with a backup, unchanged; 
   assert.equal(blockAction(existing, MD_BLOCK, MD_MARKERS).action, 'unchanged');
   assert.equal(removeBlockAction(existing, MD_MARKERS)?.content, '# Mine\n');
   const ours = file('ours.md', `${MD_BLOCK}\n`);
-  assert.equal(removeBlockAction(ours, MD_MARKERS)?.action, 'delete');
+  assert.equal(removeBlockAction(ours, MD_MARKERS, { manifest: manifestOf([ours]) })?.action, 'delete');
+  const kept = removeBlockAction(ours, MD_MARKERS);
+  assert.equal(kept?.action, 'update', 'a file install did not create stays, emptied');
+  assert.equal(kept?.content, '');
+  assert.match(String(kept?.note), /it existed before SpecReview, so the file stays/);
   assert.equal(removeBlockAction(file('none.md', '# x\n'), MD_MARKERS), null);
   assert.equal(removeBlockAction(file('missing.md'), MD_MARKERS), null);
 });
 
-test('jsonAction: structural compare, indentation and final newline kept, delete when only our entries were left', () => {
+test('jsonAction: structural compare, indentation and final newline kept, delete when only our entries were left (if install created it)', () => {
   const f = file('mcp.json', '{\n    "mcpServers": {\n        "other": { "command": "x" }\n    }\n}');
   const add = jsonAction(f, (v) => setEntry(v, 'mcpServers', 'specreview', { command: 'node' }));
   assert.equal(add?.action, 'update');
@@ -80,9 +88,15 @@ test('jsonAction: structural compare, indentation and final newline kept, delete
   assert.equal(rm?.action, 'update');
   assert.deepEqual(JSON.parse(/** @type {string} */ (rm?.content)), { mcpServers: { other: { command: 'x' } } });
   const onlyOurs = file('only.json', '{"mcpServers":{"specreview":{"command":"node"}}}\n');
-  const del = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true });
+  const del = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true, manifest: manifestOf([onlyOurs]) });
   assert.equal(del?.action, 'delete');
   assert.equal(del?.backup, undefined);
+  const keep = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true });
+  assert.equal(keep?.action, 'update', 'not created by install: kept as {}');
+  assert.equal(keep?.content, '{}\n');
+  // The pre-install backup had an empty container: it comes back.
+  fs.writeFileSync(`${onlyOurs}.specreview-backup`, '{"mcpServers": {}, "x": 1}');
+  assert.deepEqual(JSON.parse(/** @type {string} */ (jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true })?.content)), { mcpServers: {} });
   assert.equal(jsonAction(file('absent.json'), (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true }), null);
   assert.equal(jsonAction(file('empty.json', ''), (v) => setEntry(v, 'mcp', 'specreview', {}))?.action, 'update');
 });
@@ -121,13 +135,20 @@ test('copies: recognised by content, template (any invocation note) or a manifes
   assert.equal(isOurCopy(file('x.md'), withInvocationNote(template, '"/old/node" "/old/specreview.js"'), withNote, { template }), true, 'a copy with another path in the note');
   const f = file('SKILL.md', template);
   assert.equal(isOurCopy(f, template, withNote, { template }), true);
-  assert.equal(isOurCopy(f, 'old copy\n', template, { template, manifest: { version: 1, files: { [f]: { sha256: [sha256('old copy\n')] } } } }), true);
+  assert.equal(isOurCopy(f, 'old copy\n', template, { template, manifest: { schema: 1, created: [], files: { [f]: { sha256: [sha256('old copy\n')] } } } }), true);
   assert.equal(isOurCopy(f, 'mine\n', template, { template }), false);
   fs.writeFileSync(f, 'mine\n');
   const c = copyAction(f, template, { template });
   assert.equal(c.action, 'update');
-  assert.equal(c.backup, true);
-  assert.match(String(c.note), /replaces a file SpecReview did not write/);
+  assert.equal(c.backupPath, `${f}.specreview-backup`);
+  assert.match(String(c.note), /replaces a file SpecReview did not write \(backed up to \d+-SKILL\.md\.specreview-backup\)/);
+  // A backup with this content exists: none needed. One with other content: a timestamped one.
+  fs.writeFileSync(`${f}.specreview-backup`, 'mine\n');
+  assert.equal(copyAction(f, template, { template }).backupPath, undefined);
+  assert.match(String(copyAction(f, template, { template }).note), /its current content is already in /);
+  fs.writeFileSync(f, 'mine, edited again\n');
+  assert.match(String(copyAction(f, template, { template }).backupPath), /\.specreview-backup-\d{8}T\d{6}Z$/);
+  fs.writeFileSync(f, 'mine\n');
   assert.deepEqual(removeCopyAction(f, template, { template })?.kept, true);
   fs.writeFileSync(f, template);
   assert.equal(copyAction(f, template, { template }).action, 'unchanged');
@@ -135,9 +156,28 @@ test('copies: recognised by content, template (any invocation note) or a manifes
   assert.equal(removeCopyAction(file('gone.md'), template, { template }), null);
 });
 
+test('checkMarkers: one well-formed pair or none; anything else is refused', () => {
+  const ok = ['# x\n', `${MD_BLOCK}\n`, `# x\n\n${MD_BLOCK}\n\ntrailer\n`];
+  for (const text of ok) assert.doesNotThrow(() => checkMarkers('/f', text, MD_MARKERS));
+  const bad = [
+    ['<!-- specreview:begin x -->\nno end\n', /has no "<!-- specreview:end -->" line after it/],
+    [`${MD_BLOCK}\n${MD_BLOCK}\n`, /it has 2 "<!-- specreview:begin" lines/],
+    ['<!-- specreview:end -->\n<!-- specreview:begin -->\n', /has no "<!-- specreview:end -->" line after it/],
+    ['text\n<!-- specreview:end -->\n', /has a "<!-- specreview:end -->" line but no "<!-- specreview:begin" line/],
+    [`${MD_BLOCK}\n<!-- specreview:end -->\n`, /it has 2 "<!-- specreview:end -->" lines/],
+  ];
+  for (const [text, re] of bad) {
+    assert.throws(() => checkMarkers('/f', /** @type {string} */ (text), MD_MARKERS), (/** @type {any} */ e) => e instanceof InstallRefusal && /** @type {RegExp} */ (re).test(e.message) && /repair the markers/.test(e.fix));
+  }
+  assert.throws(() => blockAction(file('broken.md', '<!-- specreview:begin -->\nno end\nmy notes\n'), MD_BLOCK, MD_MARKERS), InstallRefusal);
+});
+
 test('manifest and writeAtomic', () => {
   const m = file('install-manifest.json');
   assert.deepEqual(loadManifest(m).files, {});
+  updateManifest(m, { written: [], deleted: [], created: ['/c', '/d'] });
+  updateManifest(m, { written: [], deleted: ['/d'] });
+  assert.deepEqual(loadManifest(m).created, ['/c']);
   updateManifest(m, { written: [{ path: '/x', content: 'a' }], deleted: [] });
   updateManifest(m, { written: [{ path: '/x', content: 'b' }, { path: '/y', content: 'c' }], deleted: [] });
   assert.deepEqual(loadManifest(m).files['/x'].sha256, [sha256('b'), sha256('a')]);
@@ -154,4 +194,15 @@ test('manifest and writeAtomic', () => {
   writeAtomic(deep, 'x');
   assert.equal(fs.readFileSync(deep, 'utf8'), 'x');
   assert.deepEqual(fs.readdirSync(path.dirname(deep)), ['c.txt'], 'no temp file left');
+  // Through a symlink: the link stays, the target changes; a dangling link is refused.
+  const target = file('target.json', '{}\n');
+  const link = path.join(dir, 'link.json');
+  fs.symlinkSync(target, link);
+  writeAtomic(link, '{"a": 1}\n');
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(fs.readFileSync(target, 'utf8'), '{"a": 1}\n');
+  const dangling = path.join(dir, 'dangling.json');
+  fs.symlinkSync(path.join(dir, 'nowhere', 'x.json'), dangling);
+  assert.throws(() => writeAtomic(dangling, 'x'), /is a symlink to a missing file/);
+  assert.ok(fs.lstatSync(dangling).isSymbolicLink());
 });

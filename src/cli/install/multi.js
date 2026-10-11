@@ -7,16 +7,19 @@
 //      ~/.agents/skills, a project AGENTS.md), and on uninstall keep a shared file while an agent left out of the
 //      uninstall still uses it (stillUsesShared);
 //   4. dry run: describe; --apply: applyPlan with one-time backups and the install manifest.
-// Per-file refusals (invalid JSON...) do not stop the other agents; they make the exit code 1.
+// Per-file refusals (invalid JSON...) and write failures do not stop the other agents; they make the exit code 1.
+// The node path written into agent configs is the unresolved one on PATH when it is this same node (Homebrew's
+// /opt/homebrew/bin/node survives `brew upgrade`; process.execPath, the versioned Cellar path, does not).
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { EXIT } from '../../shared/protocol.js';
 import { UsageError } from '../../core/store/errors.js';
 import { homeDir } from '../../core/store/home.js';
 import { BIN_PATH, PACKAGE_ROOT } from '../daemon-client.js';
 import { applyPlan, cliInvocation, isOnPath, projectRoot } from '../install.js';
-import { AGENTS, Planner, UNVERIFIED, claudePlugin } from './agents.js';
-import { BACKUP_SUFFIX, loadManifest } from './files.js';
+import { AGENTS, Planner, UNVERIFIED, claudeDoubleInstall, claudePlugin } from './agents.js';
+import { loadManifest } from './files.js';
 
 /** @typedef {import('./agents.js').Ctx} Ctx */
 /** @typedef {import('../install.js').FileAction} FileAction */
@@ -30,11 +33,11 @@ export const MANIFEST_FILE = 'install-manifest.json';
  * @property {boolean} detected
  * @property {string[]} evidence
  * @property {boolean} selected
- * @property {'not-detected' | 'skipped' | 'planned' | 'up-to-date' | 'configured' | 'removed' | 'nothing-to-remove'} status
+ * @property {'not-detected' | 'skipped' | 'planned' | 'up-to-date' | 'configured' | 'removed' | 'nothing-to-remove' | 'failed'} status
  * @property {string} [reason] why it was skipped
  * @property {FileAction[]} files
  * @property {string[]} notes
- * @property {Array<{ file: string, message: string, fix?: string }>} refusals
+ * @property {Array<{ file: string, message: string, fix?: string, failed?: boolean }>} refusals `failed`: a write error
  */
 
 /**
@@ -62,7 +65,7 @@ export function buildContext(rt, o) {
   const env = rt.env;
   const home = rt.deps.home ?? env.HOME ?? env.USERPROFILE;
   if (!home) throw new Error('cannot tell your home directory: HOME is not set');
-  const execPath = rt.deps.execPath ?? process.execPath;
+  const execPath = rt.deps.execPath ?? stableNodePath(env, process.execPath);
   const binPath = rt.deps.binPath ?? BIN_PATH;
   const pathEnv = env.PATH ?? '';
   return {
@@ -80,6 +83,37 @@ export function buildContext(rt, o) {
     manifest: loadManifest(manifestPath(env)),
     ...(rt.deps.claudeHome ? { claudeHome: rt.deps.claudeHome } : {}),
   };
+}
+
+/**
+ * The node to write into agent configs: $SPECREVIEW_NODE (install.sh passes the `node` it found on PATH) or the
+ * first `node` on PATH, when it resolves to the node running now; else `execPath`. process.execPath has its symlinks
+ * resolved, so on Homebrew it is /opt/homebrew/Cellar/node/<version>/bin/node, which `brew upgrade` deletes; the PATH
+ * entry /opt/homebrew/bin/node keeps working. Version-pinned installs (nvm, asdf, Volta) still change path when you
+ * switch versions: re-run `specreview install --apply` then.
+ * @param {Record<string, string | undefined>} env
+ * @param {string} execPath
+ * @returns {string}
+ */
+export function stableNodePath(env, execPath) {
+  let real;
+  try {
+    real = fs.realpathSync(execPath);
+  } catch {
+    return execPath;
+  }
+  const exe = process.platform === 'win32' ? 'node.exe' : 'node';
+  const candidates = [env.SPECREVIEW_NODE, ...(env.PATH ?? '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, exe))];
+  for (const cand of candidates) {
+    if (!cand || !path.isAbsolute(cand)) continue;
+    try {
+      fs.accessSync(cand, fs.constants.X_OK);
+      if (fs.realpathSync(cand) === real) return cand;
+    } catch {
+      // not this one
+    }
+  }
+  return execPath;
 }
 
 /**
@@ -133,6 +167,7 @@ export function runInstaller(ctx, o) {
     else def.uninstall(ctx, p);
     r.notes = p.notes;
     r.refusals = p.refusals;
+    for (const n of p.globalNotes) if (!notes.includes(n)) notes.push(n);
     if (p.skipped) {
       r.status = 'skipped';
       r.reason = p.skipped;
@@ -181,13 +216,31 @@ export function runInstaller(ctx, o) {
   const changes = [...byPath.values()];
   /** @type {string[]} */
   let written = [];
-  if (o.apply) written = applyPlan({ files: changes, notes: [] }, { backups: true, manifest: manifestPath(ctx.env) });
+  /** @type {Array<{ path: string, message: string }>} */
+  const failures = [];
+  if (o.apply) written = applyPlan({ files: changes, notes: [] }, { backups: true, manifest: manifestPath(ctx.env), failures });
+  for (const fail of failures) {
+    for (const id of owners.get(fail.path) ?? []) {
+      agents.find((a) => a.id === id)?.refusals.push({ file: fail.path, message: `could not ${byPath.get(fail.path)?.action === 'delete' ? 'delete' : 'write'} it: ${fail.message}`, failed: true });
+    }
+  }
 
   for (const r of agents) {
     if (!r.selected) continue;
     const pending = r.files.some((f) => f.action !== 'unchanged');
-    if (o.mode === 'install') r.status = !pending ? (r.refusals.length ? 'planned' : 'up-to-date') : o.apply ? 'configured' : 'planned';
+    if (r.files.some((f) => failures.some((x) => x.path === f.path))) r.status = 'failed';
+    else if (o.mode === 'install') r.status = !pending ? (r.refusals.length ? 'planned' : 'up-to-date') : o.apply ? 'configured' : 'planned';
     else r.status = pending ? (o.apply ? 'removed' : 'planned') : 'nothing-to-remove';
+  }
+
+  if (o.mode === 'install' && ctx.scope === 'project') {
+    const local = changes.filter((f) => f.action !== 'delete' && f.content.includes(ctx.binPath)).map((f) => path.relative(ctx.root, f.path) || f.path);
+    if (local.length) {
+      notes.push(
+        `These project files hold paths that exist only on this machine (${ctx.execPath}, ${ctx.binPath}): ${local.join(', ')}. ` +
+          'Keep them out of version control (e.g. in .gitignore); each teammate runs `specreview install --project` on their own machine.',
+      );
+    }
   }
 
   if (o.mode === 'install' && !ctx.cliOnPath && agents.some((r) => r.selected && r.files.length)) {
@@ -256,19 +309,19 @@ export function describeReport(report) {
       const names = (report.owners.get(f.path) ?? []).map((id) => report.agents.find((a) => a.id === id)?.name ?? id);
       const firstOwner = listed.get(f.path);
       if (firstOwner) {
-        out.push(`  ${verb(f, report.applied)} ${f.path}  (shared; listed under ${firstOwner})`);
+        out.push(`  ${verb(f, report.applied, report.written)} ${f.path}  (shared; listed under ${firstOwner})`);
         continue;
       }
       listed.set(f.path, r.name);
       const sharedWith = names.filter((n) => n !== r.name);
-      out.push(`  ${verb(f, report.applied)} ${f.path}${describeFile(f, report.applied)}${sharedWith.length ? `  [shared with ${sharedWith.join(', ')}]` : ''}`);
+      out.push(`  ${verb(f, report.applied, report.written)} ${f.path}${describeFile(f, report.applied)}${sharedWith.length ? `  [shared with ${sharedWith.join(', ')}]` : ''}`);
       if (!report.applied && f.detail && f.action !== 'unchanged' && f.action !== 'delete') {
         for (const line of f.detail.split('\n')) out.push(`      | ${line}`);
       }
-      if (report.applied && f.backup && f.action !== 'create' && report.written.includes(f.path)) out.push(`      backup: ${f.path}${BACKUP_SUFFIX} (made once, before the first change)`);
+      if (report.applied && f.backedUp) out.push(`      backup: ${f.backedUp}`);
     }
     for (const x of r.refusals) {
-      out.push(`  REFUSED ${x.file}: ${x.message}`);
+      out.push(`  ${x.failed ? 'FAILED' : 'REFUSED'} ${x.file}: ${x.message}`);
       if (x.fix) out.push(`      fix: ${x.fix}`);
     }
     for (const n of r.notes) out.push(`  note: ${n}`);
@@ -287,7 +340,8 @@ export function describeReport(report) {
   for (const n of report.notes) out.push('', n);
 
   const pending = report.changes.filter((f) => f.action !== 'unchanged').length;
-  const refused = report.agents.reduce((n, a) => n + a.refusals.length, 0);
+  const refused = new Set(report.agents.flatMap((a) => a.refusals.filter((x) => !x.failed).map((x) => x.file))).size;
+  const failed = new Set(report.agents.flatMap((a) => a.refusals.filter((x) => x.failed).map((x) => x.file))).size;
   out.push('');
   if (report.applied) {
     const removed = report.changes.filter((f) => f.action === 'delete' && report.written.includes(f.path)).length;
@@ -302,17 +356,20 @@ export function describeReport(report) {
     out.push('Nothing to remove.');
   }
   if (refused) out.push(`${refused} file${refused === 1 ? ' was' : 's were'} refused (see REFUSED above); fix ${refused === 1 ? 'it' : 'them'} and re-run.`);
+  if (failed) out.push(`${failed} file${failed === 1 ? '' : 's'} could not be written (see FAILED above); the others were. Fix the cause and re-run.`);
   return out.join('\n').replace(/^\n+/, '');
 }
 
 /**
  * @param {FileAction} f
  * @param {boolean} applied
+ * @param {string[]} [written]
  * @returns {string}
  */
-function verb(f, applied) {
+function verb(f, applied, written = []) {
   if (f.kept) return 'kept';
   if (f.action === 'unchanged') return 'unchanged';
+  if (applied && !written.includes(f.path)) return f.action === 'delete' ? 'NOT deleted:' : 'NOT written:';
   if (applied) return { create: 'created', update: 'updated', delete: 'deleted' }[f.action];
   return { create: 'would create', update: 'would update', delete: 'would delete' }[f.action];
 }
@@ -350,6 +407,7 @@ export function reportJson(report) {
         path: f.path,
         action: f.kept ? 'kept' : f.action,
         ...(f.note ? { note: f.note } : {}),
+        ...(f.backedUp ? { backup: f.backedUp } : {}),
         ...(f.source ? { source: path.relative(PACKAGE_ROOT, f.source) } : {}),
         ...((report.owners.get(f.path) ?? []).length > 1 ? { sharedWith: (report.owners.get(f.path) ?? []).filter((id) => id !== r.id) } : {}),
       })),
@@ -406,7 +464,8 @@ function stillUsesShared(ctx, d, detected) {
 
 /**
  * Per agent: is SpecReview configured (user scope), and is it up to date? Used by `specreview doctor`.
- * Agents that are neither detected nor configured are left out.
+ * Agents that are neither detected nor configured are left out. An agent counts as configured by its own files; the
+ * shared ones (~/.agents/skills) count only for a detected agent whose whole configuration is shared (Droid).
  * @param {Ctx} ctx
  * @returns {Array<{ id: string, name: string, detected: boolean, configured: boolean, upToDate: boolean, plugin?: string, problem?: string }>}
  */
@@ -418,10 +477,14 @@ export function integrationStatus(ctx) {
     const un = new Planner();
     def.install(ctx, inst);
     def.uninstall(ctx, un);
-    const configured = un.files.some((f) => f.action !== 'unchanged' || f.kept);
-    const plugin = def.id === 'claude' && inst.skipped ? (claudePlugin(ctx)?.id ?? undefined) : undefined;
+    const present = (/** @type {FileAction} */ f) => f.action !== 'unchanged' || Boolean(f.kept);
+    const allShared = inst.files.length > 0 && inst.files.every((f) => f.share);
+    const configured = un.files.some((f) => !f.share && present(f)) || (det.detected && allShared && un.files.some(present));
+    const pluginInfo = def.id === 'claude' && inst.skipped ? claudePlugin(ctx) : null;
+    const plugin = pluginInfo?.id;
     if (!det.detected && !configured && !plugin) continue;
-    const problem = [...inst.refusals, ...un.refusals][0]?.message;
+    const twice = pluginInfo ? claudeDoubleInstall(ctx, pluginInfo) : null;
+    const problem = twice ? `SpecReview plugin installed (${pluginInfo?.id}), and ${twice}` : [...inst.refusals, ...un.refusals][0]?.message;
     out.push({
       id: def.id,
       name: def.name,

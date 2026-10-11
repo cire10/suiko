@@ -51,6 +51,8 @@ export const PLAN_GATE_TIMEOUT = 345600;
  * @property {string} [note] what changes (for settings merges)
  * @property {string} [detail] the entry/block added, printed by the multi-agent dry run
  * @property {boolean} [backup] modifying an existing file: keep a one-time <file>.specreview-backup (multi-agent install)
+ * @property {string} [backupPath] replacing a file of the user's: copy it here first (always, not only once)
+ * @property {string} [backedUp] set by applyPlan: the backup it made for this file in this run
  * @property {boolean} [record] a whole-file copy: record its sha256 in the install manifest
  * @property {boolean} [kept] uninstall left this file alone (edited since install)
  * @property {string} [share] tag of a file written for several agents (deduplicated, kept while another agent uses it)
@@ -432,11 +434,15 @@ function withoutOurHooks(groups) {
 }
 
 /**
- * Writes the plan's changed files (mkdir -p, write to a temp file, rename) and deletes `delete` actions.
- * With `backups`, an existing file that a `backup` action modifies is first copied to <file>.specreview-backup
- * (once: an existing backup is never overwritten). With `manifest`, written copies (`record`) are recorded there.
+ * Writes the plan's changed files (mkdir -p, write to a temp file, rename; through symlinks) and deletes `delete`
+ * actions. A `backupPath` action first copies the file there (a file of the user's that a copy replaces). With
+ * `backups`, an existing file that a `backup` action modifies is first copied to <file>.specreview-backup (once: an
+ * existing backup is never overwritten). Each backup made is set as the action's `backedUp`. With `manifest`, written
+ * copies (`record`) and created files are recorded there, also when a later file fails.
+ * With `failures`, a file that cannot be written is pushed there and the other files still go ahead; without it the
+ * error is thrown (after the manifest is saved).
  * @param {Plan} plan
- * @param {{ backups?: boolean, manifest?: string }} [o]
+ * @param {{ backups?: boolean, manifest?: string, failures?: Array<{ path: string, message: string }> }} [o]
  * @returns {string[]} written (or deleted) paths
  */
 export function applyPlan(plan, o = {}) {
@@ -445,35 +451,48 @@ export function applyPlan(plan, o = {}) {
   const recorded = [];
   /** @type {string[]} */
   const deleted = [];
-  for (const f of plan.files) {
-    if (f.action === 'unchanged') continue;
-    if (o.backups && f.backup) backupOnce(f.path);
-    if (f.action === 'delete') {
-      fs.rmSync(f.path, { force: true });
-      deleted.push(f.path);
-      for (const dir of f.rmdirs ?? []) removeEmptyDir(dir);
-    } else {
-      writeAtomic(f.path, f.content);
-      if (f.record) recorded.push({ path: f.path, content: f.content });
+  /** @type {string[]} */
+  const created = [];
+  try {
+    for (const f of plan.files) {
+      if (f.action === 'unchanged') continue;
+      try {
+        const backup = f.backupPath ? backupTo(f.path, f.backupPath) : o.backups && f.backup ? backupTo(f.path, `${f.path}${BACKUP_SUFFIX}`) : null;
+        if (backup) f.backedUp = backup;
+        if (f.action === 'delete') {
+          fs.rmSync(f.path, { force: true });
+          deleted.push(f.path);
+          for (const dir of f.rmdirs ?? []) removeEmptyDir(dir);
+        } else {
+          writeAtomic(f.path, f.content);
+          if (f.record) recorded.push({ path: f.path, content: f.content });
+          if (f.action === 'create') created.push(f.path);
+        }
+        written.push(f.path);
+      } catch (err) {
+        if (!o.failures) throw err;
+        o.failures.push({ path: f.path, message: /** @type {Error} */ (err).message });
+      }
     }
-    written.push(f.path);
-  }
-  if (o.manifest && (recorded.length || deleted.length)) {
-    try {
-      updateManifest(o.manifest, { written: recorded, deleted });
-    } catch {
-      // the manifest only helps recognise our older copies later
+  } finally {
+    if (o.manifest && (recorded.length || deleted.length || created.length)) {
+      try {
+        updateManifest(o.manifest, { written: recorded, deleted, created });
+      } catch {
+        // the manifest only helps recognise our older copies and created files later
+      }
     }
   }
   return written;
 }
 
 /**
+ * Copies `file` to `backup` unless the backup exists already or the file does not.
  * @param {string} file
+ * @param {string} backup
  * @returns {string | null} the backup path when one was made
  */
-function backupOnce(file) {
-  const backup = `${file}${BACKUP_SUFFIX}`;
+function backupTo(file, backup) {
   if (fs.existsSync(backup) || !fs.existsSync(file)) return null;
   fs.copyFileSync(file, backup);
   return backup;
