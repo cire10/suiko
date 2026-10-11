@@ -12,7 +12,7 @@ import { setMode, switchVersion } from '../../actions.js';
 import { actorLabel, numericVersion, relTime, versionNumbers } from '../../model.js';
 import { store, useStore } from '../../state.js';
 import { Icon } from '../common.js';
-import { buildTree, fileStatus, matchesFilter, openCounts } from './code-model.js';
+import { buildTree, fileStatus, matchesFilter, openCounts, outsideReview } from './code-model.js';
 import { listKeyOf, loadList, revealFile, setFilter, useCode } from './code-state.js';
 
 /** @param {{ ds: any }} props */
@@ -32,7 +32,7 @@ export function FileTree({ ds }) {
   const shown = useMemo(() => files.filter((f) => matchesFilter(f, c.filter)), [files, c.filter]);
   const tree = useMemo(() => buildTree(shown), [shown]);
   const counts = useMemo(() => openCounts(ds, v), [ds.threads, v]);
-  const skipped = !changes ? c.list?.data?.skipped || [] : [];
+  const skipped = useMemo(() => (!changes ? outsideReview(files, c.list?.data?.skipped) : []), [files, changes]);
 
   /** @param {string} path */
   const open = (path) => {

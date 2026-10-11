@@ -27,7 +27,7 @@ import { isEditable } from '../../util.js';
 import { Chip, Icon } from '../common.js';
 import {
   ROW_CAP, buildTree, diffGaps, fileStatus, hunkFile, isStub, itemsByFile, matchesFilter, nextSelection,
-  selectionCapture, selectionLabel, stubText, treeOrder,
+  outsideReview, selectionCapture, selectionLabel, stubText, treeOrder,
 } from './code-model.js';
 import {
   codeStore, expandGap, listKeyOf, loadDiff, loadList, loadSource, revealFile, setActivePath, setFilter, setSelection,
@@ -233,6 +233,7 @@ export function CodeReviewView({ ds }) {
   const data = list?.data;
   const totals = files.reduce((acc, f) => ({ added: acc.added + (Number(f.added) || 0), removed: acc.removed + (Number(f.removed) || 0) }), { added: 0, removed: 0 });
   const sel = code.sel;
+  const skipped = outsideReview(files, data?.skipped);
 
   return html`<div ref=${rootRef} class="code-view" data-testid=${CODE_TESTID.view} data-view="code" data-mode=${changes ? 'changes' : 'files'}
     data-ready=${!hidden && ready ? 'true' : undefined} hidden=${hidden} aria-label="Code review">
@@ -277,9 +278,9 @@ export function CodeReviewView({ ds }) {
         eager=${eager.has(f.path)} layout=${layout} items=${placed.get(f.path) || []} ds=${ds} agent=${agent}
         focusedId=${s.focusedId} activeHunk=${changes ? s.activeHunk : null} canAct=${canAct} hidden=${hidden} />`) : null}
     </div>
-    ${!changes && (data?.skipped || []).length ? html`<div class="code-skipped small muted">
+    ${!changes && skipped.length ? html`<div class="code-skipped small muted">
       <strong>Not in the review:</strong>
-      ${data.skipped.map((/** @type {any} */ k, /** @type {number} */ i) => html`${i ? ', ' : ' '}<span class="mono">${k.path}</span> (${k.reason})`)}
+      ${skipped.map((/** @type {any} */ k, /** @type {number} */ i) => html`${i ? ', ' : ' '}<span class="mono">${k.path}</span> (${k.reason})`)}
     </div>` : null}
   </div>`;
 }

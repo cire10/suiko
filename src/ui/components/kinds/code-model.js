@@ -33,6 +33,16 @@ export function fileStatus(status) {
   return { letter, label, tone: s.tone };
 }
 
+/**
+ * The skipped entries of a round that are really outside it. The engine also lists its binary and too-large files
+ * under `skipped` (design 4.2: the round report names them), but those are files of the round, shown as stubs.
+ * @param {Array<{ path: string }>} files @param {Array<{ path: string, reason: string }>|undefined|null} skipped
+ */
+export function outsideReview(files, skipped) {
+  const listed = new Set(files.map((f) => f.path));
+  return (skipped || []).filter((k) => !listed.has(k.path));
+}
+
 /** A file without a text diff: binary, too large, or a stub the diff route reported. @param {any} f */
 export function isStub(f) {
   return !!(f && (f.binary || f.tooLarge || f.stub));

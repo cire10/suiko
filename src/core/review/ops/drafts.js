@@ -185,7 +185,8 @@ async function normalizeDraft(ctx, doc, item, prev) {
  */
 export async function suggestionFor(ctx, doc, anchor, input) {
   // code docs: whole lines of the anchored repo file (new side), built by the code engine
-  if (isCode(doc)) return { ...(await codeSuggestionFor(ctx, doc, anchor, anchor.v)), new: String(input.new), status: 'pending', appliedIn: null };
+  // (one trailing line break is dropped, as `apply` does, so the packet shows what will be written)
+  if (isCode(doc)) return { ...(await codeSuggestionFor(ctx, doc, anchor, anchor.v)), new: String(input.new).replace(/\r?\n$/, ''), status: 'pending', appliedIn: null };
   const mode = input.mode === 'source' ? 'source' : 'text';
   const { source } = await ctx.store.readVersion(doc.id, anchor.v);
   let start = anchor.src.start;

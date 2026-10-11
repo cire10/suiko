@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   baseName, buildTree, coveredLines, diffGaps, fileStatus, formatBytes, gapRows, gapSize, hunkFile, hunkSpan, isStub,
-  itemsByEndLine, itemsByFile, markerKey, matchesFilter, nextSelection, openCounts, selectionCapture, selectionLabel,
+  itemsByEndLine, itemsByFile, markerKey, matchesFilter, nextSelection, openCounts, outsideReview, selectionCapture, selectionLabel,
   splitPairs, stubText, treeOrder, wordSegments,
 } from '../../src/ui/components/kinds/code-model.js';
 
@@ -33,6 +33,13 @@ test('stubs: binary and too-large files have placeholders', () => {
   assert.equal(stubText({}), 'No diff to show.');
   assert.equal(formatBytes(512), '512 B');
   assert.equal(formatBytes(2048), '2 KB');
+});
+
+test('outsideReview: skipped entries of files that are in the round (binary, too large) are not outside it', () => {
+  const files = [{ path: 'a.png', binary: true }, { path: 'src/a.js' }];
+  const skipped = [{ path: '.env', reason: 'excluded' }, { path: 'a.png', reason: 'binary' }];
+  assert.deepEqual(outsideReview(files, skipped), [{ path: '.env', reason: 'excluded' }]);
+  assert.deepEqual(outsideReview(files, undefined), []);
 });
 
 test('matchesFilter: every term is a case-insensitive substring of the path or the old path', () => {

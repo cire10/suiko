@@ -229,7 +229,6 @@ test('Changes shows the interdiff per file with thread chips; n / p and the side
   await expect(page.locator('.round-results')).toContainText('The discount is now clamped');
 
   // n goes to the next hunk (b.js), p back; the centre follows
-  await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {});
   await page.keyboard.press('n');
   await expect(a.locator('.cd-hunk-row.active')).toHaveCount(1);
   await page.keyboard.press('n');
@@ -407,6 +406,13 @@ test('keys: j / k move between files, n / p between hunks, c comments the select
   await lineBtn(page, 'src/a.js', 'new', 8).click();
   await page.keyboard.press('c');
   await expect(page.getByTestId(TESTID.composer)).toContainText('Agent will see: src/a.js:L8');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId(TESTID.composer)).toHaveCount(0);
+
+  // the shortcuts overlay names what j / k do here
+  await page.keyboard.press('?');
+  const help = page.getByTestId(TESTID.helpOverlay);
+  await expect(help.locator('[data-key-row="threads"]')).toContainText('Next / previous file');
   expect(ui.errors).toEqual([]);
 });
 

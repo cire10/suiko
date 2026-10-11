@@ -11,16 +11,17 @@ import { TESTID } from 'protocol';
 import { closeDialog, openDialog } from '../actions.js';
 import { helpGroups } from '../commands.js';
 import { shortcut } from '../keys.js';
-import { isSingleKeyCombo, matchRow } from '../model.js';
+import { docKindOf, isSingleKeyCombo, matchRow } from '../model.js';
 import { useStore } from '../state.js';
 import { IS_MAC, isEditable } from '../util.js';
 import { Modal } from './common.js';
 
 export function HelpOverlay() {
   const singleKeys = useStore((s) => s.prefs.singleKeys);
+  const kind = useStore((s) => (s.route.view === 'doc' && s.ds ? docKindOf(s.ds) : 'file'));
   const [query, setQuery] = useState('');
   const filterRef = useRef(/** @type {HTMLInputElement|null} */ (null));
-  const groups = useMemo(() => helpGroups(), []);
+  const groups = useMemo(() => helpGroups(kind), [kind]);
   const q = query.trim();
   const shown = groups.map((g) => ({
     group: g.group,

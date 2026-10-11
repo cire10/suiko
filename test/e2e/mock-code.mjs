@@ -925,7 +925,8 @@ const GENERATED = `${Array.from({ length: GENERATED_LINES }, (_, i) => `export c
  * The 'code' scenario: code review 'cr-feat' (feat vs main) after one round of review.
  *   v1 (agent, open): src/a.js M (two hunks, 16 unchanged lines between), src/new-name.js R (from src/old-name.js),
  *      src/util/strings.js A, docs/old-notes.md D, assets/logo.png A binary, data/fixtures.json M too large,
- *      vendor/generated.js A (3200 lines); skipped: .env.local (excluded).
+ *      vendor/generated.js A (3200 lines); skipped: .env.local (excluded), plus the binary and the too-large
+ *      file (the engine lists those under skipped too).
  *   rv1 (changes requested, delivered to claude) created:
  *      t1 blocking comment on src/a.js new side, the two discount lines   -> addressed in v2 (linked hunk)
  *      t2 question on src/a.js OLD side, the removed tax guard            -> answered in v2
@@ -941,7 +942,12 @@ export function buildCodeScenario(opts = {}) {
     id: 'cr-feat',
     title: 'feat vs main',
     clock: opts.clock,
-    skipped: [{ path: '.env.local', reason: 'excluded' }],
+    // as the engine does, the binary and too-large files of the round are also listed as skipped
+    skipped: [
+      { path: '.env.local', reason: 'excluded' },
+      { path: 'assets/logo.png', reason: 'binary' },
+      { path: 'data/fixtures.json', reason: 'too-large' },
+    ],
     files: [
       { path: 'src/a.js', status: 'M', oldText: A_BASE, newText: A_V1 },
       { path: 'src/new-name.js', oldPath: 'src/old-name.js', status: 'R', oldText: OLD_NAME, newText: OLD_NAME.replace('VERSION = 1', 'VERSION = 2') },

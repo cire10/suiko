@@ -53,8 +53,9 @@ import {
  * @property {string|((s: UiState) => string)} [description]
  * @property {string[]} [keywords]
  * @property {string[]} [keys]
- * @property {{ row?: string, label?: string }} [help] the help row this command's keys go in (default: its own,
- *   labelled with `label` or the title)
+ * @property {{ row?: string, label?: string, codeLabel?: string }} [help] the help row this command's keys go in
+ *   (default: its own, labelled with `label` or the title; `codeLabel` in a code review, whose view binds the key
+ *   to something else)
  * @property {'doc'|'any'} [scope]
  * @property {boolean} [palette]
  * @property {string} [inline]
@@ -556,7 +557,7 @@ export const COMMANDS = Object.freeze([
     category: 'Navigate',
     keywords: ['down', 'forward'],
     keys: ['j'],
-    help: { row: 'threads', label: 'Next / previous thread' },
+    help: { row: 'threads', label: 'Next / previous thread', codeLabel: 'Next / previous file' },
     when: (s) => (panelItems(s.ds, s.filter, s.version).length ? true : 'no threads in this filter'),
     run: () => navThread(1),
   },
@@ -856,10 +857,12 @@ export function describe(c, s) {
 
 /**
  * The keyboard shortcuts overlay, grouped by category: one row per command with keys, except that commands naming
- * the same help row share it (their keys listed together).
+ * the same help row share it (their keys listed together). In a code review (`kind` 'code') a row takes its
+ * `codeLabel`: the code view binds j / k to the next / previous file.
+ * @param {string} [kind] the doc kind shown (docKindOf)
  * @returns {KeyGroup[]}
  */
-export function helpGroups() {
+export function helpGroups(kind) {
   return CATEGORIES.map((group) => {
     /** @type {Map<string, KeyRow>} */
     const rows = new Map();
@@ -871,7 +874,7 @@ export function helpGroups() {
         row.keys.push(...c.keys);
         row.commands.push(c.id);
       } else {
-        rows.set(id, { id, keys: [...c.keys], label: c.help?.label || c.title, commands: [c.id] });
+        rows.set(id, { id, keys: [...c.keys], label: (kind === 'code' && c.help?.codeLabel) || c.help?.label || c.title, commands: [c.id] });
       }
     }
     return { group, rows: [...rows.values()] };

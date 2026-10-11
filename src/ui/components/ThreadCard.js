@@ -238,7 +238,7 @@ function SuggestionBlock({ t, ds, canAct, busy = false }) {
   const newLines = String(sug.new ?? '').split('\n');
   return html`<div class="suggestion-block">
     <div class="suggestion-head"><strong>Suggestion</strong> <${Chip} tone=${sug.status === 'conflict' ? 'danger' : sug.status === 'applied' ? 'ok' : 'muted'}>${status}<//>
-      <span class="small muted">${sug.mode === 'source' ? 'source lines' : 'text'}${sug.startLine ? ` · ${linesLabel([sug.startLine, sug.endLine])}` : ''}</span></div>
+      <span class="small muted">${sug.mode === 'source' ? 'source lines' : sug.mode === 'lines' ? sug.file || 'lines' : 'text'}${sug.startLine ? ` · ${linesLabel([sug.startLine, sug.endLine])}` : ''}</span></div>
     ${sug.mode === 'text' && oldLines.length === 1 && newLines.length === 1
       ? html`<${WordDiff} before=${sug.old} after=${sug.new} class="mono" />`
       : html`<pre class="diff-lines">${oldLines.map((l) => html`<span class="del">- ${l}\n</span>`)}${newLines.map((l) => html`<span class="ins">+ ${l}\n</span>`)}</pre>`}
