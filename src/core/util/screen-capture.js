@@ -66,10 +66,21 @@ export async function captureScreenRegion({
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'specreview-snip-'));
   const file = path.join(dir, 'snip.png');
   try {
-    const outcome = await runPicker(cmd, ['-i', '-x', file], { timeoutMs, env, signal });
+    const { outcome, code, stderr } = await runPicker(cmd, ['-i', '-x', file], { timeoutMs, env, signal });
     if (outcome !== 'exited') return null;
     let buf = await readNonEmpty(file);
-    if (!buf) return null; // Esc: nothing written
+    if (!buf) {
+      // Esc (or a click without a drag) ends the picker quietly. A failure says why on stderr: report it instead of
+      // passing it off as a cancel (most often a missing Screen Recording permission).
+      if (code !== 0 && stderr) {
+        throw new SpecReviewError(
+          `the screen capture failed: ${stderr}. If macOS blocked it, allow Screen Recording for the app that runs ` +
+            'SpecReview (System Settings > Privacy & Security > Screen & System Audio Recording) and try again',
+          { code: 'capture_failed', exit: EXIT.ERROR },
+        );
+      }
+      return null;
+    }
     let size = imageSize(buf);
     if (!size) throw new SpecReviewError('the screen capture is not a PNG or JPEG image', { code: 'capture_failed', exit: EXIT.ERROR });
     const tool = sips === undefined ? (override ? null : findSips()) : sips;
@@ -174,28 +185,34 @@ async function readNonEmpty(file) {
 }
 
 /**
- * Runs the picker to completion. 'exited' when it ended by itself (whatever its exit code), 'timeout' / 'aborted'
- * when it was killed. Spawn failures (missing / not executable command) reject with an 'unsupported' error.
+ * Runs the picker to completion. outcome 'exited' when it ended by itself (with its exit code and trimmed stderr),
+ * 'timeout' / 'aborted' when it was killed. Spawn failures (missing / not executable command) reject with an
+ * 'unsupported' error.
  * @param {string} cmd @param {string[]} args
  * @param {{ timeoutMs: number, env: Record<string, string | undefined>, signal?: AbortSignal }} o
- * @returns {Promise<'exited' | 'timeout' | 'aborted'>}
+ * @returns {Promise<{ outcome: 'exited' | 'timeout' | 'aborted', code: number | null, stderr: string }>}
  */
 function runPicker(cmd, args, { timeoutMs, env, signal }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      resolve('aborted');
+      resolve({ outcome: 'aborted', code: null, stderr: '' });
       return;
     }
     /** @type {import('node:child_process').ChildProcess} */
     let child;
     try {
-      child = spawn(cmd, args, { env: /** @type {NodeJS.ProcessEnv} */ (env), stdio: ['ignore', 'ignore', 'ignore'] });
+      child = spawn(cmd, args, { env: /** @type {NodeJS.ProcessEnv} */ (env), stdio: ['ignore', 'ignore', 'pipe'] });
     } catch (err) {
       reject(spawnError(cmd, err));
       return;
     }
     /** @type {'exited' | 'timeout' | 'aborted'} */
     let outcome = 'exited';
+    let stderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (/** @type {string} */ chunk) => {
+      if (stderr.length < 4096) stderr += chunk;
+    });
     let settled = false;
     /** @type {NodeJS.Timeout | null} */
     let hardKill = null;
@@ -220,11 +237,11 @@ function runPicker(cmd, args, { timeoutMs, env, signal }) {
       finish();
       reject(spawnError(cmd, err));
     });
-    child.once('close', () => {
+    child.once('close', (code) => {
       if (settled) return;
       settled = true;
       finish();
-      resolve(outcome);
+      resolve({ outcome, code, stderr: stderr.trim().slice(0, 500) });
     });
   });
 }

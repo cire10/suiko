@@ -1,8 +1,9 @@
 // @ts-check
 // Pure, import-free helpers that derive what the UI shows from DocState (design 5.3 / 10.2 shapes): thread status
 // and anchor-state chips, panel filters and the Verify queue, document order, presence and review progress,
-// changes grouping, outline badges and the history timeline. No DOM and no store access, so the same functions
-// run in the browser and in Node tests.
+// changes grouping, outline badges and the history timeline; plus shortcut labels and key-combo classification
+// (app-level Cmd/Ctrl combos, single-character keys) and the command palette's fuzzy search. No DOM and no store
+// access, so the same functions run in the browser and in Node tests.
 
 /** @typedef {any} DocState */
 /** @typedef {any} Thread */
@@ -395,15 +396,25 @@ export function blockingOpen(ds) {
 
 /**
  * The verdict the Submit dialog starts with: "Request changes" when the review carries a blocking comment (a
- * blocking new thread, or a reopen of a blocking thread), else "Comment".
+ * blocking new thread, or a reopen of a blocking thread), else `otherwise` (the reviewer's Settings choice,
+ * "Comment" by default).
  * @param {DocState} ds
+ * @param {'comment'|'changes_requested'} [otherwise]
  * @returns {'changes_requested'|'comment'}
  */
-export function defaultVerdict(ds) {
+export function defaultVerdict(ds, otherwise = 'comment') {
   const threads = ds?.threads || [];
   const blocking = (ds?.drafts?.items || []).some((/** @type {any} */ d) => (d.kind === 'thread' && d.severity === 'blocking')
     || (d.kind === 'reply' && d.reopen && threads.some((/** @type {any} */ t) => t.id === d.thread && t.severity === 'blocking')));
-  return blocking ? 'changes_requested' : 'comment';
+  return blocking ? 'changes_requested' : otherwise === 'changes_requested' ? 'changes_requested' : 'comment';
+}
+
+/**
+ * What to tell the agent after submitting when it is not listening (Submit dialog, Settings, command palette).
+ * @param {DocState} ds
+ */
+export function agentPrompt(ds) {
+  return `Run \`specreview feedback ${ds?.doc?.id ?? ''}\` and address it.`;
 }
 
 /** Threads an Approve with "resolve addressed" would resolve. @param {DocState} ds */
@@ -861,13 +872,286 @@ export function attachmentName(path) {
  * @param {{ compact?: boolean }} [opts]
  */
 export function keyLabel(combo, mac, opts = {}) {
-  const MAC = /** @type {Record<string, string>} */ ({ mod: '⌘', shift: '⇧', alt: '⌥', enter: '↵', esc: 'Esc' });
+  const MAC = /** @type {Record<string, string>} */ ({ mod: '⌘', ctrl: '⌃', shift: '⇧', alt: '⌥', enter: '↵', esc: 'Esc' });
   const PC = /** @type {Record<string, string>} */ (opts.compact
-    ? { mod: 'Ctrl', shift: '⇧', alt: 'Alt', enter: '↵', esc: 'Esc' }
-    : { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', enter: 'Enter', esc: 'Esc' });
+    ? { mod: 'Ctrl', ctrl: 'Ctrl', shift: '⇧', alt: 'Alt', enter: '↵', esc: 'Esc' }
+    : { mod: 'Ctrl', ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', enter: 'Enter', esc: 'Esc' });
   const names = mac ? MAC : PC;
-  const parts = String(combo).split('+').filter(Boolean).map((p) => names[p.toLowerCase()] ?? p);
+  // 'mod+k' splits into ['mod', 'k']; 'mod++' would be ambiguous and is not used.
+  const raw = String(combo).split('+').filter(Boolean);
+  const modified = raw.length > 1;
+  const parts = raw.map((p, i) => {
+    const named = names[p.toLowerCase()];
+    if (named != null && (i < raw.length - 1 || p.length > 1)) return named;
+    // A letter after a modifier is written in capitals, like menus do ('⌘K', 'Ctrl+K').
+    return modified && i === raw.length - 1 && /^[a-z]$/.test(p) ? p.toUpperCase() : p;
+  });
   return parts.join(mac ? '' : '+');
+}
+
+/**
+ * Whether a shortcut combo is a single-character key (letters, digits, punctuation, with or without Shift): the
+ * shortcuts the reviewer can switch off in Settings. Esc, Enter and anything with Cmd / Ctrl / Alt are not.
+ * @param {string} combo e.g. 'c', 'shift+B', '?', 'mod+k', 'esc'
+ */
+export function isSingleKeyCombo(combo) {
+  const parts = String(combo).split('+').filter(Boolean);
+  const key = parts[parts.length - 1] || '';
+  if (parts.slice(0, -1).some((p) => p.toLowerCase() !== 'shift')) return false;
+  return key.length === 1;
+}
+
+/**
+ * The app-level combo a key press is, if any: Mod+K (command palette), Mod+, (settings), Mod+/ (keyboard
+ * shortcuts; also Mod+? where '/' needs Shift). Mod is Cmd or Ctrl on every platform (Ctrl is the macOS fallback for
+ * hosts that keep the Cmd combos for themselves); Alt must not be held (AltGr characters on Windows). Shift+Mod+K is
+ * not the palette. Caps Lock reports 'K' without Shift.
+ * @param {{ key: string, meta?: boolean, ctrl?: boolean, shift?: boolean, alt?: boolean }} k
+ * @returns {'palette'|'settings'|'help'|null}
+ */
+export function appCombo(k) {
+  if (!k || !(k.meta || k.ctrl) || k.alt) return null;
+  const key = String(k.key || '');
+  if ((key === 'k' || key === 'K') && !k.shift) return 'palette';
+  if (key === ',') return 'settings';
+  if (key === '/' || key === '?') return 'help';
+  return null;
+}
+
+// ------------------------------------------------------------------------------------------------ palette search
+
+/** Characters after which a match starts a "word" (bonus). */
+const WORD_SEP = /[\s\-_/.:,;()[\]{}§·—–"'“”‘’<>|+…#@]/;
+const FZ = Object.freeze({
+  base: 1, first: 10, word: 8, camel: 7, digit: 4, consec: 5, gap: 0.6, lead: 0.2, leadMax: 3, prefix: 25, substring: 10,
+  skip: 2,
+});
+
+/**
+ * Fuzzy subsequence match of `query` in `text` (case-insensitive), scored like fuzzy finders do: every matched
+ * character scores, more at the start of the text, at a word start (after a space or punctuation, or a camelCase
+ * hump) and right after the previous match; skipped characters cost a little, and so does starting late. A text that
+ * starts with the query, or contains it, gets a bonus. The best alignment is found by dynamic programming (titles are
+ * short), so 'gt' in 'Go to thread' matches the word starts g and t.
+ * After a gap, the next letter must start a word, or be in the same word as the previous match (an abbreviation,
+ * which costs a little more): 'stng' finds 'settings' and 'kbd' 'Keyboard', but 'mode' does not find 'comment ·
+ * Rollout — load test' (letters from the middle of four different words). The first letter may be anywhere.
+ * @param {string} query
+ * @param {string} text
+ * @returns {{ score: number, positions: number[] } | null} positions: indexes in `text` of the matched characters
+ */
+export function fuzzyMatch(query, text) {
+  const q = String(query ?? '').toLowerCase();
+  const t = String(text ?? '');
+  const tl = t.toLowerCase();
+  const n = q.length;
+  const m = t.length;
+  if (!n) return { score: 0, positions: [] };
+  if (n > m || tl.length !== m) return null; // (lowercasing changed the length: no reliable positions)
+  let k = 0;
+  for (let j = 0; j < m && k < n; j++) if (tl[j] === q[k]) k++;
+  if (k < n) return null;
+  const bonus = new Float64Array(m);
+  const boundary = new Uint8Array(m);
+  // word[j]: which word character j belongs to (a new one starts at every word start).
+  const word = new Int32Array(m);
+  for (let j = 0; j < m; j++) {
+    const b = charBonus(t, j);
+    bonus[j] = FZ.base + b;
+    boundary[j] = b > 0 ? 1 : 0;
+    word[j] = j === 0 ? 0 : word[j - 1] + boundary[j];
+  }
+  const NEG = -1e9;
+  let prev = new Float64Array(m).fill(NEG);
+  /** @type {Int32Array[]} */
+  const back = [];
+  for (let i = 0; i < n; i++) {
+    const cur = new Float64Array(m).fill(NEG);
+    const bk = new Int32Array(m).fill(-1);
+    // Over p <= j-2, of prev[p] - gap * (j - 1 - p) (the best earlier match with a gap before j): any p (allowed
+    // when j starts a word), and p in j's own word (allowed anywhere).
+    let gAny = NEG;
+    let gAnyArg = -1;
+    let gWord = NEG;
+    let gWordArg = -1;
+    for (let j = 0; j < m; j++) {
+      if (i > 0 && j >= 2) {
+        const cand = prev[j - 2] - FZ.gap;
+        gAny -= FZ.gap;
+        if (cand > gAny) {
+          gAny = cand;
+          gAnyArg = j - 2;
+        }
+        if (word[j - 1] !== word[j]) {
+          gWord = NEG;
+          gWordArg = -1;
+        } else {
+          gWord -= FZ.gap;
+          if (word[j - 2] === word[j] && cand > gWord) {
+            gWord = cand;
+            gWordArg = j - 2;
+          }
+        }
+      }
+      if (j < i || tl[j] !== q[i]) continue;
+      if (i === 0) {
+        cur[j] = bonus[j] - Math.min(j * FZ.lead, FZ.leadMax);
+        continue;
+      }
+      let s = NEG;
+      let p = -1;
+      if (prev[j - 1] > NEG / 2) {
+        s = prev[j - 1] + FZ.consec;
+        p = j - 1;
+      }
+      const g = boundary[j] ? gAny : gWord - FZ.skip;
+      if (g > NEG / 2 && g > s) {
+        s = g;
+        p = boundary[j] ? gAnyArg : gWordArg;
+      }
+      if (p < 0) continue;
+      cur[j] = s + bonus[j];
+      bk[j] = p;
+    }
+    back.push(bk);
+    prev = cur;
+  }
+  let end = -1;
+  let best = NEG;
+  for (let j = 0; j < m; j++) {
+    if (prev[j] > best) {
+      best = prev[j];
+      end = j;
+    }
+  }
+  if (end < 0 || best <= NEG / 2) return null;
+  const positions = new Array(n);
+  for (let i = n - 1, j = end; i >= 0; i--) {
+    positions[i] = j;
+    j = back[i][j];
+  }
+  const at = tl.indexOf(q);
+  const extra = at === 0 ? FZ.prefix : at > 0 ? FZ.substring + (WORD_SEP.test(t[at - 1]) ? 5 : 0) : 0;
+  return { score: best + extra, positions };
+}
+
+/** @param {string} t @param {number} j */
+function charBonus(t, j) {
+  if (j === 0) return FZ.first;
+  const prev = t[j - 1];
+  const c = t[j];
+  if (WORD_SEP.test(prev)) return FZ.word;
+  if (prev !== prev.toUpperCase() && c !== c.toLowerCase()) return FZ.camel;
+  if (/\d/.test(c) && !/\d/.test(prev)) return FZ.digit;
+  return 0;
+}
+
+/**
+ * @typedef {object} SearchRow  what the command palette matches a query against
+ * @property {string} title shown, and highlighted where it matched
+ * @property {string} [description]
+ * @property {string} [category]
+ * @property {string[]} [keywords] extra words that find the row (synonyms, a thread's comment text)
+ * @property {string[]} [exact] queries that put the row first ('t4' for thread t4, 'v2' for version 2)
+ */
+
+/**
+ * Scores a palette row for a query (null: no match). The whole query is fuzzy-matched against the title; besides,
+ * each word of the query may match the title (fuzzy) or the keywords / description / category (as a word or a
+ * substring), in any order, so 'approve submit' finds 'Submit review as Approve' and words of a comment find its
+ * thread. An `exact` hit ranks first.
+ * @param {string} query
+ * @param {SearchRow} row
+ * @returns {{ score: number, positions: number[] } | null} positions: matched characters of the title
+ */
+export function matchRow(query, row) {
+  const q = normWs(query).toLowerCase();
+  if (!q) return { score: 0, positions: [] };
+  const title = String(row.title ?? '');
+  if ((row.exact || []).some((e) => String(e).toLowerCase() === q)) {
+    const at = title.toLowerCase().indexOf(q);
+    return { score: 1000, positions: at < 0 ? [] : Array.from({ length: q.length }, (_, i) => at + i) };
+  }
+  /** @type {Array<{ score: number, positions: number[] }>} */
+  const found = [];
+  const whole = fuzzyMatch(q, title);
+  if (whole) found.push(whole);
+  const tokens = q.split(' ');
+  const other = [...(row.keywords || []), row.description || '', row.category || ''].join(' ').toLowerCase();
+  let score = 0;
+  const pos = new Set();
+  let all = true;
+  for (const tok of tokens) {
+    const f = tokens.length > 1 || !whole ? fuzzyMatch(tok, title) : whole;
+    const at = wordAt(other, tok);
+    const kw = at < 0 ? null : (at === 0 || WORD_SEP.test(other[at - 1]) ? 6 : 2) + tok.length * 1.5;
+    if (f && (kw == null || f.score >= kw)) {
+      score += f.score;
+      for (const p of f.positions) pos.add(p);
+    } else if (kw != null) {
+      score += kw;
+    } else {
+      all = false;
+      break;
+    }
+  }
+  if (all && (tokens.length > 1 || !whole)) found.push({ score: score - 2, positions: [...pos].sort((a, b) => a - b) });
+  if (!found.length) return null;
+  return found.reduce((a, b) => (b.score > a.score ? b : a));
+}
+
+/** Index of `word` in `text`, preferring an occurrence at a word start; -1 when absent. @param {string} text @param {string} word */
+function wordAt(text, word) {
+  let first = -1;
+  for (let i = text.indexOf(word); i >= 0; i = text.indexOf(word, i + 1)) {
+    if (i === 0 || WORD_SEP.test(text[i - 1])) return i;
+    if (first < 0) first = i;
+  }
+  return first;
+}
+
+/**
+ * Splits a text into plain and matched runs for highlighting.
+ * @param {string} text
+ * @param {number[]} positions sorted indexes of matched characters
+ * @returns {Array<{ text: string, hit: boolean }>}
+ */
+export function highlightParts(text, positions) {
+  const t = String(text ?? '');
+  const hits = new Set(positions || []);
+  /** @type {Array<{ text: string, hit: boolean }>} */
+  const out = [];
+  for (let i = 0; i < t.length; i++) {
+    const hit = hits.has(i);
+    const last = out[out.length - 1];
+    if (last && last.hit === hit) last.text += t[i];
+    else out.push({ text: t[i], hit });
+  }
+  return out;
+}
+
+const THREAD_TYPE = /** @type {Record<string, string>} */ ({
+  comment: 'comment', question: 'question', suggestion: 'suggestion', 'agent-question': 'agent question',
+});
+
+/**
+ * The "Go to thread" row of a thread or new-thread draft (a panelItems entry):
+ * 't4 · comment · §3.2 Token refresh — first words of the comment'.
+ * @param {{ kind: 'thread'|'draft', id: string, item: any, anchor: Anchor|null }} it
+ * @returns {{ title: string, body: string }} body: the whole first comment (for search)
+ */
+export function threadRowTitle(it) {
+  const t = it.item || {};
+  const type = THREAD_TYPE[t.type] || 'comment';
+  const a = it.anchor;
+  const section = a && a.kind !== 'doc' ? sectionTail(a.section) : '';
+  const where = section ? `§${section}` : targetLabel(a) || 'document';
+  const body = it.kind === 'draft'
+    ? String(t.body || t.suggestion?.new || '')
+    : String((t.comments || [])[0]?.body || t.suggestion?.new || '');
+  const words = clip(body.replace(/[*_`#>[\]]+/g, ''), 60).replace(/\s+…$/, '…');
+  const title = `${it.id} · ${it.kind === 'draft' ? `draft ${type}` : type} · ${where}${words ? ` — ${words}` : ''}`;
+  return { title, body: normWs(body).slice(0, 400) };
 }
 
 // ------------------------------------------------------------------------------------------------ unsaved input

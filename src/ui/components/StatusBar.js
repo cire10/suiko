@@ -3,9 +3,9 @@
 // FINAL badge.
 
 import { html } from 'preact-htm';
-import { setFilter, setMode } from '../actions.js';
+import { showThreads } from '../actions.js';
 import { isOutdated } from '../model.js';
-import { store, useStore } from '../state.js';
+import { useStore } from '../state.js';
 
 export function StatusBar() {
   const s = useStore((st) => ({
@@ -31,11 +31,7 @@ export function StatusBar() {
       : null}
     <span class=${ext || failedLocal ? 'warn-text' : ''} title=${[...(s.externals || []), ...(s.pageErrors?.resourcesFailed || [])].join('\n')}>
       ${ext || failedLocal ? `${ext + failedLocal} resource${ext + failedLocal === 1 ? '' : 's'} failed` : 'externals ok'}</span>
-    <button type="button" class=${`link-btn ${orphans ? 'warn-text' : ''}`} onClick=${() => {
-      if (s.mode !== 'review') setMode('review');
-      setFilter('outdated');
-      store.set({ sidebar: true, drawer: store.get().narrow ? true : store.get().drawer, sidePane: 'threads' });
-    }}>Orphans (${orphans})</button>
+    <button type="button" class=${`link-btn ${orphans ? 'warn-text' : ''}`} onClick=${() => showThreads('outdated', { review: true })}>Orphans (${orphans})</button>
     <span class="spacer"></span>
     <span>FINAL: ${final ? html`<strong class="ok-text">v${final.version}</strong>` : '-'}</span>
   </footer>`;

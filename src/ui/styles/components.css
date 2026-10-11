@@ -1,5 +1,5 @@
 /* Components: home list, outline rail, side panel tabs, thread panel and cards, composer, toasts, modal dialogs,
-   menus and the submit dialog. */
+   menus, the submit dialog, the command palette, settings and the keyboard shortcuts overlay. */
 
 /* ---------------------------------------------------------------- home */
 
@@ -30,6 +30,7 @@
 
 .home-tools {
   display: flex;
+  align-items: center;
   gap: 4px;
 }
 
@@ -1080,4 +1081,467 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ---------------------------------------------------------------- "Ask before Send now" (composer) */
+
+.confirm-send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+}
+
+/* ---------------------------------------------------------------- command palette */
+
+/* The top bar / home button: a search field look-alike with its key. */
+.palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.palette-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.palette-btn-kbd {
+  min-width: 0;
+  padding: 0 4px;
+  border-bottom-width: 1px;
+  font-family: var(--font);
+}
+
+.palette-backdrop {
+  padding-top: 12vh;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: min(560px, 76vh);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.palette-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px 0;
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+}
+
+.crumb {
+  border: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-muted);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: var(--fg);
+}
+
+.crumb-current {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: default;
+}
+
+.crumb-sep {
+  color: var(--fg-subtle);
+}
+
+.palette-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+input.palette-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+}
+
+input.palette-input:focus-visible {
+  outline: none;
+}
+
+.palette-esc {
+  font-family: var(--font);
+  color: var(--fg-muted);
+}
+
+.palette-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 6px 6px;
+}
+
+.palette-section-title {
+  padding: 8px 8px 4px;
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.palette-item.is-active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.palette-item.is-disabled {
+  cursor: default;
+}
+
+.palette-item.is-disabled .pi-title {
+  color: var(--fg-subtle);
+}
+
+.pi-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pi-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pi-title mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* The description fills what the title leaves, and keeps some room when the title is long (a thread's status). */
+.pi-desc {
+  flex: 1 1 0;
+  min-width: min(9em, 30%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+
+.pi-reason {
+  font-style: italic;
+}
+
+.pi-keys {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.pi-keys kbd {
+  font-family: var(--font);
+}
+
+.pi-more {
+  color: var(--fg-subtle);
+  flex: 0 0 auto;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 18px 10px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.palette-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.palette-foot kbd {
+  min-width: 1.3em;
+  margin-right: 2px;
+  font-family: var(--font);
+}
+
+/* ---------------------------------------------------------------- settings */
+
+.settings {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-section h3 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+
+.setting-text {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.setting-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+.setting-control {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+/* Segmented radio choice. */
+.seg-choice {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.seg-opt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  margin-left: -1px;
+  padding: 3px 10px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.seg-opt:first-child {
+  margin-left: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.seg-opt:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.seg-opt.on {
+  z-index: 1;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The radio covers its whole option (invisible), so a click anywhere on it is a click on the radio. */
+.seg-opt input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.seg-opt:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* On / off switch (a checkbox with role="switch"). */
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch input:checked + .switch-track .switch-thumb {
+  transform: translateX(16px);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.about {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.about dt {
+  color: var(--fg-muted);
+}
+
+.about dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.about-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.settings-foot {
+  margin: 14px 0 0;
+}
+
+/* ---------------------------------------------------------------- keyboard shortcuts overlay */
+
+.help-filter {
+  margin-bottom: 8px;
+}
+
+input.help-filter-input {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+}
+
+input.help-filter-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+  border-color: var(--focus);
+}
+
+.help-off {
+  margin: 0 0 8px;
+}
+
+.key-off {
+  color: var(--fg-subtle);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.help-foot {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-thumb {
+    transition: none;
+  }
 }

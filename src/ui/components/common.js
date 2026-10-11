@@ -1,8 +1,10 @@
 // @ts-check
 // Small shared building blocks: inline SVG icons (no icon font, no external requests), chips, a word-diff view and
-// an accessible modal (focus moved in on open, Tab kept inside, focus restored on close, Esc / backdrop close).
+// an accessible modal (focus moved in on open, Tab kept inside, focus restored on close, Esc / backdrop close). The
+// focus handling is a hook (useDialogFocus) the command palette shares; it runs as a layout effect, so keys typed
+// right after the key that opened a dialog land in it.
 
-import { html, useEffect, useRef } from 'preact-htm';
+import { html, useLayoutEffect, useRef } from 'preact-htm';
 import { wordParts } from '../util.js';
 
 const ICONS = /** @type {Record<string, string>} */ ({
@@ -24,6 +26,11 @@ const ICONS = /** @type {Record<string, string>} */ ({
   external: 'M14 4h6v6M20 4L10 14M18 14v6H4V6h6',
   scissors: 'M9 6a3 3 0 11-6 0 3 3 0 016 0zM9 18a3 3 0 11-6 0 3 3 0 016 0zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12',
   screen: 'M3 4h18v12H3zM8 20h8M12 16v4M7 8V7h2M17 8V7h-2M7 12v1h2M17 12v1h-2',
+  search: 'M10.5 4a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM20 20l-4.6-4.6',
+  gear: 'M19.26 10.56L21.93 10.82L21.93 13.18L19.26 13.44L18.15 16.11L19.85 18.19L18.19 19.85L16.11 18.15L13.44 19.26'
+    + 'L13.18 21.93L10.82 21.93L10.56 19.26L7.89 18.15L5.81 19.85L4.15 18.19L5.85 16.11L4.74 13.44L2.07 13.18L2.07 10.82'
+    + 'L4.74 10.56L5.85 7.89L4.15 5.81L5.81 4.15L7.89 5.85L10.56 4.74L10.82 2.07L13.18 2.07L13.44 4.74L16.11 5.85'
+    + 'L18.19 4.15L19.85 5.81L18.15 7.89zM12 9a3 3 0 100 6 3 3 0 000-6z',
 });
 
 /**
@@ -58,24 +65,25 @@ export function WordDiff({ before = '', after = '', parts, class: cls = '' }) {
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Modal dialog.
- * @param {{ title: string, onClose: () => void, testid?: string, wide?: boolean, children?: any, initialFocus?: string,
- *   class?: string }} props
+ * Focus handling of a modal dialog: moves the focus in when it opens (the `initialFocus` selector, else the first
+ * focusable element), gives it back to where it was when it closes (also the doc iframe, when a key forwarded from
+ * the doc opened it), and returns the keydown handler that keeps Tab inside.
+ * @param {{ current: HTMLElement|null }} ref the dialog element
+ * @param {string} [initialFocus]
+ * @returns {(ev: KeyboardEvent) => void}
  */
-export function Modal({ title, onClose, testid, wide = false, children, initialFocus, class: cls = '' }) {
-  const ref = useRef(/** @type {HTMLDivElement|null} */ (null));
-  useEffect(() => {
+export function useDialogFocus(ref, initialFocus) {
+  useLayoutEffect(() => {
     const prev = /** @type {HTMLElement|null} */ (document.activeElement);
     const root = ref.current;
     const first = root && /** @type {HTMLElement|null} */ (
       (initialFocus && root.querySelector(initialFocus)) || root.querySelector(FOCUSABLE));
     first?.focus();
     return () => {
-      if (prev && document.contains(prev)) prev.focus();
+      if (prev && prev !== document.body && document.contains(prev)) prev.focus();
     };
   }, []);
-  /** @param {KeyboardEvent} ev */
-  const onKeyDown = (ev) => {
+  return (ev) => {
     if (ev.key !== 'Tab' || !ref.current) return;
     const items = /** @type {HTMLElement[]} */ ([...ref.current.querySelectorAll(FOCUSABLE)]).filter((el) => el.offsetParent !== null);
     if (!items.length) return;
@@ -88,6 +96,21 @@ export function Modal({ title, onClose, testid, wide = false, children, initialF
       ev.preventDefault();
       first.focus();
     }
+  };
+}
+
+/**
+ * Modal dialog.
+ * @param {{ title: string, onClose: () => void, testid?: string, wide?: boolean, children?: any, initialFocus?: string,
+ *   class?: string, onKeyDown?: (ev: KeyboardEvent) => void }} props onKeyDown: also sees the dialog's keys
+ */
+export function Modal({ title, onClose, testid, wide = false, children, initialFocus, class: cls = '', onKeyDown: onKey }) {
+  const ref = useRef(/** @type {HTMLDivElement|null} */ (null));
+  const trapTab = useDialogFocus(ref, initialFocus);
+  /** @param {KeyboardEvent} ev */
+  const onKeyDown = (ev) => {
+    onKey?.(ev);
+    trapTab(ev);
   };
   return html`<div class="modal-backdrop" onMouseDown=${(/** @type {MouseEvent} */ e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div ref=${ref} class=${`modal ${wide ? 'modal-wide' : ''} ${cls}`.trim()} role="dialog" aria-modal="true" aria-label=${title}

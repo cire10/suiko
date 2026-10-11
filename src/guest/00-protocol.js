@@ -58,6 +58,7 @@ const MSG = Object.freeze({
   REVEAL: 'reveal',
   CLEAR_SELECTION: 'clearSelection',
   SET_HIDDEN: 'setHidden',
+  SET_PREFS: 'setPrefs',       // {singleKeys: boolean} (also INIT.prefs); false: c s q a / b are forwarded, not acted on
 });
 
 /** Snips: drag a box over any area of the doc (protocol.js SNIP; the SnipCapture shape is documented there). */

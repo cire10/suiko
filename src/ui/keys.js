@@ -1,10 +1,15 @@
 // @ts-check
-// Keyboard map (design 11.8, amendments 7).
+// Keyboard map (design 11.8, amendments 7). What each key does is listed in the command registry (commands.js),
+// which the keyboard shortcuts overlay and the command palette read; handleKey implements the keys.
 //
 // Keys come from two places:
-//   - keydown in the UI document (ignored while typing in an input / textarea, except Esc and Cmd+Shift+Enter;
-//     the composer and reply boxes handle their own Cmd+Enter, Cmd+Shift+Enter and Esc);
+//   - keydown in the UI document (ignored while typing in an input / textarea, except Esc, Cmd+Shift+Enter and the
+//     app-level combos below; the composer and reply boxes handle their own Cmd+Enter, Cmd+Shift+Enter and Esc);
 //   - `key` messages forwarded by the guest while focus is inside the doc iframe.
+// App-level combos work everywhere, also while typing (a composer keeps its text): Cmd/Ctrl+K toggles the command
+// palette, Cmd/Ctrl+, Settings, Cmd/Ctrl+/ the keyboard shortcuts (also `?`). Ctrl works on macOS too, because some
+// hosts (Safari, the Claude desktop app) keep the Cmd combos for themselves. The browser's own action for these
+// combos is prevented. Dialogs are exclusive, and Esc closes the one that is open.
 // Forwarded keys may only trigger non-mutating actions (navigation, opening a composer, toggling panels). So x / o /
 // y (resolve, reopen, accept a decline), Cmd+Enter (add a draft) and Send now are honoured only from the UI itself.
 // b (snip an area of the doc) and Shift+B (snip the screen) work from both: they only start a capture the reviewer
@@ -14,15 +19,22 @@
 // c / s / q / a typed in the doc with a selection are handled by the guest, which posts `action` (like its toolbar)
 // instead of forwarding the key; a forwarded key that still races such an action for the same selection is dropped
 // by openComposer (same capture and type within DUPLICATE_OPEN_MS), so the composer never opens twice.
+// Single-character shortcuts (letters, digits, punctuation, with or without Shift) can be switched off in Settings
+// (prefs.singleKeys): they then do nothing, from the UI or the doc (the guest is told too, so it stops acting on
+// c / s / q / a / b itself); Esc, the Cmd/Ctrl combos, the buttons and the palette keep working.
 
 import {
-  closeDialog, cancelComposer, cancelReply, clearFocus, cycleTheme, navChange, navThread, openComposer, openSubmit,
-  resolveThread, setFilter, setKeyForwarder, setMode, setTool, snipScreen, startReply, stepVersion, submitComposer,
-  toast, toggleBaseKind, toggleHidden, togglePick, toggleSidebar, toggleSnip, unresolveThread,
+  closeDialog, cancelComposer, cancelReply, clearFocus, cycleTheme, navChange, navThread, openDialog, openSubmit,
+  acceptDecline, acceptFocused, focusedThread, reopenFocused, selectionAction, setKeyForwarder, setMode, setTool,
+  showThreads, snipScreen, startReply, stepVersion, submitComposer, toggleBaseKind, toggleDialog, toggleHidden,
+  togglePick, toggleSidebar, toggleSnip,
 } from './actions.js';
-import { canSendNow, isComposerDirty, isReplyDirty, keyLabel } from './model.js';
+import { helpGroups, KEYS } from './commands.js';
+import { appCombo, canSendNow, isComposerDirty, isReplyDirty, keyLabel } from './model.js';
 import { store } from './state.js';
 import { IS_MAC, isEditable } from './util.js';
+
+export { KEYS };
 
 /**
  * A shortcut as this platform shows it ('mod+shift+enter' -> '⌘⇧↵' on a Mac, 'Ctrl+Shift+Enter' elsewhere;
@@ -32,67 +44,8 @@ import { IS_MAC, isEditable } from './util.js';
  */
 export const shortcut = (combo, opts) => keyLabel(combo, IS_MAC, opts);
 
-/** The shortcuts shown on buttons (titles and kbd hints) and in the help; handleKey implements them. */
-export const KEYS = Object.freeze({
-  snip: 'b',
-  snipScreen: 'shift+B',
-  pick: 'e',
-  add: 'mod+enter',
-  sendNow: 'mod+shift+enter',
-  submit: 'f',
-  cancel: 'esc',
-});
-
-/**
- * @typedef {{ keys: string[], label: string, id?: string }} KeyRow  keys: combos for keyLabel (shown one per <kbd>)
- * @typedef {{ group: string, rows: KeyRow[] }} KeyGroup
- */
-
-/** Shown by the help overlay, grouped (keep in sync with handleKey). @type {readonly KeyGroup[]} */
-export const KEYMAP = Object.freeze([
-  {
-    group: 'Comment',
-    rows: [
-      { keys: ['c', 's', 'q', 'a'], label: 'Comment, suggest, question, or mark agreed on the selected text' },
-      { id: 'snip', keys: [KEYS.snip], label: 'Snip an area of the document: drag a box over text, images or diagrams, then comment (Esc cancels)' },
-      { id: 'snip-screen', keys: [KEYS.snipScreen], label: 'Snip anywhere on your screen (macOS picker), then comment on the screenshot' },
-      { keys: [KEYS.pick], label: 'Pick an image, diagram, table or code block ([ ] parent / child, Shift-drag a region, Esc exits)' },
-      { id: 'add', keys: [KEYS.add], label: 'Add the comment to the review (in the composer)' },
-      { id: 'send-now', keys: [KEYS.sendNow], label: 'Send now: this comment alone, right away (in the composer)' },
-    ],
-  },
-  {
-    group: 'Review',
-    rows: [
-      { id: 'submit', keys: [KEYS.submit, KEYS.sendNow], label: 'Submit review: everything in it (the second key while no new comment is open)' },
-      { keys: ['r'], label: 'Reply to the focused thread' },
-      { keys: ['x'], label: 'Resolve / accept the focused thread' },
-      { keys: ['o'], label: 'Reopen the focused thread' },
-      { keys: ['y'], label: 'Accept a decline' },
-      { keys: ['v'], label: 'Verify queue' },
-    ],
-  },
-  {
-    group: 'Navigate',
-    rows: [
-      { keys: ['j', 'k'], label: 'Next / previous thread' },
-      { keys: ['n', 'p'], label: 'Next / previous change' },
-      { keys: ['1', '2', '3', '4'], label: 'Review / Changes / Source / History' },
-      { keys: ['[', ']'], label: 'Previous / next version' },
-      { keys: ['d'], label: 'Toggle the base: your last review / previous version' },
-    ],
-  },
-  {
-    group: 'View',
-    rows: [
-      { keys: ['h'], label: 'Hide all annotations (clean read)' },
-      { keys: ['\\'], label: 'Toggle the thread panel' },
-      { keys: ['t'], label: 'Cycle theme (system, light, dark)' },
-      { keys: ['?'], label: 'This help' },
-      { keys: [KEYS.cancel], label: 'Close or cancel' },
-    ],
-  },
-]);
+/** The keyboard shortcuts overlay's groups, generated from the command registry. */
+export const KEYMAP = Object.freeze(helpGroups());
 
 const MODES = /** @type {const} */ (['review', 'changes', 'source', 'history']);
 
@@ -108,15 +61,17 @@ export function handleKey(k, fromGuest) {
   const key = String(k.key || '');
   const mod = !!(k.meta || k.ctrl);
 
-  if (s.dialog === 'help') {
-    if (key === 'Escape' || key === '?') {
+  const app = appCombo(k);
+  if (app) {
+    toggleDialog(app);
+    return true;
+  }
+  if (s.dialog) {
+    if (key === 'Escape') {
       closeDialog();
       return true;
     }
-    return false;
-  }
-  if (s.dialog === 'submit' || s.dialog === 'image') {
-    if (key === 'Escape') {
+    if (s.dialog === 'help' && key === '?' && !mod && !k.alt && s.prefs.singleKeys) {
       closeDialog();
       return true;
     }
@@ -135,8 +90,15 @@ export function handleKey(k, fromGuest) {
   }
   if (mod || k.alt) return false;
   if (key === 'Escape') return escape(fromGuest);
+  // Every other key handled below is a single character: off with the Settings switch.
+  if (!s.prefs.singleKeys && key.length === 1) return false;
   if (key === '?') {
-    store.set({ dialog: 'help' });
+    openDialog('help');
+    return true;
+  }
+  if (key === 't') {
+    // Also on the doc list.
+    cycleTheme();
     return true;
   }
   if (s.route.view !== 'doc' || !s.ds) return false;
@@ -178,9 +140,7 @@ export function handleKey(k, fromGuest) {
     case 'y':
       return !fromGuest && acceptDecline();
     case 'v':
-      if (s.mode !== 'review') setMode('review');
-      setFilter('verify');
-      store.set({ sidePane: 'threads', drawer: s.narrow ? true : s.drawer, sidebar: true });
+      showThreads('verify', { review: true });
       return true;
     case 'f':
       openSubmit();
@@ -208,61 +168,9 @@ export function handleKey(k, fromGuest) {
     case '\\':
       toggleSidebar();
       return true;
-    case 't':
-      cycleTheme();
-      return true;
     default:
       return false;
   }
-}
-
-/** c / s / q / a on the current selection (doc selection, or selected lines in Source mode). @param {string} key */
-function selectionAction(key) {
-  const s = store.get();
-  const action = /** @type {Record<string, string>} */ ({ c: 'comment', s: 'suggest', q: 'question', a: 'agree' })[key];
-  if (s.mode === 'source') {
-    if (s.sourceSel && key === 'c') {
-      openComposer({ capture: { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to }, action });
-    } else if (key === 'c') {
-      toast('Click a line number (shift-click for a range), then press C.', { timeout: 3000 });
-    }
-    return true;
-  }
-  if (s.mode === 'history') return false;
-  const capture = s.guest.selection;
-  if (!capture) {
-    toast('Select text in the document first, press b to snip any area of it, or e to pick an image, diagram, table or code block.', { timeout: 3500 });
-    return true;
-  }
-  openComposer({ capture, action });
-  return true;
-}
-
-function focusedThread() {
-  const s = store.get();
-  return (s.ds?.threads || []).find((/** @type {any} */ t) => t.id === s.focusedId) || null;
-}
-
-function acceptFocused() {
-  const t = focusedThread();
-  if (!t || t.status === 'resolved') return false;
-  resolveThread(t.id);
-  return true;
-}
-
-function reopenFocused() {
-  const t = focusedThread();
-  if (!t) return false;
-  if (t.status === 'resolved') unresolveThread(t.id);
-  else startReply(t.id, { reopen: true });
-  return true;
-}
-
-function acceptDecline() {
-  const t = focusedThread();
-  if (!t || t.status !== 'declined') return false;
-  resolveThread(t.id);
-  return true;
 }
 
 /**
@@ -304,11 +212,31 @@ function escape(fromGuest) {
   return false;
 }
 
+/** The Latin character of the physical keys of the app-level combos (keyboard layouts without Latin letters). */
+const APP_CODES = /** @type {Record<string, string>} */ ({ KeyK: 'k', Comma: ',', Slash: '/' });
+
+/** @param {KeyboardEvent} ev @returns {KeyInput} */
+function keyInput(ev) {
+  let key = ev.key;
+  // Cmd+K on a Cyrillic / Greek / Hebrew layout types a non-Latin character: match the app combos by physical key
+  // then (never for a Latin character, so Cmd+- on a German keyboard, physically 'Slash', stays zoom out).
+  if ((ev.metaKey || ev.ctrlKey) && key && key.length === 1 && !/^[\x20-\x7e]$/.test(key) && APP_CODES[ev.code]) {
+    key = APP_CODES[ev.code];
+  }
+  return { key, meta: ev.metaKey, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey };
+}
+
 /** @param {KeyboardEvent} ev */
 function onKeyDown(ev) {
   if (ev.defaultPrevented || ev.isComposing) return;
+  const k = keyInput(ev);
+  if (appCombo(k)) {
+    // Global, also while typing in a field; an auto-repeat only keeps the browser from acting.
+    ev.preventDefault();
+    if (!ev.repeat) handleKey(k, false);
+    return;
+  }
   if (ev.repeat && !['j', 'k', 'n', 'p'].includes(ev.key)) return;
-  const k = { key: ev.key, meta: ev.metaKey, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey };
   if (isEditable(ev.target)) {
     const submitCombo = (k.meta || k.ctrl) && k.shift && k.key === 'Enter';
     if (k.key !== 'Escape' && !submitCombo) return;

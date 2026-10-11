@@ -53,6 +53,17 @@ describe('captureScreenRegion with a fake picker', () => {
     assert.equal(await captureScreenRegion({ env: { SPECREVIEW_SCREENCAPTURE: fake.command('cancel0') } }), null);
   });
 
+  test('a failing picker (no file, non-zero exit, stderr) is reported, not passed off as a cancel', async () => {
+    const script = path.join(TMP, 'failing-capture.sh');
+    fs.writeFileSync(script, '#!/bin/sh\necho "could not create image from display" >&2\nexit 1\n', { mode: 0o755 });
+    await assert.rejects(captureScreenRegion({ env: { SPECREVIEW_SCREENCAPTURE: script } }), (/** @type {any} */ err) => {
+      assert.equal(err.code, 'capture_failed');
+      assert.match(err.message, /could not create image from display/);
+      assert.match(err.message, /Screen Recording/);
+      return true;
+    });
+  });
+
   test('timeout: the picker is killed and the capture is null', async () => {
     const t0 = Date.now();
     const shot = await captureScreenRegion({ env: { SPECREVIEW_SCREENCAPTURE: fake.command('hang') }, timeoutMs: 300 });

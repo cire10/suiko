@@ -3,8 +3,9 @@
 // On DOMContentLoaded (or immediately when the bundle runs later) the guest mounts the overlay, registers the layout
 // and DOM-change hooks in a fixed order, starts listening, opens the channel and posts `hello` to the allowed UI
 // origins. After the UI connects, it posts `ready {outline, features, externalsFailed}` and then reacts to UI
-// messages (init, setTargets, setChanges, focus, scrollTo, setTool, setTheme, reveal, clearSelection, setHidden).
-// setTool switches between the exclusive tools: 'select', 'pick' (60-picker.js) and 'snip' (65-snip.js).
+// messages (init, setTargets, setChanges, focus, scrollTo, setTool, setTheme, reveal, clearSelection, setHidden,
+// setPrefs). setTool switches between the exclusive tools: 'select', 'pick' (60-picker.js) and 'snip' (65-snip.js).
+// setPrefs {singleKeys} (also init.prefs) switches the guest's own single-key shortcuts on or off (85-keys.js).
 // After every layout pass it posts `positions` when they changed (scroll-only changes are throttled to 100 ms), and
 // when scrolling settles it posts `scroll {topSrid, offset}`.
 //
@@ -204,6 +205,7 @@ const Main = (() => {
     setMode(d.mode);
     applyTheme(d.theme);
     setHidden(!!d.hidden);
+    if (d.prefs) Keys.setPrefs(d.prefs); // absent: keep the current preferences
     Targets.set(targetsOf(d));
     Targets.setActive(d.activeId == null ? null : String(d.activeId));
     ChangesOverlay.set(d.changes || null);
@@ -229,6 +231,7 @@ const Main = (() => {
   });
   Channel.on(MSG.CLEAR_SELECTION, () => SelectionCapture.clear());
   Channel.on(MSG.SET_HIDDEN, (d) => setHidden(!!d.hidden));
+  Channel.on(MSG.SET_PREFS, (d) => Keys.setPrefs(d));
 
   /** Closes the "removed content" popover on a click anywhere in the page. @param {PointerEvent} ev */
   function closePopoverOnOutside(ev) {
@@ -295,6 +298,7 @@ const Main = (() => {
       selection: SelectionCapture.current,
       pageErrors: PageErrors.snapshot(),
       navigation: NavGuard.debug(),
+      prefs: Keys.prefs,
     }),
     /** Recomputes the selection capture immediately and returns it. */
     captureSelection: () => SelectionCapture.flush(),

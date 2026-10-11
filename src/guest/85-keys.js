@@ -19,12 +19,36 @@
 // Likewise `b` (also 'B' without Shift, i.e. Caps Lock) toggles snip mode in the guest (65-snip.js posts
 // toolChanged {tool:'snip'} / {tool:'select'}) and is not forwarded; it is forwarded only when snips are not allowed
 // (readonly). Shift+B (snip the screen, a daemon job) is always forwarded as a normal key.
+// Both exceptions are single-key shortcuts the reviewer can turn off: after `setPrefs {singleKeys:false}` (or INIT
+// with prefs {singleKeys:false}) the guest acts on none of these keys and forwards them like any other key (the UI
+// then ignores them). The mini-toolbar, and pick / snip started from the UI (setTool), keep working.
+//
+// App-level combos — Mod+K (command palette), Mod+, (settings), Mod+/ (keyboard shortcuts), where Mod is Cmd or Ctrl
+// on every platform (Ctrl is the macOS fallback for hosts that reserve the Cmd combos) and Alt is not held (so
+// AltGr characters typed on Windows are never taken) — are global, so they are forwarded EVEN with focus in an
+// editable element of the document, and the guest calls preventDefault() on them so the browser does not act
+// (Ctrl+K would focus the address bar). They are matched by the character typed; on layouts whose keys do not type
+// Latin characters (Cyrillic, Greek, Hebrew...) by the physical key (KeyK, Comma, Slash), and the Latin character is
+// forwarded so the UI recognises the combo. Matching the physical key only for non-ASCII characters keeps e.g.
+// Cmd+- on a German keyboard (physical 'Slash') as zoom out. The page still has the first say: the decision is made
+// by a one-shot window listener appended while the event is in its capture phase, so it runs after every page
+// handler (capture or bubble, on any node including window, whenever registered). If one of them prevented the
+// default or stopped propagation, the page keeps the key. Same other rules: trusted, not composing, not before the
+// UI is connected; an auto-repeat is default-prevented but not forwarded again.
 
 const Keys = (() => {
   /** Keys that act on the current text selection like the mini-toolbar buttons (same map as src/ui/keys.js). */
   const SELECTION_KEYS = /** @type {Record<string, string>} */ (Object.freeze({
     c: 'comment', s: 'suggest', q: 'question', a: 'agree',
   }));
+
+  /** App-level combos by the character typed ('K': Shift or Caps Lock; the UI decides on Shift). */
+  const APP_KEYS = Object.freeze(['k', 'K', ',', '/']);
+  /** ...and by physical key, only when the character is not ASCII (non-Latin layouts). */
+  const APP_CODES = /** @type {Record<string, string>} */ (Object.freeze({ KeyK: 'k', Comma: ',', Slash: '/' }));
+
+  /** Reviewer preferences pushed by the UI (setPrefs / init.prefs). */
+  const prefs = { singleKeys: true };
 
   /** `b` without Shift (Caps Lock reports 'B'): snip the document. @param {{key: string, shift: boolean}} p */
   function isSnipKey(p) {
@@ -39,6 +63,46 @@ const Keys = (() => {
     if (k === 'Enter') return ev.metaKey || ev.ctrlKey;
     if (!k || k.length !== 1) return false;
     return !ev.metaKey && !ev.ctrlKey && !ev.altKey;
+  }
+
+  /**
+   * The key to forward when `ev` is an app-level combo (Mod+K / Mod+, / Mod+/), else ''.
+   * @param {KeyboardEvent} ev
+   */
+  function appKey(ev) {
+    if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return '';
+    const k = ev.key || '';
+    if (APP_KEYS.includes(k)) return k;
+    if (/^[\x20-\x7e]$/.test(k)) return ''; // a Latin character that is not ours: never steal it by physical key
+    const c = APP_CODES[ev.code];
+    if (!c) return '';
+    return c === 'k' && ev.shiftKey ? 'K' : c;
+  }
+
+  /** @param {KeyboardEvent} ev @param {string} key */
+  function payloadOf(ev, key) {
+    return { key, meta: ev.metaKey, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey };
+  }
+
+  /**
+   * Capture phase on window: for an app-level combo, appends a one-shot bubble listener to window. Listeners added
+   * during dispatch to a target whose bubble phase has not been invoked yet do run (the listener list is copied when
+   * that phase starts), and after every listener already registered there, so this listener is the last to see the
+   * event. If propagation is stopped first it never runs and the next keydown, or a timer, removes it.
+   * @param {KeyboardEvent} ev
+   */
+  function onAppKeyCapture(ev) {
+    if (!ev.isTrusted || ev.isComposing) return;
+    const key = appKey(ev);
+    if (!key) return;
+    const finish = guard((/** @type {Event} */ e) => {
+      window.removeEventListener('keydown', finish);
+      if (e !== ev || ev.defaultPrevented || !Channel.connected) return; // the page claimed it / nobody to tell
+      ev.preventDefault();
+      if (!ev.repeat) Channel.send(MSG.KEY, payloadOf(ev, key));
+    }, 'app-key');
+    window.addEventListener('keydown', finish);
+    setTimeout(() => window.removeEventListener('keydown', finish), 0);
   }
 
   /** @param {KeyboardEvent} ev */
@@ -56,16 +120,30 @@ const Keys = (() => {
     // Decide after dispatch so that page handlers that run after ours can still claim the key.
     setTimeout(guard(() => {
       if (ev.defaultPrevented) return;
-      const action = SELECTION_KEYS[payload.key];
-      if (action && SelectionCapture.keyAction(action)) return; // posted `action`; the UI must not see the key too
-      if (isSnipKey(payload) && Snip.keyToggle()) return; // posted `toolChanged`; the UI follows it
+      if (prefs.singleKeys) {
+        const action = SELECTION_KEYS[payload.key];
+        if (action && SelectionCapture.keyAction(action)) return; // posted `action`; the UI must not see the key too
+        if (isSnipKey(payload) && Snip.keyToggle()) return; // posted `toolChanged`; the UI follows it
+      }
       Channel.send(MSG.KEY, payload);
     }, 'key-forward'), 0);
   }
 
   return {
     start() {
+      window.addEventListener('keydown', guard(onAppKeyCapture, 'app-keydown'), true);
       window.addEventListener('keydown', guard(onKeyDown, 'keydown'));
+    },
+    /**
+     * Applies `setPrefs` / `init.prefs`. Only the fields present (as booleans) change; the rest keep their value.
+     * @param {any} p
+     */
+    setPrefs(p) {
+      if (p && typeof p === 'object' && typeof p.singleKeys === 'boolean') prefs.singleKeys = p.singleKeys;
+    },
+    /** Debug: the current preferences. */
+    get prefs() {
+      return { singleKeys: prefs.singleKeys };
     },
   };
 })();

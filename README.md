@@ -4,7 +4,7 @@
 
 SpecReview runs entirely on your machine, keeps every version and thread as plain files you can commit to git, and works with Claude Code (plugin, skill, slash command and hooks), any MCP client, and any CLI agent.
 
-Everything is one key away: select text and press `c` to comment, press `b` to snip any area of the doc, `B` to snip anything on your screen, and `Cmd+Shift+Enter` to send a comment to the agent right now. See [Keyboard shortcuts](#keyboard-shortcuts) and [Snipping](#snipping).
+Everything is one key away: select text and press `c` to comment, press `b` to snip any area of the doc, `B` to snip anything on your screen, and `Cmd+Shift+Enter` to send a comment to the agent right now. `Cmd+K` opens a command palette for everything else. See [Keyboard shortcuts](#keyboard-shortcuts) and [Snipping](#snipping).
 
 ![Review mode: the rendered spec with highlighted threads, pins and the thread panel](docs/img/review-mode.png)
 
@@ -139,10 +139,13 @@ specreview feedback token-service               # after you submit: prints the f
 
 ## Keyboard shortcuts
 
-Press `?` in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`.
+Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`.
 
 | | Key | Does |
 |---|---|---|
+| **Anywhere** | `Cmd+K` | **Command palette**: find and run any action by name |
+| | `Cmd+,` | Settings |
+| | `Cmd+/` or `?` | Keyboard shortcuts (this list) |
 | **Comment** | `c` / `s` / `q` | Comment on, suggest replacement text for, or ask a question about the selected text |
 | | `a` | Mark the selection agreed (locks it) |
 | | `b` | **Snip an area of the doc**: drag a box over anything (text, images, diagrams, a mix) |
@@ -164,9 +167,12 @@ Press `?` in the UI to see this list. On Windows and Linux, use `Ctrl` where it 
 | **View** | `h` | Hide all highlights for a clean read |
 | | `\` | Show or hide the thread panel |
 | | `t` | Cycle the theme |
-| | `?` | Help overlay |
 
-Most keys work while focus is in the document too. Keys that change a thread's state (`x`, `o`, `y`) act only when focus is in the SpecReview UI, so scripts in a reviewed document cannot trigger them. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
+Most keys work while focus is in the document too. Keys that change a thread's state (`x`, `o`, `y`) act only when focus is in the SpecReview UI, so scripts in a reviewed document cannot trigger them. `Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere, even while you type a comment (the draft is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` work too, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
+
+**Command palette** (`Cmd+K`): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions; filter the thread list; submit with a verdict; copy the review link or the agent prompt; open another doc; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
+
+**Settings** (`Cmd+,`): theme, the outline rail, whether the thread panel starts open, single-letter shortcuts (turn them off if the doc has its own keyboard controls or you press keys by accident), what happens when the agent records a new version, a confirmation before **Send now**, and the default verdict. See [Settings](docs/user-guide.md#settings).
 
 ## Snipping
 
@@ -448,7 +454,7 @@ The access token appears in the pane's address bar; it is not sent as a referrer
 
 ## Documentation
 
-- [Reviewer guide](docs/user-guide.md): the UI, gestures, snipping, keyboard shortcuts, Verify, locks and final versions.
+- [Reviewer guide](docs/user-guide.md): the UI, gestures, snipping, keyboard shortcuts, the command palette, settings, Verify, locks and final versions.
 - [Agent protocol](docs/agent-protocol.md): the full contract for agents: commands, packet format, revise JSON, guards, MCP tools.
 - [Claude Code skill](integrations/claude-code/skills/spec-review/SKILL.md) and its [reference](integrations/claude-code/skills/spec-review/reference.md).
 - [AGENTS.md snippet](integrations/agents-md/AGENTS.snippet.md) for other agents.

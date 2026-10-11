@@ -346,6 +346,19 @@ test('every TESTID is rendered somewhere in the review flow', async ({ page, ui,
   await modeTab(page, 'history').click();
   await expect(page.getByTestId(TESTID.historyRow)).toHaveCount(2);
   await collect();
+  // The command palette (top-bar button), Settings (gear) and the keyboard shortcuts (help button).
+  await page.getByTestId(TESTID.commandPaletteOpen).click();
+  await expect(page.getByTestId(TESTID.commandItem).first()).toBeVisible();
+  await collect(); // palette, its input, items
+  await page.keyboard.press('Escape');
+  await page.getByTestId(TESTID.settingsOpen).click();
+  await expect(page.getByTestId(TESTID.settingsDialog)).toBeVisible();
+  await collect();
+  await page.keyboard.press('Escape');
+  await page.getByTestId(TESTID.helpOpen).click();
+  await expect(page.getByTestId(TESTID.helpOverlay)).toBeVisible();
+  await collect();
+  await page.keyboard.press('Escape');
   const missing = Object.values(TESTID).filter((id) => !seen.has(id));
   expect(missing).toEqual([]);
 });

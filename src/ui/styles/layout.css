@@ -1,8 +1,9 @@
 /* Page layout: top bar, banners, the three columns (outline rail / document / side panel), status bar.
-   Wide (>= 1200 px): a grid with both rails. Medium (900-1199 px, class is-medium): the outline rail is collapsed
-   behind the menu button unless the user opened it (class rail-open) and the side panel is narrower, so the doc
-   keeps most of the width. Narrow (< 900 px): the doc is full width; the outline and the side panel are drawers
-   toggled by `=` / `\` (classes nav-open / drawer-open), over a scrim. No horizontal page scroll. */
+   Wide (>= 1200 px): a grid with both rails (the Outline rail setting "Never", or the menu button, can close the left
+   one: class rail-closed). Medium (900-1199 px, class is-medium): the outline rail is collapsed behind the menu
+   button unless it is open (class rail-open: opened there, or the "Always" setting) and the side panel is narrower,
+   so the doc keeps most of the width. Narrow (< 900 px): the doc is full width; the outline and the side panel are
+   drawers toggled by `=` / `\` (classes nav-open / drawer-open), over a scrim. No horizontal page scroll. */
 
 .doc-view {
   display: flex;
@@ -217,6 +218,18 @@
   display: none;
 }
 
+.rail-closed .main {
+  grid-template-columns: minmax(0, 1fr) var(--rail-right);
+}
+
+.rail-closed.sidebar-hidden .main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rail-closed .rail-left {
+  display: none;
+}
+
 .rail-left,
 .rail-right {
   min-height: 0;
@@ -346,8 +359,10 @@
 }
 
 /* Medium: keep the first top bar row on one line (the Changes base picker would wrap the tools onto a second
-   one): no brand text, and the title shrinks (ellipsis, full title in its tooltip) before anything wraps. */
-.is-medium .brand-text {
+   one): no brand text, the palette button shows only its key, and the title shrinks (ellipsis, full title in its
+   tooltip) before anything wraps. */
+.is-medium .brand-text,
+.is-medium .palette-btn-text {
   display: none;
 }
 
@@ -363,7 +378,8 @@
 
   .brand-text,
   .drafts-count,
-  .round-status {
+  .round-status,
+  .palette-btn-text {
     display: none;
   }
 

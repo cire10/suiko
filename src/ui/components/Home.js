@@ -1,11 +1,13 @@
 // @ts-check
-// Home: every tracked doc across registered workspaces (GET /api/docs), live-updated through the event stream.
+// Home: every tracked doc across registered workspaces (GET /api/docs), live-updated through the event stream. The
+// header has the command palette, theme, Settings and keyboard shortcuts buttons, like the doc view's top bar.
 
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { cycleTheme, docPath, navigate } from '../actions.js';
-import { store, useStore } from '../state.js';
+import { useStore } from '../state.js';
 import { Chip, Icon, Spinner } from './common.js';
+import { HelpButton, PaletteButton, SettingsButton } from './TopBar.js';
 
 const STATE_LABEL = /** @type {Record<string, [string, string]>} */ ({
   in_review: ['In review', 'accent'],
@@ -21,12 +23,12 @@ export function Home() {
     <header class="home-head">
       <h1><span class="logo" aria-hidden="true"><${Icon} name="comment" size=${18} /></span> SpecReview</h1>
       <div class="home-tools">
+        <${PaletteButton} />
         <button type="button" class="icon-btn" aria-label=${`Theme: ${theme}. Change theme`} title="Theme (t)" onClick=${cycleTheme}>
           <${Icon} name=${theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'system'} />
         </button>
-        <button type="button" class="icon-btn" aria-label="Keyboard shortcuts" title="Help (?)" onClick=${() => store.set({ dialog: 'help' })}>
-          <${Icon} name="help" />
-        </button>
+        <${SettingsButton} />
+        <${HelpButton} />
       </div>
     </header>
     <main class="home-main">

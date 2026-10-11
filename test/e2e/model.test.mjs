@@ -1,16 +1,17 @@
 // @ts-check
-// Unit tests (node:test) for the UI's pure helpers: src/ui/model.js (DocState -> what the panels show) and the URL
-// helpers of src/ui/util.js. They run without a browser:  node --test test/e2e/model.test.mjs
+// Unit tests (node:test) for the UI's pure helpers: src/ui/model.js (DocState -> what the panels show, shortcut
+// labels and key combos, the command palette's fuzzy search) and the URL helpers of src/ui/util.js. They run without a browser:  node --test test/e2e/model.test.mjs
 // (Playwright only picks up *.spec.mjs, so this file is not part of `npx playwright test`.)
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  anchorAt, anchorQuote, applyErrorText, attachmentName, attachmentUrl, backupHasInput, canSendNow, coalesceWordParts,
-  defaultBase, defaultVerdict, diffLines, draftVersion, groupHunks, hunkLines, hunkPreview, hunkSourceText,
-  isComposerDirty, isReplyDirty, isVerifiable, keyLabel, linesLabel, panelItems, presenceInfo, reviewProgress,
-  roundResults, roundSummary, singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches,
-  timeline, trimDiffContext,
+  agentPrompt, anchorAt, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
+  canSendNow, coalesceWordParts, defaultBase, defaultVerdict, diffLines, draftVersion, fuzzyMatch, groupHunks,
+  highlightParts, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isSingleKeyCombo,
+  isVerifiable, keyLabel, linesLabel, matchRow, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary,
+  singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches, threadRowTitle, timeline,
+  trimDiffContext,
 } from '../../src/ui/model.js';
 import { contentUrl, docUrl, wordParts } from '../../src/ui/util.js';
 
@@ -207,6 +208,11 @@ test('defaultVerdict: Request changes with a blocking new thread or a reopen of 
   assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'reply', thread: 't2', reopen: true }])), 'comment');
   assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'reply', thread: 't1', reopen: false }])), 'comment');
   assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'reply', thread: 't1', reopen: true }])), 'changes_requested');
+  // The Settings choice applies when nothing is blocking; a blocking draft still wins.
+  assert.equal(defaultVerdict(ds, 'changes_requested'), 'changes_requested');
+  assert.equal(defaultVerdict(ds, 'comment'), 'comment');
+  assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'thread', severity: 'blocking' }]), 'comment'), 'changes_requested');
+  assert.equal(agentPrompt(ds), 'Run `specreview feedback spec` and address it.');
 });
 
 test('changes: the only H1 leaves the group titles; hunk source text; readable word diffs', () => {
@@ -349,6 +355,80 @@ test('keyLabel: Mac symbols or Ctrl / Shift names', () => {
   assert.equal(keyLabel('mod+shift+enter', false, { compact: true }), 'Ctrl+⇧+↵');
   assert.equal(keyLabel('mod+shift+enter', true, { compact: true }), '⌘⇧↵');
   assert.equal(keyLabel('\\', false), '\\');
+  // A letter after a modifier is a capital, like menus write it; the macOS Ctrl fallback is ⌃.
+  assert.equal(keyLabel('mod+k', true), '⌘K');
+  assert.equal(keyLabel('mod+k', false), 'Ctrl+K');
+  assert.equal(keyLabel('mod+,', true), '⌘,');
+  assert.equal(keyLabel('mod+/', false), 'Ctrl+/');
+  assert.equal(keyLabel('ctrl+k', true), '⌃K');
+  assert.equal(keyLabel('mod+k', false, { compact: true }), 'Ctrl+K');
+});
+
+test('isSingleKeyCombo: letters, digits and punctuation (Shift allowed); not Esc, Enter or Cmd / Ctrl / Alt combos', () => {
+  for (const k of ['c', 'shift+B', '?', '1', '[', '\\']) assert.equal(isSingleKeyCombo(k), true, k);
+  for (const k of ['esc', 'mod+enter', 'mod+shift+enter', 'mod+k', 'alt+x', 'ctrl+,']) assert.equal(isSingleKeyCombo(k), false, k);
+});
+
+test('appCombo: Cmd or Ctrl + K / , / / on any platform; not with Alt, not Shift+K', () => {
+  assert.equal(appCombo({ key: 'k', meta: true }), 'palette');
+  assert.equal(appCombo({ key: 'k', ctrl: true }), 'palette');
+  assert.equal(appCombo({ key: 'K', meta: true }), 'palette'); // Caps Lock
+  assert.equal(appCombo({ key: 'K', meta: true, shift: true }), null);
+  assert.equal(appCombo({ key: ',', meta: true }), 'settings');
+  assert.equal(appCombo({ key: ',', ctrl: true }), 'settings');
+  assert.equal(appCombo({ key: '/', meta: true }), 'help');
+  assert.equal(appCombo({ key: '?', ctrl: true, shift: true }), 'help');
+  assert.equal(appCombo({ key: 'k' }), null);
+  assert.equal(appCombo({ key: 'k', ctrl: true, alt: true }), null);
+  assert.equal(appCombo({ key: 'Enter', meta: true }), null);
+});
+
+test('fuzzyMatch: subsequences ranked by prefix, word starts and runs; no letters from the middle of other words', () => {
+  const gt = fuzzyMatch('gt', 'Go to thread');
+  assert.deepEqual(gt?.positions, [0, 3]);
+  assert.ok(/** @type {any} */ (fuzzyMatch('verif', 'Verify queue')).score > /** @type {any} */ (fuzzyMatch('verif', 'Never if you')).score || !fuzzyMatch('verif', 'Never if you'));
+  // A prefix beats the same letters later on.
+  assert.ok(/** @type {any} */ (fuzzyMatch('com', 'Comment on the selection')).score > /** @type {any} */ (fuzzyMatch('com', 'Submit review as Comment')).score);
+  // Abbreviations inside one word.
+  assert.deepEqual(fuzzyMatch('stng', 'Open settings')?.positions, [5, 7, 10, 11]);
+  assert.ok(fuzzyMatch('kbd', 'Keyboard shortcuts'));
+  // Letters picked from the middle of different words are no match.
+  assert.equal(fuzzyMatch('mode', 'comment · Rollout — load test'), null);
+  assert.equal(fuzzyMatch('snip', 'Send now: this comment alone, the composer'), null);
+  assert.equal(fuzzyMatch('xyz', 'Go to thread'), null);
+  assert.deepEqual(fuzzyMatch('', 'anything'), { score: 0, positions: [] });
+});
+
+test('matchRow: words in any order, keywords and descriptions, exact ids first; highlightParts', () => {
+  const approve = matchRow('approve submit', { title: 'Submit review as Approve' });
+  assert.ok(approve);
+  assert.deepEqual(highlightParts('Submit review as Approve', /** @type {any} */ (approve).positions).filter((p) => p.hit).map((p) => p.text), ['Submit', 'Approve']);
+  // A keyword (a thread's comment text) finds the row without highlighting the title.
+  const byKeyword = matchRow('grace window', { title: 't1 · comment · §3 Tokens', keywords: ['Add a grace window for concurrent refreshes.'] });
+  assert.ok(byKeyword);
+  assert.deepEqual(/** @type {any} */ (byKeyword).positions, []);
+  assert.equal(matchRow('nothing here', { title: 'Go to thread', keywords: ['jump'] }), null);
+  // An exact id outranks any fuzzy match.
+  const t4 = /** @type {any} */ (matchRow('t4', { title: 't4 · comment · §Rollout', exact: ['t4'] }));
+  const other = /** @type {any} */ (matchRow('t4', { title: 'Toggle 4 things' }));
+  assert.ok(t4.score > (other?.score ?? 0));
+  assert.deepEqual(t4.positions, [0, 1]);
+  assert.deepEqual(matchRow('  ', { title: 'x' }), { score: 0, positions: [] });
+  assert.deepEqual(highlightParts('abc', [0, 2]), [{ text: 'a', hit: true }, { text: 'b', hit: false }, { text: 'c', hit: true }]);
+});
+
+test('threadRowTitle: "t4 · comment · §section — first words", drafts and doc-level comments', () => {
+  const t = {
+    ...thread('t4', 'open', [{ by: human, body: 'Add a **target RPS** for the load test, and the p99 latency we accept under that load.' }]),
+    anchors: { 1: anchor(1, 10, { section: ['Spec', '4 Rollout checklist'] }) },
+  };
+  const row = threadRowTitle({ kind: 'thread', id: 't4', item: t, anchor: anchorAt(t, 1) });
+  assert.match(row.title, /^t4 · comment · §4 Rollout checklist — Add a target RPS for the load test, and the p99 latency we…$/);
+  assert.match(row.body, /p99 latency we accept under that load\.$/);
+  const draft = threadRowTitle({ kind: 'draft', id: 'd2', item: { type: 'question', body: 'Why?' }, anchor: { kind: 'doc' } });
+  assert.equal(draft.title, 'd2 · draft question · General comment — Why?');
+  const agentQ = threadRowTitle({ kind: 'thread', id: 't6', item: { type: 'agent-question', comments: [] }, anchor: null });
+  assert.equal(agentQ.title, 't6 · agent question · document');
 });
 
 test('canSendNow: a new comment, question or suggestion; not a draft being edited or "Mark agreed"', () => {

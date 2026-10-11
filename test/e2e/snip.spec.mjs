@@ -307,7 +307,7 @@ test('the help overlay groups the keys and lists b, Shift+B and Send now; button
   await focusUi(page);
   await page.keyboard.press('?');
   const help = page.getByTestId('help-overlay');
-  await expect(help.locator('.keymap-group th')).toHaveText(['Comment', 'Review', 'Navigate', 'View']);
+  await expect(help.locator('.keymap-group th')).toHaveText(['Comment', 'Review', 'Navigate', 'View', 'App']);
   await expect(help.locator('[data-key-row="snip"]')).toContainText('Snip an area of the document');
   await expect(help.locator('[data-key-row="snip"] kbd')).toHaveText('b');
   await expect(help.locator('[data-key-row="snip-screen"]')).toContainText('Snip anywhere on your screen');

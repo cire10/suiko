@@ -14,17 +14,21 @@
 // - Snips: `b` snips an area of the doc (the guest draws the box and posts `action` with a SnipCapture and its crop,
 //   which opens the composer like any capture); Shift+B asks the daemon to run the macOS region picker and attaches
 //   the screenshot to a composer. Neither sends anything: the comment goes out on Add to review / Send now.
+// - Dialogs are exclusive (openDialog): the command palette, Settings, the keyboard shortcuts, Submit review and the
+//   image viewer replace each other; what was typed in the Submit dialog lives in the store and survives that.
+// - Preferences (setPref) apply at once and are remembered per browser; single-letter shortcuts are mirrored to the
+//   guest (setPrefs, and init.prefs), so it stops acting on c / s / q / a / b itself when they are off.
 
 import { MSG, SSE } from 'protocol';
-import { api, docApi, onConnection, onReconnect } from './api.js';
+import { api, docApi, onConnection, onReconnect, token } from './api.js';
 import { guest } from './frame.js';
 import {
-  anchorAt, anchorColumn, applyErrorText, backupHasInput, defaultBase, draftVersion, isComposerDirty, isReplyDirty,
-  numericVersion, panelItems, replyDraftsFor, staleApproveText, suggestionMode, versionNumbers,
+  agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, defaultBase, draftVersion, isComposerDirty,
+  isReplyDirty, numericVersion, panelItems, replyDraftsFor, staleApproveText, suggestionMode, versionNumbers,
 } from './model.js';
 import { EventStream } from './sse.js';
 import { store, writePref } from './state.js';
-import { debounce, docUrl, originOf } from './util.js';
+import { copyText, debounce, docUrl, originOf } from './util.js';
 
 /** @typedef {import('./state.js').UiState} UiState */
 /** @typedef {import('./state.js').Mode} Mode */
@@ -55,6 +59,15 @@ let draftToast = 0;
 let frameVersion = null;
 /** The composer opened last: its key, when, and what for (see DUPLICATE_OPEN_MS). */
 let lastOpen = { key: 0, at: 0, sig: '' };
+/**
+ * A new version to show in Changes once a refresh brought it in (Settings: "Switch to Changes automatically"), with
+ * the text of its announcement.
+ * @type {{ v: number, text: string, until: number }|null}
+ */
+let autoChanges = null;
+/** The doc list request in flight (loadDocList). */
+/** @type {Promise<void>|null} */
+let docListLoading = null;
 
 /**
  * A second request to open the same composer (same capture and type) within this window is a duplicate: the guest
@@ -179,6 +192,7 @@ export async function openDoc(ws, doc) {
     reply: null,
     tool: 'select',
     drawer: false,
+    sidebar: get().prefs.panelOpen,
     nav: false,
     dialog: null,
     submitForm: null,
@@ -187,8 +201,10 @@ export async function openDoc(ws, doc) {
     unseenVersion: null,
     sourceSel: null,
     sidePane: 'changes',
+    recording: false,
     guest: guestInitial(),
   });
+  autoChanges = null;
   /** @type {any} */
   let ds;
   try {
@@ -263,6 +279,7 @@ export async function refreshNow() {
   set(patch);
   updateTitle();
   await Promise.all([loadTargets(), loadChanges()]);
+  flushAutoChanges();
 }
 
 /**
@@ -272,6 +289,44 @@ export async function refreshNow() {
  */
 function holdsView(s) {
   return !!(s.composer || s.reply || s.dialog === 'submit');
+}
+
+/**
+ * Whether the UI may switch to Changes on its own for a new version (Settings): never while the reviewer is in the
+ * middle of something: a composer, a reply, any dialog (the palette included), the record form, or pick / snip.
+ * @param {UiState} s
+ */
+function canAutoSwitch(s) {
+  return !!s.ds && !holdsView(s) && !s.dialog && !s.recording && s.tool === 'select' && !s.screenSnip.running;
+}
+
+/**
+ * Shows the announced version in Changes once the refresh that brings it in is done (see announceVersion). When the
+ * reviewer started something meanwhile (a comment, a dialog), or the version never arrives, the usual toast says it
+ * instead.
+ */
+function flushAutoChanges() {
+  const p = autoChanges;
+  if (!p) return;
+  const s = get();
+  if (!versionNumbers(s.ds).includes(p.v)) {
+    if (Date.now() > p.until) {
+      autoChanges = null;
+      versionToast(p.v, p.text);
+    }
+    return;
+  }
+  autoChanges = null;
+  if (!canAutoSwitch(s)) {
+    versionToast(p.v, p.text);
+    return;
+  }
+  reviewChanges(p.v);
+  toast(`${p.text}. Showing what changed.`, {
+    tone: 'info',
+    timeout: 8000,
+    actions: [{ label: 'Verify', run: () => openVerify(p.v) }],
+  });
 }
 
 /** @param {string} name @param {any} data */
@@ -289,6 +344,8 @@ function onDocEvent(name, data) {
     case SSE.WORKING_CHANGED:
       set((s) => (s.ds ? {
         ds: { ...s.ds, working: { ...s.ds.working, dirty: !!data?.dirty, missing: !!data?.missing, sha256: data?.sha256 ?? s.ds.working?.sha256 } },
+        // Nothing left to record: the "Record as my revision" form closes with the banner.
+        recording: data?.dirty && !data?.missing ? s.recording : false,
       } : null));
       if (get().version === 'live') {
         if (data?.dirty) reloadFrame();
@@ -358,7 +415,18 @@ function announceVersion(data) {
   const author = typeof data?.author === 'string' ? data.author.replace(/^\w+:/, '') : data?.author?.name;
   set({ unseenVersion: v });
   updateTitle();
-  toast(`v${v} ready${author ? ` from ${author}` : ''}${tail ? ` - ${tail}` : ''}`, {
+  const text = `v${v} ready${author ? ` from ${author}` : ''}${tail ? ` - ${tail}` : ''}`;
+  if (get().prefs.onNewVersion === 'changes' && canAutoSwitch(get())) {
+    // Settings: "Switch to Changes automatically". The refresh that follows this event brings the version in.
+    autoChanges = { v, text, until: Date.now() + 10000 };
+    return;
+  }
+  versionToast(v, text);
+}
+
+/** The "vN ready" toast, with Review changes / Verify. @param {number} v @param {string} text */
+function versionToast(v, text) {
+  toast(text, {
     tone: 'info',
     timeout: 15000,
     actions: [
@@ -509,6 +577,7 @@ function sendInit() {
     changes: s.mode === 'changes' ? s.changes : null,
     activeId: s.focusedId,
     hidden: s.hidden,
+    prefs: { singleKeys: s.prefs.singleKeys },
   });
 }
 
@@ -1075,8 +1144,10 @@ function reviewedVersion() {
 }
 
 /**
- * Add to review (draft) or Send now (draft + one-item review with verdict comment).
- * @param {{ sendNow?: boolean }} [opts]
+ * Add to review (draft) or Send now (draft + one-item review with verdict comment). With "Ask before Send now"
+ * (Settings), a Send now first shows a confirmation in the composer (confirmSend); confirming it, or pressing Send
+ * now again while it shows, sends.
+ * @param {{ sendNow?: boolean, confirmed?: boolean }} [opts]
  */
 export async function submitComposer(opts = {}) {
   const c = client;
@@ -1100,10 +1171,14 @@ export async function submitComposer(opts = {}) {
   }
   const problem = composerProblem(comp);
   if (problem) {
-    updateComposer({ error: problem });
+    updateComposer({ error: problem, confirmSend: false });
     return;
   }
-  updateComposer({ busy: true, error: null });
+  if (opts.sendNow && !opts.confirmed && !comp.confirmSend && get().prefs.confirmSendNow) {
+    updateComposer({ confirmSend: true, error: null });
+    return;
+  }
+  updateComposer({ busy: true, error: null, confirmSend: false });
   try {
     let cropPath = comp.cropPath;
     if (comp.crop && !cropPath) {
@@ -1174,7 +1249,7 @@ export function cancelComposer() {
         label: 'Undo',
         run: () => {
           if (!lastCancelled || get().composer) return;
-          set({ composer: { ...lastCancelled, key: ++composerSeq, busy: false }, drawer: get().narrow ? true : get().drawer });
+          set({ composer: { ...lastCancelled, key: ++composerSeq, busy: false, confirmSend: false }, drawer: get().narrow ? true : get().drawer });
           lastCancelled = null;
           saveBackupSoon();
         },
@@ -1826,28 +1901,52 @@ export async function snipScreen() {
   if (!get().composer) toast('The screenshot was saved but no comment could be opened for it.', { tone: 'warn' });
 }
 
-/** \ : the thread drawer (narrow) or the side panel (wide). */
+/**
+ * \ : the thread drawer (narrow) or the side panel (wide), for this page; whether it is open when a doc opens is a
+ * setting (prefs.panelOpen).
+ */
 export function toggleSidebar() {
   const s = get();
   if (s.narrow) set({ drawer: !s.drawer, nav: false });
-  else {
-    set({ sidebar: !s.sidebar });
-    writePref('sidebar', s.sidebar ? '0' : '1');
-  }
+  else set({ sidebar: !s.sidebar });
 }
 
 /**
- * The menu button: the outline drawer below 900 px; between 900 and 1199 px the outline / history rail, which is
- * collapsed by default there so the doc keeps its width (the choice is remembered).
+ * Whether the outline / history rail is shown beside the doc (900 px and up; below, it is a drawer): the page's own
+ * choice (railOpen), else the Outline rail setting: auto shows it at 1200 px and up and, between 900 and 1199 px,
+ * when the reviewer opened it there (remembered); always / never.
+ * @param {UiState} s
+ */
+export function railShown(s) {
+  if (s.narrow) return false;
+  if (s.railOpen != null) return s.railOpen;
+  if (s.prefs.railMode === 'always') return true;
+  if (s.prefs.railMode === 'never') return false;
+  return s.medium ? s.rail : true;
+}
+
+/** Whether the top bar shows the menu button that opens / closes the outline (drawer or rail). @param {UiState} s */
+export function railToggleShown(s) {
+  return s.narrow || s.medium || s.prefs.railMode !== 'auto' || s.railOpen != null;
+}
+
+/**
+ * The menu button (and the palette's "Toggle outline rail"): the outline drawer below 900 px; from 900 px the
+ * outline / history rail. With the Auto setting between 900 and 1199 px, where it is collapsed by default so the doc
+ * keeps its width, the choice is remembered; otherwise it holds for this page.
  */
 export function toggleNav() {
   const s = get();
-  if (!s.narrow && s.medium) {
+  if (s.narrow) {
+    set({ nav: !s.nav, drawer: false });
+    return;
+  }
+  if (s.prefs.railMode === 'auto' && s.medium && s.railOpen == null) {
     set({ rail: !s.rail });
     writePref('rail', s.rail ? '0' : '1');
     return;
   }
-  set({ nav: !s.nav, drawer: false });
+  set({ railOpen: !railShown(s) });
 }
 
 /** @param {string} filter */
@@ -1859,6 +1958,276 @@ export function setFilter(filter) {
 export function setSourceLayout(layout) {
   set({ sourceLayout: layout });
   writePref('sourceLayout', layout);
+}
+
+// ============================================================================================ dialogs & preferences
+
+/**
+ * Opens a dialog. Dialogs are exclusive, so this closes the one that is open (the Submit dialog keeps what was
+ * typed in it: submitForm).
+ * @param {'palette'|'settings'|'help'} name
+ */
+export function openDialog(name) {
+  set({ dialog: name, lightbox: null });
+  if (name === 'settings') loadAbout();
+  if (name === 'palette' || name === 'settings') loadDocList();
+}
+
+/** Cmd/Ctrl+K, Cmd/Ctrl+, and Cmd/Ctrl+/ open their dialog, or close it when it is the one open. @param {'palette'|'settings'|'help'} name */
+export function toggleDialog(name) {
+  if (get().dialog === name) closeDialog();
+  else openDialog(name);
+}
+
+const PREF_KEYS = /** @type {const} */ ({
+  railMode: 'railMode', panelOpen: 'sidebar', singleKeys: 'singleKeys', onNewVersion: 'onNewVersion',
+  confirmSendNow: 'confirmSendNow', defaultVerdict: 'defaultVerdict',
+});
+
+/**
+ * Changes a preference (Settings): applied at once and remembered in this browser.
+ * @template {keyof import('./state.js').Prefs} K
+ * @param {K} name
+ * @param {import('./state.js').Prefs[K]} value
+ */
+export function setPref(name, value) {
+  const s = get();
+  if (s.prefs[name] === value) return;
+  set({ prefs: { ...s.prefs, [name]: value } });
+  writePref(PREF_KEYS[name], typeof value === 'boolean' ? (value ? '1' : '0') : String(value));
+  if (name === 'singleKeys') guest.send(MSG.SET_PREFS, { singleKeys: !!value });
+  if (name === 'railMode') set({ railOpen: null });
+  if (name === 'panelOpen' && !s.narrow) set({ sidebar: !!value });
+}
+
+/** Single-letter shortcuts on / off (the palette command; Settings has the same switch). */
+export function toggleSingleKeys() {
+  const on = !get().prefs.singleKeys;
+  setPref('singleKeys', on);
+  toast(on ? 'Single-letter shortcuts are on.' : 'Single-letter shortcuts are off. Every action is still in the command palette and on the buttons.', { timeout: 4000 });
+}
+
+/** Settings > About: the daemon's version (GET /api/health) and the ports in use. */
+export async function loadAbout() {
+  const contentPort = (() => {
+    const base = get().ds?.contentBase;
+    try {
+      return base ? new URL(base).port : '';
+    } catch {
+      return '';
+    }
+  })();
+  const uiPort = location.port;
+  set((s) => ({ about: { version: s.about?.version ?? null, uiPort, contentPort } }));
+  try {
+    const h = await api.health();
+    set((s) => ({ about: { ...(s.about || { uiPort, contentPort }), version: h?.version ? String(h.version) : null } }));
+  } catch {
+    /* the version stays unknown */
+  }
+}
+
+/** Every tracked doc (GET /api/docs) for "Open another document" and the workspace root; one request at a time. */
+export function loadDocList() {
+  if (docListLoading) return docListLoading;
+  docListLoading = (async () => {
+    try {
+      const docs = await api.docs();
+      set({ home: { docs: Array.isArray(docs) ? docs : [], error: null } });
+    } catch (err) {
+      set((s) => ({ home: { docs: s.home.docs, error: errorText(err) } }));
+    } finally {
+      docListLoading = null;
+    }
+  })();
+  return docListLoading;
+}
+
+/** The open doc's workspace root (from the doc list), or null while unknown. @param {UiState} s */
+export function workspaceRoot(s) {
+  const r = s.route;
+  if (r.view !== 'doc') return null;
+  const d = (s.home.docs || []).find((/** @type {any} */ x) => x.ws === r.ws && x.id === r.doc);
+  return d?.root ? String(d.root) : null;
+}
+
+/** Absolute path of the spec when the workspace root is known, else its workspace-relative path. @param {UiState} s */
+export function specPath(s) {
+  const rel = String(s.ds?.doc?.path || '');
+  const root = workspaceRoot(s);
+  if (!root || !rel || /^([a-z]:)?[\\/]/i.test(rel)) return rel;
+  return `${root.replace(/[\\/]+$/, '')}/${rel}`;
+}
+
+// ============================================================================================ palette commands
+
+/** The thread the keyboard / palette actions apply to (the focused card), or null. */
+export function focusedThread() {
+  const s = get();
+  return (s.ds?.threads || []).find((/** @type {any} */ t) => t.id === s.focusedId) || null;
+}
+
+/** x: resolve / accept the focused thread. Returns false when there is nothing to resolve. */
+export function acceptFocused() {
+  const t = focusedThread();
+  if (!t || t.status === 'resolved') return false;
+  resolveThread(t.id);
+  return true;
+}
+
+/** o: reopen the focused thread (a resolved one directly, another with a reopening reply). */
+export function reopenFocused() {
+  const t = focusedThread();
+  if (!t) return false;
+  if (t.status === 'resolved') unresolveThread(t.id);
+  else startReply(t.id, { reopen: true });
+  return true;
+}
+
+/** y: accept the agent's decline of the focused thread. */
+export function acceptDecline() {
+  const t = focusedThread();
+  if (!t || t.status !== 'declined') return false;
+  resolveThread(t.id);
+  return true;
+}
+
+/** c / s / q / a: comment, suggest, ask or mark agreed on the selection (doc text, or Source lines for c). @param {'c'|'s'|'q'|'a'} key */
+export function selectionAction(key) {
+  const s = get();
+  const action = /** @type {Record<string, string>} */ ({ c: 'comment', s: 'suggest', q: 'question', a: 'agree' })[key];
+  if (s.mode === 'source') {
+    if (s.sourceSel && key === 'c') {
+      openComposer({ capture: { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to }, action });
+    } else if (key === 'c') {
+      toast('Click a line number (shift-click for a range), then press C.', { timeout: 3000 });
+    }
+    return true;
+  }
+  if (s.mode === 'history') return false;
+  const capture = s.guest.selection;
+  if (!capture) {
+    toast('Select text in the document first, press b to snip any area of it, or e to pick an image, diagram, table or code block.', { timeout: 3500 });
+    return true;
+  }
+  openComposer({ capture, action });
+  return true;
+}
+
+/**
+ * Shows the thread list with a filter (Verify queue, palette filters, the status bar's Orphans): the thread panel
+ * (or drawer), on its Threads tab in Changes mode.
+ * @param {string} filter
+ * @param {{ review?: boolean }} [opts] review: switch to Review mode first
+ */
+export function showThreads(filter, opts = {}) {
+  if (opts.review && get().mode !== 'review') setMode('review');
+  setFilter(filter);
+  const s = get();
+  set({ sidePane: 'threads', drawer: s.narrow ? true : s.drawer, sidebar: true });
+}
+
+/** "Submit review as ...": the Submit dialog with that verdict chosen. @param {'comment'|'changes_requested'|'approved'} verdict */
+export function submitWithVerdict(verdict) {
+  if (!get().ds) return;
+  updateSubmitForm({ verdict });
+  openSubmit();
+}
+
+/** localStorage key of the "seen" marks of the comparison shown (base -> version), or null off a doc. @param {UiState} s */
+export function seenStorageKey(s) {
+  const r = s.route;
+  return r.view === 'doc' ? `specreview.seen.${r.ws}/${r.doc}.${s.base}-${s.version}` : null;
+}
+
+/** The hunk ids marked seen in a comparison. @param {string|null} key @returns {Set<string>} */
+export function readSeen(key) {
+  if (!key) return new Set();
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || '[]');
+    return new Set(Array.isArray(v) ? v.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Marks changes of the comparison shown as seen (or not); kept per comparison in localStorage.
+ * @param {string[]} ids
+ * @param {boolean} on
+ */
+export function setChangesSeen(ids, on) {
+  const key = seenStorageKey(get());
+  if (!key) return;
+  const seen = readSeen(key);
+  for (const id of ids) {
+    if (on) seen.add(id);
+    else seen.delete(id);
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify([...seen]));
+  } catch {
+    /* storage unavailable: the marks last for this page only */
+  }
+  set((s) => ({ seenRev: s.seenRev + 1 }));
+}
+
+/** "Mark all changes seen" for the comparison shown. */
+export function markAllChangesSeen() {
+  const hunks = get().changes?.hunks || [];
+  setChangesSeen(hunks.map((/** @type {any} */ h) => String(h.id)), true);
+  toast(`${hunks.length} change${hunks.length === 1 ? '' : 's'} marked seen.`, { tone: 'ok', timeout: 2500 });
+}
+
+/** Opens the working-copy banner's "Record as my revision" form (it asks for a summary first). */
+export function startRecording() {
+  const s = get();
+  if (!s.ds?.working?.dirty || s.ds.working.missing) return;
+  set({ recording: true });
+}
+
+/** Closes the "Record as my revision" form. */
+export function stopRecording() {
+  set({ recording: false });
+}
+
+/** Ends the review session (like `specreview close`): a waiting agent stops waiting. */
+export async function closeSession() {
+  const c = client;
+  if (!c) return;
+  try {
+    await c.close();
+  } catch (err) {
+    toast(`Could not close the session: ${errorText(err)}`, { tone: 'danger' });
+    return;
+  }
+  await refreshNow();
+}
+
+/** Copies the review URL of the open doc, with the access token like `specreview open` prints it. */
+export async function copyReviewLink() {
+  const r = get().route;
+  if (r.view !== 'doc') return;
+  const t = token();
+  const url = `${location.origin}${docPath(r.ws, r.doc)}${t ? `?k=${encodeURIComponent(t)}` : ''}`;
+  toast(await copyText(url)
+    ? 'Review link copied. It carries your access token and works on this machine only.'
+    : 'Copy failed.', { timeout: 4000 });
+}
+
+/** Copies the "tell the agent" prompt (the one the Submit dialog offers when no agent is listening). */
+export async function copyAgentPrompt() {
+  const ds = get().ds;
+  if (!ds) return;
+  toast(await copyText(agentPrompt(ds)) ? 'Prompt copied. Paste it into your agent\'s chat.' : 'Copy failed; select the text instead.', { timeout: 3000 });
+}
+
+/** Copies the spec's path (absolute once the workspace root is known). */
+export async function copySpecPath() {
+  if (!get().ds) return;
+  if (!workspaceRoot(get())) await loadDocList();
+  const path = specPath(get());
+  toast(await copyText(path) ? `Copied ${path}` : 'Copy failed.', { timeout: 3000 });
 }
 
 // ============================================================================================ toasts

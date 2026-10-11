@@ -12,7 +12,9 @@
 // - Screenshots: the crop of a doc snip (b) or a picked region, and attached images (pasted, a screen snip with
 //   Shift+B), show as thumbnails (TESTID.composerAttachment); a click shows one full size.
 // - Add to review (Cmd/Ctrl+Enter) creates a draft. Send now (Cmd/Ctrl+Shift+Enter) submits a one-item review with
-//   verdict `comment`. Cancel (Esc) closes the composer, with an Undo toast. The buttons show their keys.
+//   verdict `comment`; with "Ask before Send now" (Settings) it first asks in the composer (Send now / Not yet; the
+//   key again confirms, Esc backs out). Cancel (Esc) closes the composer, with an Undo toast. The buttons show their
+//   keys.
 // - Suggestions: text mode (an input prefilled with the exact slice) when the source slice equals the rendered
 //   quote modulo whitespace; otherwise source mode (a monospace textarea with the anchor's whole lines). A live word
 //   diff is shown, plus an optional rendered preview (/fragment, sanitised).
@@ -89,7 +91,12 @@ export function Composer() {
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      cancelComposer();
+      if (c.confirmSend) {
+        updateComposer({ confirmSend: false });
+        taRef.current?.focus();
+      } else {
+        cancelComposer();
+      }
       return;
     }
     if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && ['1', '2', '3'].includes(e.key) && c.type !== 'agree') {
@@ -170,6 +177,7 @@ export function Composer() {
         </li>`;
       })}</ul>` : null}
       ${c.error ? html`<p class="error small" role="alert">${c.error}</p>` : null}
+      ${c.confirmSend && !c.busy ? html`<${ConfirmSend} onBack=${() => taRef.current?.focus()} />` : null}
       <div class="composer-actions">
         <button type="button" class="btn btn-primary" data-testid=${TESTID.composerAdd} disabled=${c.busy || c.resolving}
           onClick=${() => submitComposer()} title=${`${c.draftId ? 'Save the draft' : 'Add to the review, send it later with Submit review'} (${shortcut(KEYS.add)})`}
@@ -181,6 +189,24 @@ export function Composer() {
         ${c.busy ? html`<${Spinner} label="Saving" />` : null}
       </div>`}
   </section>`;
+}
+
+/**
+ * "Ask before Send now": the question, with the focus on its Send now button (Enter sends, Esc backs out).
+ * @param {{ onBack: () => void }} props
+ */
+function ConfirmSend({ onBack }) {
+  const ref = useRef(/** @type {HTMLButtonElement|null} */ (null));
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  return html`<div class="confirm-send" role="alertdialog" aria-label="Send this comment now?" data-confirm-send>
+    <span class="small">Send this comment to the agent now, on its own? Your other drafts stay in the review.</span>
+    <span class="row">
+      <button ref=${ref} type="button" class="btn btn-sm btn-primary" onClick=${() => submitComposer({ sendNow: true, confirmed: true })}>Send now</button>
+      <button type="button" class="btn btn-sm" onClick=${() => { updateComposer({ confirmSend: false }); onBack(); }}>Not yet</button>
+    </span>
+  </div>`;
 }
 
 /** Alt text of a crop: what was snipped or picked. @param {any} capture */

@@ -1,6 +1,7 @@
 // @ts-check
 // Submit review (design 11.6): verdict (Comment / Request changes / Approve; it starts on Request changes when the
-// review carries a blocking comment), a summary, the drafts going out with
+// review carries a blocking comment, else on the Default verdict setting, or on the verdict a "Submit review as"
+// palette command picked), a summary, the drafts going out with
 // jump links, locks added this round, the Approve options (Mark vN final, Resolve N addressed threads), a warning
 // about open blocking threads, and, when no agent is listening, a Copy prompt button for the chat.
 // - The review is about the version on screen. When a newer version exists (it arrived while the dialog was open,
@@ -12,8 +13,8 @@ import { html, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { closeDialog, focusItem, reviewChanges, submitReview, toast, updateSubmitForm } from '../actions.js';
 import {
-  addressedThreads, agentName, blockingOpen, clip, defaultVerdict, isComposerDirty, isReplyDirty, locksAddedThisRound,
-  numericVersion, staleApproveText, targetLabel,
+  addressedThreads, agentName, agentPrompt, blockingOpen, clip, defaultVerdict, isComposerDirty, isReplyDirty,
+  locksAddedThisRound, numericVersion, staleApproveText, targetLabel,
 } from '../model.js';
 import { useStore } from '../state.js';
 import { copyText } from '../util.js';
@@ -31,7 +32,8 @@ export function SubmitDialog() {
   const form = useStore((s) => s.submitForm);
   const openComment = useStore((s) => (s.composer && !s.composer.draftId && isComposerDirty(s.composer) ? 'comment' : null));
   const openReply = useStore((s) => (s.reply && !s.reply.draftId && isReplyDirty(s.reply, s.ds?.drafts) ? s.reply.threadId : null));
-  const [initialVerdict] = useState(() => defaultVerdict(ds));
+  const preferred = useStore((s) => s.prefs.defaultVerdict);
+  const [initialVerdict] = useState(() => defaultVerdict(ds, preferred));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(/** @type {string|null} */ (null));
   if (!ds) return null;
@@ -53,7 +55,7 @@ export function SubmitDialog() {
   const stale = staleApproveText(ds, reviewed);
   const blocked = verdict === 'approved' && !!stale;
   const empty = !items.length && !body.trim() && verdict === 'comment';
-  const prompt = `Run \`specreview feedback ${ds.doc.id}\` and address it.`;
+  const prompt = agentPrompt(ds);
 
   const submit = async () => {
     if (busy || empty || blocked) return;

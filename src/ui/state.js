@@ -4,7 +4,9 @@
 //
 // Everything the UI shows comes from here: the DocState fetched from the daemon, the selected version / mode /
 // base / filter, the focused thread, the composer and reply drafts being edited, the guest's connection state,
-// dialogs and toasts. Server data is never mutated in place: refetches replace it.
+// dialogs (one at a time: Submit, the command palette, Settings, keyboard shortcuts, an image), toasts, and the
+// reviewer's per-browser preferences (Settings; localStorage through readPref / writePref, which tolerate storage
+// being unavailable). Server data is never mutated in place: refetches replace it.
 //
 // Notifications are batched in a microtask, so a burst of `set` calls causes one render pass.
 
@@ -13,6 +15,20 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
 /** @typedef {'review'|'changes'|'source'|'history'} Mode */
 /** @typedef {'open'|'needs'|'verify'|'drafts'|'resolved'|'outdated'|'all'} Filter */
 /** @typedef {'system'|'light'|'dark'} Theme */
+/** @typedef {'submit'|'help'|'image'|'palette'|'settings'} Dialog  one at a time: opening one closes the other */
+
+/**
+ * Per-browser preferences (Settings, localStorage through readPref / writePref; the theme is `theme`).
+ * @typedef {object} Prefs
+ * @property {'auto'|'always'|'never'} railMode the outline rail: auto (beside the doc at >= 1200 px, behind the menu
+ *   button at 900-1199 px unless opened there), always (beside the doc at >= 900 px), never (behind the menu button)
+ * @property {boolean} panelOpen the thread panel is shown when a doc opens (\\ still toggles it)
+ * @property {boolean} singleKeys single-character shortcuts (c, j, b, 1, ?, ...) are on, in the UI and in the doc
+ * @property {'toast'|'changes'} onNewVersion when the agent records a version: a toast, or switch to Changes
+ *   (never while a composer, a reply, a dialog or a capture tool is open)
+ * @property {boolean} confirmSendNow Send now asks for confirmation first
+ * @property {'comment'|'changes_requested'} defaultVerdict the Submit dialog's verdict when nothing is blocking
+ */
 
 /**
  * @typedef {object} Composer
@@ -41,6 +57,7 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  *   failed): a retry saves and sends that draft instead of creating another
  * @property {boolean} busy
  * @property {string|null} error
+ * @property {boolean} [confirmSend] "Ask before Send now" is showing its confirmation
  */
 
 /**
@@ -70,11 +87,15 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  *   running while it waits for the reviewer; supported turns false once the daemon answered 501 (not macOS)
  * @property {boolean} narrow viewport below 900 px
  * @property {boolean} medium viewport 900-1199 px: the outline / history rail is collapsed unless `rail`
- * @property {boolean} rail medium layout: the outline / history rail is shown (the user's choice, remembered)
+ * @property {boolean} rail medium layout with railMode 'auto': the outline / history rail is shown (the user's
+ *   choice, remembered)
+ * @property {boolean|null} railOpen the outline rail shown / hidden for this page by the menu button or the
+ *   palette, over what railMode (and `rail`) say; null: follow them
  * @property {boolean} drawer thread drawer open (narrow) / thread panel visible (wide)
  * @property {boolean} sidebar wide layout: right panel shown
  * @property {boolean} nav narrow: outline drawer open
- * @property {'submit'|'help'|'image'|null} dialog
+ * @property {Prefs} prefs
+ * @property {Dialog|null} dialog
  * @property {{ src: string, alt: string }|null} lightbox the image shown full size (dialog 'image')
  * @property {{ body: string, verdict: string|null, markFinal: boolean, resolveAddressed: boolean }|null} submitForm
  *   what the reviewer entered in the Submit dialog; kept when the dialog closes, cleared by a successful submit
@@ -91,10 +112,28 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  * @property {boolean} sourceDiff show the diff against the base in Source mode
  * @property {'changes'|'threads'} sidePane which list the side panel shows in Changes mode
  * @property {number} frameNonce bump to reload the doc iframe
+ * @property {boolean} recording the working-copy banner shows its "Record as my revision" form
+ * @property {number} seenRev bumped when the "seen" marks of the shown comparison change (kept in localStorage)
+ * @property {{ version: string|null, uiPort: string, contentPort: string }|null} about Settings > About: the
+ *   daemon's version (GET /api/health), loaded when Settings opens
  */
+
+/** @returns {Prefs} */
+export function readPrefs() {
+  return {
+    railMode: readPref('railMode', ['auto', 'always', 'never'], 'auto'),
+    // The same key the panel's open / closed state was remembered under before it became a setting.
+    panelOpen: readPref('sidebar', ['1', '0'], '1') === '1',
+    singleKeys: readPref('singleKeys', ['1', '0'], '1') === '1',
+    onNewVersion: readPref('onNewVersion', ['toast', 'changes'], 'toast'),
+    confirmSendNow: readPref('confirmSendNow', ['1', '0'], '0') === '1',
+    defaultVerdict: readPref('defaultVerdict', ['comment', 'changes_requested'], 'comment'),
+  };
+}
 
 /** @returns {UiState} */
 export function initialState() {
+  const prefs = readPrefs();
   return {
     route: { view: 'home' },
     conn: 'ok',
@@ -121,9 +160,11 @@ export function initialState() {
     narrow: false,
     medium: false,
     rail: readPref('rail', ['1', '0'], '0') === '1',
+    railOpen: null,
     drawer: false,
-    sidebar: readPref('sidebar', ['1', '0'], '1') === '1',
+    sidebar: prefs.panelOpen,
     nav: false,
+    prefs,
     dialog: null,
     lightbox: null,
     submitForm: null,
@@ -147,6 +188,9 @@ export function initialState() {
     sourceDiff: true,
     sidePane: 'changes',
     frameNonce: 0,
+    recording: false,
+    seenRev: 0,
+    about: null,
   };
 }
 

@@ -1623,6 +1623,9 @@ After submit, a status chip moves through "Submitted, then Delivered to claude 1
 ### 11.8 Keyboard
 | Key | Action |
 |---|---|
+| Mod+K | Command palette (toggle) |
+| Mod+, | Settings |
+| Mod+/ or `?` | Keyboard shortcuts (help overlay) |
 | `c` / `s` / `q` / `a` | Comment, suggest, question, or mark agreed on the selection |
 | `e` | Pick mode (in pick mode: `[` `]` parent/child, Esc exits) |
 | `j` / `k` | Next / previous thread |
@@ -1640,8 +1643,13 @@ After submit, a status chip moves through "Submitted, then Delivered to claude 1
 | `h` | Hide all annotations (clean read) |
 | `\` | Toggle the thread sidebar or drawer |
 | `t` | Cycle theme |
-| `?` | Help overlay |
 | Esc | Close or cancel |
+
+- **Mod** is Cmd on macOS (shown as ⌘ glyphs) and Ctrl elsewhere. On macOS, Ctrl+K, Ctrl+, and Ctrl+/ also work, because Safari and the Claude desktop app may reserve ⌘, or ⌘K.
+- **Global:** the three Mod combos work with focus in the UI, inside UI text fields (an open composer keeps its draft), and in the doc iframe (the guest forwards them). They `preventDefault` so the browser does not act.
+- **Command palette:** every keyed action (one registry, src/ui/commands.js, feeds both the palette and the help overlay), plus actions without a key: go to thread / section / version, compare versions, thread filters, submit with a verdict, general comment, record the working copy, mark all changes seen, copy review link / agent prompt / spec path, toggle the outline rail, reload, open the doc list or another doc, close session (asks first), theme, single-letter shortcuts on/off. A command that cannot run now is dimmed with the reason.
+- **Settings** (localStorage, applied at once): theme; outline rail (Auto / Always / Never); thread panel open by default; single-letter shortcuts; on a new version (toast / switch to Changes); ask before Send now; default verdict when nothing is blocking (Comment / Request changes; never Approve); About (version, workspace, spec path, ports, agent prompt).
+- **Single-letter shortcuts off:** the UI ignores every single-character shortcut (letters, digits, and punctuation such as `?` `[` `]` `\`; Esc and the Mod combos still work), and the guest (`setPrefs {singleKeys:false}`, also `init.prefs`) neither acts on c / s / q / a / b itself nor captures them; it forwards them like any other key.
 
 ### 11.9 Empty states, accessibility and theming
 - **Empty states:**

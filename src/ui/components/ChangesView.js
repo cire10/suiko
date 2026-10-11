@@ -1,7 +1,7 @@
 // @ts-check
 // Changes mode side panel (design 8.6 / 11.3): what changed from the base to the shown version.
-// - The change list, grouped by section, with "seen" checkboxes (kept in localStorage per comparison) and a
-//   progress count. Clicking an item (or n / p) scrolls the doc to the hunk. Each item shows the hunk as an inline
+// - The change list, grouped by section, with "seen" checkboxes (kept in localStorage per comparison, through
+//   actions.js, so the command palette's "Mark all changes seen" ticks them too) and a progress count. Clicking an item (or n / p) scrolls the doc to the hunk. Each item shows the hunk as an inline
 //   word diff of its source lines (from GET .../diff/source; old words struck, new words marked, unchanged words
 //   as context, long unchanged runs shortened), capped at 6 lines with "Show more". Group titles drop the doc's
 //   only H1 (the spec title would otherwise prefix every section).
@@ -12,7 +12,7 @@
 import { html, useEffect, useMemo, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { docApi } from '../api.js';
-import { focusItem, goToHunk, navChange, resolveThread, startReply } from '../actions.js';
+import { focusItem, goToHunk, navChange, readSeen, resolveThread, seenStorageKey, setChangesSeen, startReply } from '../actions.js';
 import { Markdown } from '../markdown.js';
 import {
   agentName, coalesceWordParts, diffLines, guardBadges, groupHunks, hunkLines, hunkPreview, hunkSourceText, isVerifiable, numericVersion,
@@ -80,25 +80,6 @@ function HunkBody({ h, active, text }) {
       ${expanded ? 'Show less' : lines && lines.length > HUNK_LINES ? `Show ${lines.length - HUNK_LINES} more line${lines.length - HUNK_LINES === 1 ? '' : 's'}` : 'Show more'}</button>` : null}`;
 }
 
-/** @param {string} key */
-function readSeen(key) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key) || '[]');
-    return new Set(Array.isArray(v) ? v.map(String) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-/** @param {string} key @param {Set<string>} set */
-function writeSeen(key, set) {
-  try {
-    localStorage.setItem(key, JSON.stringify([...set]));
-  } catch {
-    /* storage unavailable: progress lasts for this page only */
-  }
-}
-
 export function ChangesView() {
   const s = useStore((st) => ({
     ds: st.ds,
@@ -109,11 +90,11 @@ export function ChangesView() {
     activeHunk: st.activeHunk,
     route: st.route,
     outline: st.guest.outline.length ? st.guest.outline : st.targets?.outline,
+    seenKey: seenStorageKey(st),
+    seenRev: st.seenRev,
   }));
   const r = /** @type {any} */ (s.route);
-  const seenKey = `specreview.seen.${r.ws}/${r.doc}.${s.base}-${s.version}`;
-  const [seen, setSeen] = useState(() => readSeen(seenKey));
-  useEffect(() => setSeen(readSeen(seenKey)), [seenKey]);
+  const seen = useMemo(() => readSeen(s.seenKey), [s.seenKey, s.seenRev]);
   const h1 = singleH1(s.outline);
   const groups = useMemo(() => groupHunks(s.changes, { h1 }), [s.changes, h1]);
   const sourceDiff = useSourceDiff(r, s.base, s.version, s.changes);
@@ -142,13 +123,7 @@ export function ChangesView() {
   const last = Number(ds.doc.lastReviewedVersion);
 
   /** @param {string} id @param {boolean} on */
-  const toggleSeen = (id, on) => {
-    const next = new Set(seen);
-    if (on) next.add(id);
-    else next.delete(id);
-    setSeen(next);
-    writeSeen(seenKey, next);
-  };
+  const toggleSeen = (id, on) => setChangesSeen([id], on);
 
   return html`<section class="changes-view" aria-label="Changes">
     <div class="changes-head">

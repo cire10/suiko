@@ -95,13 +95,14 @@ export const MSG = Object.freeze({
   ACTION: 'action',           // {action:'comment'|'suggest'|'question'|'agree', capture, rect, crop?: dataUrl}
   POSITIONS: 'positions',     // {targets:{[id]:{top,height,state:'ok'|'block'|'hidden'|'missing'}}, hunks:{[id]:top}, scrollY, viewportH, docH}
   ACTIVATE: 'activate',       // {id}  (user clicked a highlight / pin / change bar)
-  KEY: 'key',                 // {key, meta, ctrl, shift, alt}  (only non-editable focus, not defaultPrevented)
+  KEY: 'key',                 // {key, meta, ctrl, shift, alt}  (only non-editable focus, not defaultPrevented;
+                              // Mod+K / Mod+, / Mod+/ are also forwarded from editable focus and default-prevented)
   SCROLL: 'scroll',           // {topSrid}
   PAGE_ERROR: 'pageError',    // {count, last}
   TOOL_CHANGED: 'toolChanged',// {tool}  (guest changed tool itself: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip')
   // UI -> guest
   CONNECT: 'connect',         // carries the MessagePort (window message, not port)
-  INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId, hidden}
+  INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId, hidden, prefs?}
   SET_TARGETS: 'setTargets',  // {targets:DomTarget[]}
   SET_CHANGES: 'setChanges',  // {changes:Changes|null}
   FOCUS: 'focus',             // {id}   highlight as active + scroll into view + pulse
@@ -111,6 +112,8 @@ export const MSG = Object.freeze({
   REVEAL: 'reveal',           // {id}   open <details>/tabs hiding the target
   CLEAR_SELECTION: 'clearSelection',
   SET_HIDDEN: 'setHidden',    // {hidden:boolean}  hide all annotations (clean read)
+  SET_PREFS: 'setPrefs',      // {singleKeys:boolean}  false: the guest neither acts on nor captures single-letter keys
+                              // (c s q a b ...); it forwards them like any other key. Also accepted inside INIT as prefs.
 });
 
 /** data-testid values the UI must render (used by e2e tests). */
@@ -139,6 +142,14 @@ export const TESTID = Object.freeze({
   snipTool: 'snip-tool',               // snip an area of the doc (key b)
   snipScreen: 'snip-screen',           // snip anywhere on screen via macOS screencapture (key B)
   composerAttachment: 'composer-attachment', // thumbnail of an attached screenshot in the composer
+  commandPalette: 'command-palette',           // Cmd/Ctrl+K dialog
+  commandPaletteInput: 'command-palette-input',
+  commandPaletteOpen: 'command-palette-open',  // top-bar button
+  commandItem: 'command-item',                 // plus data-command-id
+  settingsDialog: 'settings-dialog',           // Cmd/Ctrl+, dialog
+  settingsOpen: 'settings-open',               // top-bar gear button
+  helpOverlay: 'help-overlay',                 // Cmd/Ctrl+/ or ? dialog
+  helpOpen: 'help-open',
   changeItem: 'change-item',           // plus data-hunk-id
   historyRow: 'history-row',           // plus data-version
   docList: 'doc-list',

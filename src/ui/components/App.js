@@ -6,14 +6,22 @@
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
 // The doc iframe stays mounted in every mode, so switching between Review / Changes and Source / History never
 // reloads the document.
+// The Outline rail setting (Auto / Always / Never) and the menu button's choice for the page decide whether the rail
+// is beside the doc from 900 px up (railShown).
 // While a screen snip (Shift+B) waits for the reviewer in the macOS picker, a floating hint says what to do; it
 // blocks nothing (the picker itself is modal on the Mac).
+// The command palette, Settings and the keyboard shortcuts are global dialogs (also on the doc list); Submit review
+// belongs to the doc view. One dialog shows at a time.
 
-import { html, useState } from 'preact-htm';
-import { goToNewHead, navigate, recordWorkingCopy, reloadFrame, switchVersion, setMode, toggleNav, toggleSidebar } from '../actions.js';
+import { html, useEffect, useRef, useState } from 'preact-htm';
+import {
+  goToNewHead, navigate, railShown, recordWorkingCopy, reloadFrame, startRecording, stopRecording, switchVersion, setMode,
+  toggleNav, toggleSidebar,
+} from '../actions.js';
 import { agentName } from '../model.js';
 import { store, useStore } from '../state.js';
 import { ChangesView } from './ChangesView.js';
+import { CommandPalette } from './CommandPalette.js';
 import { Composer } from './Composer.js';
 import { DocFrame } from './DocFrame.js';
 import { HelpOverlay } from './HelpOverlay.js';
@@ -21,6 +29,7 @@ import { HistoryView } from './HistoryView.js';
 import { Home } from './Home.js';
 import { Lightbox } from './Lightbox.js';
 import { Outline } from './Outline.js';
+import { SettingsDialog } from './SettingsDialog.js';
 import { SourceView } from './SourceView.js';
 import { StatusBar } from './StatusBar.js';
 import { SubmitDialog } from './SubmitDialog.js';
@@ -41,6 +50,8 @@ export function App() {
     <${Toasts} />
     ${dialog === 'help' ? html`<${HelpOverlay} />` : null}
     ${dialog === 'image' ? html`<${Lightbox} />` : null}
+    ${dialog === 'palette' ? html`<${CommandPalette} />` : null}
+    ${dialog === 'settings' ? html`<${SettingsDialog} />` : null}
   </div>`;
 }
 
@@ -69,7 +80,7 @@ function DocView() {
     mode: st.mode,
     narrow: st.narrow,
     medium: st.medium,
-    rail: st.rail,
+    rail: railShown(st),
     drawer: st.drawer,
     nav: st.nav,
     sidebar: st.sidebar,
@@ -89,6 +100,7 @@ function DocView() {
     s.narrow ? 'is-narrow' : 'is-wide',
     !s.narrow && s.medium ? 'is-medium' : '',
     !s.narrow && s.medium && s.rail ? 'rail-open' : '',
+    !s.narrow && !s.medium && !s.rail ? 'rail-closed' : '',
     s.drawer ? 'drawer-open' : '',
     s.nav ? 'nav-open' : '',
     s.sidebar ? '' : 'sidebar-hidden',
@@ -138,9 +150,14 @@ function SidePanel({ narrow, mode }) {
 }
 
 function Banners() {
-  const s = useStore((st) => ({ ds: st.ds, version: st.version, newHead: st.newHead, mode: st.mode, lost: st.guest.lost }));
-  const [recording, setRecording] = useState(false);
+  const s = useStore((st) => ({ ds: st.ds, version: st.version, newHead: st.newHead, mode: st.mode, lost: st.guest.lost, recording: st.recording }));
   const [summary, setSummary] = useState('');
+  const recordRef = useRef(/** @type {HTMLInputElement|null} */ (null));
+  // The form opens from its button or from the command palette: its summary field takes the focus.
+  useEffect(() => {
+    if (s.recording) recordRef.current?.focus();
+  }, [s.recording]);
+  const recording = s.recording;
   const ds = s.ds;
   if (!ds) return null;
   const head = Number(ds.doc.head);
@@ -168,13 +185,14 @@ function Banners() {
           ? html`<button type="button" class="btn btn-sm" onClick=${() => switchVersion(head)}>Back to v${head}</button>`
           : html`<button type="button" class="btn btn-sm" onClick=${() => switchVersion('live')}>Preview live</button>`}
         ${recording
-          ? html`<form class="inline-form" onSubmit=${(/** @type {Event} */ e) => { e.preventDefault(); recordWorkingCopy(summary); setRecording(false); setSummary(''); }}>
-              <input type="text" aria-label="Revision summary" placeholder="Summary of your edit" value=${summary}
-                onInput=${(/** @type {any} */ e) => setSummary(e.currentTarget.value)} />
+          ? html`<form class="inline-form" onSubmit=${(/** @type {Event} */ e) => { e.preventDefault(); recordWorkingCopy(summary); stopRecording(); setSummary(''); }}>
+              <input ref=${recordRef} type="text" aria-label="Revision summary" placeholder="Summary of your edit" value=${summary}
+                onInput=${(/** @type {any} */ e) => setSummary(e.currentTarget.value)}
+                onKeyDown=${(/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopRecording(); } }} />
               <button type="submit" class="btn btn-sm btn-primary">Record</button>
-              <button type="button" class="btn btn-sm" onClick=${() => setRecording(false)}>Cancel</button>
+              <button type="button" class="btn btn-sm" onClick=${stopRecording}>Cancel</button>
             </form>`
-          : html`<button type="button" class="btn btn-sm" onClick=${() => setRecording(true)}>Record as my revision</button>`}
+          : html`<button type="button" class="btn btn-sm" onClick=${startRecording}>Record as my revision</button>`}
       </span>
     </div>`);
   }

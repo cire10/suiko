@@ -1,8 +1,10 @@
 // @ts-check
-// Top bar (design 11.1): doc title, version picker, mode tabs (a dropdown below 900 px), Changes base picker,
-// comment / pick / snip / screen-snip / hide / theme / help tools, presence chip, round status, the review progress
-// chip, Drafts count and Submit review. The capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are
-// discoverable; the screen-snip button disappears once the daemon said it cannot capture the screen (not macOS).
+// Top bar (design 11.1): doc title, version picker, mode tabs (a dropdown below 900 px), Changes base picker, the
+// command palette button (⌘K), comment / pick / snip / screen-snip / hide / theme tools, Settings (gear) and the
+// keyboard shortcuts, presence chip, round status, the review progress chip, Drafts count and Submit review. The
+// capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are discoverable; the screen-snip button
+// disappears once the daemon said it cannot capture the screen (not macOS). The menu button (outline drawer / rail)
+// shows whenever the outline is not simply beside the doc (narrow or medium width, or the Outline rail setting).
 // The second row keeps a fixed, keyed structure (optional items are empty slots, not inserted / removed nodes) and
 // Submit review is its own component: DocState refreshes arriving over SSE (drafts count, presence, a new round)
 // must never re-create or move the button between a mousedown and its mouseup, or the browser drops the click.
@@ -10,14 +12,14 @@
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import {
-  cycleTheme, navigate, openComposer, openSubmit, setBase, setMode, snipScreen, switchVersion, toggleHidden, toggleNav,
-  togglePick, toggleSidebar, toggleSnip,
+  cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase, setMode, snipScreen,
+  switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar, toggleSnip,
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import {
   agentName, draftCount, filterCounts, presenceInfo, reviewProgress, roundSummary, versionNumbers,
 } from '../model.js';
-import { store, useStore } from '../state.js';
+import { useStore } from '../state.js';
 import { Chip, Icon } from './common.js';
 
 const MODES = /** @type {const} */ ([
@@ -39,7 +41,8 @@ export function TopBar() {
     theme: st.theme,
     narrow: st.narrow,
     medium: st.medium,
-    rail: st.rail,
+    rail: railShown(st),
+    railToggle: railToggleShown(st),
     drawer: st.drawer,
     sidebar: st.sidebar,
     nav: st.nav,
@@ -70,7 +73,7 @@ export function TopBar() {
 
   return html`<header class="topbar">
     <div class="tb-row">
-      ${s.narrow || s.medium ? html`<button type="button" class="icon-btn nav-toggle" aria-label="Outline and history" aria-controls="sr-nav"
+      ${s.railToggle ? html`<button type="button" class="icon-btn nav-toggle" aria-label="Outline and history" aria-controls="sr-nav"
         aria-expanded=${s.narrow ? s.nav : s.rail} onClick=${toggleNav}><${Icon} name="menu" /></button>` : null}
       <a class="brand" href="/" title="All documents" onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); navigate('/'); }}>
         <${Icon} name="comment" size=${16} /><span class="brand-text">SpecReview</span></a>
@@ -100,6 +103,7 @@ export function TopBar() {
         </select>
       </span>` : null}
       <span class="spacer"></span>
+      <${PaletteButton} />
       <span class="tools">
         <button type="button" class="icon-btn" data-selection-comment disabled=${!s.selection || !canPick}
           aria-label="Comment on the selection" title="Comment on the selected text (c)"
@@ -132,8 +136,8 @@ export function TopBar() {
           title=${`Theme: ${s.theme} (t)`} onClick=${cycleTheme}>
           <${Icon} name=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'system'} />
         </button>
-        <button type="button" class="icon-btn" aria-label="Keyboard shortcuts" title="Help (?)"
-          onClick=${() => store.set({ dialog: 'help' })}><${Icon} name="help" /></button>
+        <${SettingsButton} />
+        <${HelpButton} />
       </span>
     </div>
     <div class="tb-row tb-sub">
@@ -153,6 +157,29 @@ export function TopBar() {
       <${SubmitButton} key="submit" />
     </div>
   </header>`;
+}
+
+/** The command palette button: a search field look-alike with its key (⌘K / Ctrl K). Also on the doc list. */
+export function PaletteButton() {
+  return html`<button type="button" class="palette-btn" data-testid=${TESTID.commandPaletteOpen} onClick=${() => openDialog('palette')}
+    aria-label="Command palette" aria-keyshortcuts="Meta+K Control+K" title=${`Command palette: run anything by name (${shortcut(KEYS.palette)})`}>
+    <${Icon} name="search" size=${14} /><span class="palette-btn-text">Commands</span>
+    <kbd class="palette-btn-kbd" aria-hidden="true">${shortcut(KEYS.palette, { compact: true })}</kbd>
+  </button>`;
+}
+
+/** The gear: Settings (⌘,). Also on the doc list. */
+export function SettingsButton() {
+  return html`<button type="button" class="icon-btn" data-testid=${TESTID.settingsOpen} aria-label="Settings"
+    aria-keyshortcuts="Meta+, Control+," title=${`Settings (${shortcut(KEYS.settings)})`} onClick=${() => openDialog('settings')}>
+    <${Icon} name="gear" /></button>`;
+}
+
+/** Keyboard shortcuts (⌘/ or ?). Also on the doc list. */
+export function HelpButton() {
+  return html`<button type="button" class="icon-btn" data-testid=${TESTID.helpOpen} aria-label="Keyboard shortcuts"
+    aria-keyshortcuts="Meta+/ Control+/ ?" title=${`Keyboard shortcuts (${shortcut(KEYS.help)} or ?)`}
+    onClick=${() => openDialog('help')}><${Icon} name="help" /></button>`;
 }
 
 /** Submit review: no props, so a TopBar re-render never touches it (see the header). */
