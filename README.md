@@ -83,7 +83,7 @@ Without a checkout, give it the repository's git URL. There is no public downloa
 curl -fsSL <raw URL of install.sh> | SPECREVIEW_REPO=<git URL> sh -s -- --yes
 ```
 
-That clones into `~/.specreview/app` (or `SPECREVIEW_APP_DIR`; `SPECREVIEW_REF` picks a branch or tag) and updates the clone when you run it again.
+That clones into `~/.specreview/app` (or `SPECREVIEW_APP_DIR`; `SPECREVIEW_REF` picks a branch or tag) and updates the clone when you run it again (a run without `SPECREVIEW_REF` moves a pinned clone back to the default branch).
 
 Once the CLI is installed, configure or reconfigure the agents with `specreview install`:
 
@@ -100,7 +100,7 @@ What it configures (user scope; `--project` writes the project-level equivalents
 
 | Agent | Detected by | What `specreview install` writes |
 |---|---|---|
-| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and three hooks in `settings.json` with absolute paths: `PreToolUse` on `Write`, `UserPromptSubmit`, and the plan-mode gate (`PermissionRequest` on `ExitPlanMode`, which opens Claude's plan in SpecReview). Skipped when the SpecReview plugin is installed, because the hooks would run twice. |
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and three hooks in `settings.json` with absolute paths: `PreToolUse` on `Write`, `UserPromptSubmit`, and the plan-mode gate (`PermissionRequest` on `ExitPlanMode`, which opens Claude's plan in SpecReview). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
 | Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
 | Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
 | Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
@@ -113,7 +113,20 @@ What it configures (user scope; `--project` writes the project-level equivalents
 
 Google Antigravity and Devin Desktop (Windsurf) are listed as not configured: their config files are not documented well enough to write safely.
 
-How it edits your config: JSON files are parsed and only the `specreview` entry (or the hooks that run `specreview`) is added or replaced, keeping the file's indentation; a file that is not valid JSON is refused and never rewritten. Markdown files get a block between `<!-- specreview:begin -->` and `<!-- specreview:end -->`, and Codex's `config.toml` a block between `# specreview:begin` and `# specreview:end`; everything outside the markers is kept as is. The first time it changes an existing file, it saves a copy as `<file>.specreview-backup`. Writes are atomic, and re-running is idempotent. `--only` configures an agent even when it is not detected; `--skip` leaves agents out. A skill or command copy you edited after installing is kept by `uninstall`.
+How it edits your config:
+
+- **JSON** files are parsed and only the `specreview` entry (or the hooks that run `specreview`) is added or replaced, keeping the file's indentation. A file that is not valid JSON is refused and never rewritten.
+- **Markdown** files get a block between `<!-- specreview:begin -->` and `<!-- specreview:end -->`; everything outside the markers is kept as is. If the markers are damaged (a begin line without its end line, or two blocks), the file is refused rather than guessed at.
+- **Codex's `config.toml`** gets a block between `# specreview:begin` and `# specreview:end` that holds only the `[mcp_servers.specreview]` table. Codex itself writes into `config.toml` (project trust when you open a folder, `codex mcp add`) and may put its tables inside those markers; they are kept: a reinstall moves them below the block, `uninstall` leaves them. A `specreview` server you defined yourself is left alone, and a file that does not parse is refused.
+- The first time it changes an existing file, it saves a copy as `<file>.specreview-backup`. A file of yours that a skill or command copy replaces is backed up every time it changed, to `<file>.specreview-backup-<time>` once the first backup exists.
+- Writes are atomic and go through symlinks (a config managed by stow, home-manager or chezmoi stays a link). Re-running is idempotent. If one file cannot be written, the others still are, and the failure is reported.
+- `uninstall` removes only what install added. It deletes a config file only when install created it; one you already had (even `{}`) is kept. A skill or command copy you edited after installing is kept too.
+
+`--only` configures an agent even when it is not detected; `--skip` leaves agents out.
+
+`--project` writes the project-level files. Claude Code's hooks then go to `.claude/settings.local.json`, its personal, uncommitted settings file. The project files hold paths that exist only on your machine, so keep them out of version control (the dry run lists them); each teammate runs `specreview install --project` for themselves. A project that has a `CLAUDE.md` but no `AGENTS.md` gets no `AGENTS.md`: OpenCode and Amp read `CLAUDE.md` only while `AGENTS.md` does not exist.
+
+The commands written into the agents' configs use absolute paths. For node, that is the `node` on your `PATH` when it is the one running the install (for example Homebrew's `/opt/homebrew/bin/node`, which keeps working after `brew upgrade`). With nvm, asdf or Volta the path names one Node version: re-run `specreview install --apply` after you switch versions (`specreview doctor` flags outdated entries).
 
 When `specreview` is not on the `PATH` the agents see, the installed instructions use the absolute command (`"<path to node>" "<path to specreview>/bin/specreview.js"`) instead.
 
