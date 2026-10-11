@@ -293,6 +293,47 @@ export function registerApiRoutes(router, deps) {
     sendJson(res, 200, await engine.call('recordReviewerVersion', wsId, docId, { summary: body.summary ?? '', by: await engine.reviewer(wsId) }));
   });
 
+  // ---------------------------------------------------------------- code reviews (WP4, code-contracts.md 11.2)
+  // GET-only reads of a code doc's rounds; the file path goes in the query (URL-encoded). A non-code doc is 400, an
+  // unknown path 404 (the engine's NotFoundError), a malformed v / from / to / context / side 422, and a build
+  // without the code engine 422 (CODE_NOT_AVAILABLE). Nothing here reads a file outside the store: the engine serves
+  // the round's blobs.
+
+  /** @param {Record<string, string>} params */
+  const codeDoc = async (params) => {
+    const r = await resolveDoc(params);
+    if (!isCode(r.doc)) throw new HttpError(400, 'not a code review');
+    return r;
+  };
+
+  router.get(`${D}/files`, async ({ res, params, query }) => {
+    const { wsId, docId, doc } = await codeDoc(params);
+    const q = codeRound(doc, query);
+    sendJson(res, 200, await engine.call('codeFiles', wsId, docId, q));
+  });
+
+  router.get(`${D}/files/diff`, async ({ res, params, query }) => {
+    const { wsId, docId, doc } = await codeDoc(params);
+    const path = codePath(query.get('path'));
+    const q = codeRound(doc, query);
+    const context = codeContext(query.get('context'));
+    sendJson(res, 200, await engine.call('codeFileDiff', wsId, docId, { path, ...q, ...(context === undefined ? {} : { context }) }));
+  });
+
+  router.get(`${D}/files/source`, async ({ res, params, query }) => {
+    const { wsId, docId, doc } = await codeDoc(params);
+    const path = codePath(query.get('path'));
+    if (query.has('from') || query.has('to')) throw invalid('files/source takes v (one round), not from/to');
+    const q = codeRound(doc, query);
+    const side = query.get('side') ?? 'new';
+    if (side !== 'new' && side !== 'old') throw invalid(`side must be new or old, not ${side}`);
+    sendJson(res, 200, await engine.call('codeFileSource', wsId, docId, { path, v: /** @type {{ v: number }} */ (q).v, side }));
+  });
+
+  // The code poller (watch.js, 11.3) reads a code doc's working tree through the engine: docState's `working`
+  // comes from kindOf(doc).workingState (codeWorkingState, memoized), the value the UI shows.
+  deps.sse?.hub?.setCodeWorking?.(async (wsId, docId) => (await engine.call('docState', wsId, docId))?.working ?? null);
+
   // ---------------------------------------------------------------- attachments, previews, session
 
   router.post(`${D}/attachments`, async ({ req, res, params }) => {
@@ -431,6 +472,58 @@ export function parseVersion(raw) {
  */
 function defaultVersion(doc) {
   return doc.head ? doc.head : 'live';
+}
+
+/** Longest file path a code route accepts. */
+const MAX_CODE_PATH = 4096;
+
+/**
+ * The round(s) of a code route: {v} (default head) or {from, to} (to defaults to head, from to the last reviewed
+ * round or to - 1). Recorded rounds only: 'live' and v together with from/to are 422.
+ * @param {import('../shared/types.js').Doc} doc
+ * @param {URLSearchParams} query
+ * @returns {{ v: number } | { from: number, to: number }}
+ */
+function codeRound(doc, query) {
+  /** @param {string} name */
+  const round = (name) => {
+    const v = parseVersion(query.get(name));
+    if (v === 'live') throw invalid(`${name} must be a recorded round (a number), not live`);
+    return v;
+  };
+  const v = round('v');
+  const from = round('from');
+  const to = round('to');
+  if (v !== undefined && (from !== undefined || to !== undefined)) throw invalid('give v, or from and to, not both');
+  const head = doc.head || 1;
+  if (from === undefined && to === undefined) return { v: v ?? head };
+  const end = to ?? head;
+  if (from !== undefined) return { from, to: end };
+  const last = doc.lastReviewedVersion;
+  return { from: typeof last === 'number' && last >= 1 && last < end ? last : Math.max(1, end - 1), to: end };
+}
+
+/**
+ * A repo-relative file path from the query (the engine checks it against the round's files).
+ * @param {string | null} raw
+ * @returns {string}
+ */
+function codePath(raw) {
+  if (typeof raw !== 'string' || raw === '') throw invalid('path is required');
+  if (raw.length > MAX_CODE_PATH) throw invalid(`path is longer than ${MAX_CODE_PATH} characters`);
+  if (raw.includes('\0')) throw invalid('path contains a NUL character');
+  return raw;
+}
+
+/**
+ * Optional context lines of a code diff: 0..10000, else 422.
+ * @param {string | null} raw
+ * @returns {number | undefined}
+ */
+function codeContext(raw) {
+  if (raw === null || raw === '') return undefined;
+  if (!/^\d{1,5}$/.test(raw) || Number(raw) > 10000) throw invalid(`context must be a number of lines (0-10000), not ${raw}`);
+  return Number(raw);
 }
 
 /**
