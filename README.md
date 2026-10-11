@@ -71,12 +71,16 @@ Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safa
 
 ### Quick install
 
-From a checkout of this repository:
+On a new machine:
 
 ```bash
-./install.sh          # installs the CLI, then lists what it would configure for each coding agent it finds
-./install.sh --yes    # the same, and writes it
+git clone https://github.com/cire10/html_documentation_annotator.git specreview
+cd specreview
+./install.sh                   # installs the CLI, then lists what it would configure for each coding agent it finds
+specreview install --apply     # writes that configuration (same as ./install.sh --yes)
 ```
+
+Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
 
 `install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `specreview` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `specreview install`. Options after `--yes` go to `specreview install`, e.g. `./install.sh --yes --only claude,codex`.
 
