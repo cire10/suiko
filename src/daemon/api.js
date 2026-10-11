@@ -37,6 +37,7 @@ const MAX_FRAGMENT_CHARS = 1_000_000;
  * @property {import('./engine.js').Engine} engine
  * @property {import('./sse.js').SseManager} sse
  * @property {string} version package version
+ * @property {string} [build] fingerprint of the code the daemon loaded (core/util/build.js)
  * @property {() => { uiPort: number, contentPort: number }} ports
  * @property {(reason: string) => void} shutdown
  */
@@ -68,7 +69,7 @@ export function registerApiRoutes(router, deps) {
   // ---------------------------------------------------------------- daemon
 
   router.get('/api/health', ({ res }) => {
-    sendJson(res, 200, { ok: true, name: APP_NAME, version: deps.version, pid: process.pid });
+    sendJson(res, 200, { ok: true, name: APP_NAME, version: deps.version, build: deps.build, pid: process.pid });
   });
 
   router.post('/api/shutdown', ({ res }) => {
