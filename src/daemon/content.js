@@ -18,6 +18,7 @@
 //                                            thumbnails (DocState.attachmentBase). Refused to same-origin requests
 //                                            (Sec-Fetch-Site: same-origin), so the doc's own (untrusted) script cannot
 //                                            read the reviewer's screenshots; the UI origin loads them as same-site.
+//   (a code doc: 404 for every /c/<docKey>/<ver>/ route; only __att is served)
 //   /<anything else>                         root-absolute URL used by a doc ('/img/a.png'): 307 to the same path
 //                                            under the Referer's /c/<docKey>/<ver>/ prefix; 404 without one
 //
@@ -47,7 +48,7 @@ import { HttpError, notFound, sendFile, sendText } from './http-util.js';
 import { contentTypeOf } from './mime.js';
 import { encodeRelPath, encodeSegments, isAllowedHost, isSafeMethod, loopbackOrigins, parseTarget, setBaseHeaders } from './security.js';
 import { DOC_KEY_RE } from './workspaces.js';
-import { isSnapshot } from '../core/store/snapshot.js';
+import { isCode, isVirtual } from '../core/store/snapshot.js';
 
 const log = createLogger('daemon.content');
 
@@ -271,6 +272,9 @@ export class ContentOrigin {
     const ref = await this.deps.index.resolveDocKey(key);
     if (!ref) throw notFound();
     const { store, doc } = await this.deps.index.doc(ref.wsId, ref.docId);
+    // a code review is never served here (its diffs are text nodes in the UI origin): 404 for every /c/ route of a
+    // code doc but __att (its review screenshots, above)
+    if (isCode(doc)) throw notFound();
     const rel = rest.join('/');
     if (!rel) {
       res.writeHead(302, { Location: `/c/${key}/${ver}/${encodeRelPath(doc.path)}`, 'Cache-Control': 'no-store' });
@@ -367,7 +371,7 @@ export class ContentOrigin {
       }
     }
     // a snapshot doc (piped text, an agent message, a plan) is not a workspace file: it never reaches workspace files
-    if (!listed && isSnapshot(doc)) throw notFound();
+    if (!listed && isVirtual(doc)) throw notFound();
     const abs = realpathWithin(store.root, rel);
     if (!abs) throw notFound();
     // the real file must not be a denied path either (a symlink into .git/, a key file...)

@@ -21,6 +21,7 @@
 
 import { APP_NAME, LIMITS, VERDICTS } from '../shared/protocol.js';
 import { getRender, renderFragment } from '../core/render/index.js';
+import { docKind, docOriginType, isCode } from '../core/store/snapshot.js';
 import { createLogger } from '../core/util/log.js';
 import { captureScreenRegion, imageMime } from '../core/util/screen-capture.js';
 import { HttpError, invalid, notFound, readJsonBody, sendJson } from './http-util.js';
@@ -117,6 +118,8 @@ export function registerApiRoutes(router, deps) {
     if (v === undefined) throw invalid('version is required');
     const t = (await engine.call('domTargets', wsId, docId, v)) ?? {};
     let outline = t.outline;
+    // a code doc has no rendered outline (its versions are diffs): the fallback is empty
+    if (!Array.isArray(outline) && isCode(doc)) outline = [];
     if (!Array.isArray(outline)) {
       try {
         outline = (await getRender(store, doc, v)).outline ?? [];
@@ -388,9 +391,10 @@ async function docSummary(store, wsId, root, doc, allListening) {
     root,
     id: doc.id,
     path: doc.path,
-    // snapshot docs (a plan, an agent message, piped text) have no working file: the UI labels them by origin
-    kind: doc.kind === 'snapshot' ? 'snapshot' : 'file',
-    origin: doc.kind === 'snapshot' ? doc.origin?.type ?? null : null,
+    // snapshot docs (a plan, an agent message, piped text) and code reviews have no working file: the UI labels them
+    // by kind and origin ('file' | 'snapshot' | 'code'; origin 'plan', 'message', 'stdin', 'diff'... or null)
+    kind: docKind(doc),
+    origin: docOriginType(doc),
     title: doc.title ?? doc.path,
     format: doc.format,
     head: doc.head ?? 0,

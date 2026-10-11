@@ -110,8 +110,8 @@ export function preWrite(input, o) {
   if (!store) return null;
   const rel = path.relative(realpath(store.root), realpath(file)).split(path.sep).join('/');
   if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  // a snapshot doc's path is synthetic: it never stands for a file on disk
-  const doc = findDoc(store.storeDir, (d) => d.path === rel && d.kind !== 'snapshot');
+  // a snapshot or code doc's path is synthetic: it never stands for a file on disk (file docs only; they have no kind)
+  const doc = findDoc(store.storeDir, (d) => d.path === rel && (d.kind === undefined || d.kind === 'file'));
   if (!doc || doc.state === 'closed') return null;
   const reviewIds = listIds(path.join(store.storeDir, 'docs', doc.id, 'reviews'), 'rv');
   if (!reviewIds.length) return null;
