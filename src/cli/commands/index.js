@@ -20,6 +20,7 @@ export const COMMANDS = {
   ask: { load: () => import('./ask.js'), summary: 'Ask the reviewer a question anchored on the doc', group: 'loop' },
   snip: { load: () => import('./snip.js'), summary: 'Reviewer: snip the screen (macOS) into a draft comment, or --send it now', group: 'loop' },
   last: { load: () => import('./last.js'), summary: "Review the agent's last message (Claude Code transcript)", group: 'loop' },
+  snapshot: { load: () => import('./snapshot.js'), summary: 'Snapshot a web page for review (uses the network)', group: 'loop' },
   threads: { load: () => import('./threads.js'), summary: 'List threads, one line each', group: 'inspect' },
   show: { load: () => import('./show.js'), summary: 'Show a thread with its timeline, or old source lines', group: 'inspect' },
   diff: { load: () => import('./diff.js'), summary: 'What changed between versions (default: last reviewed..head)', group: 'inspect' },

@@ -2,6 +2,7 @@
 // MCP tool table (design 9.7, agent-protocol 15). Every tool maps its arguments onto the input of the matching CLI
 // command module and runs the same execute(), so the tool's text content is the CLI text and its structuredContent
 // is the CLI's --json value. Additive tools beyond the design table: specreview_ask, specreview_threads.
+// specreview_snapshot is the only tool that uses the network (public hosts only: no allow_private, reader or as_html).
 // specreview_revise deliberately has no `force` (only a user at a terminal should force a refused revision).
 
 import path from 'node:path';
@@ -45,6 +46,17 @@ export const TOOLS = [
     command: 'open',
     toInput: async (a) => ({ paths: [a.path], title: a.title }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'specreview_snapshot',
+    title: 'Snapshot a web page for review',
+    description:
+      'Fetch a public web page once (uses the network), record it as a doc for review (scripts never run; the HTML becomes Markdown), open the review UI and return its URL. Calling it again for the same URL records a new version when the page changed. Public hosts only: a page on localhost or a private network needs the CLI (`specreview snapshot <url> --allow-private`). Refused when the network is turned off (SPECREVIEW_OFFLINE=1, or network.allow false in the user config).',
+    schema: z.object({ url: z.string().min(1).describe('The http(s) URL of the page'), title: z.string().optional(), workspace: workspaceArg }),
+    command: 'snapshot',
+    // no allow_private, reader or as_html (design 2.12): public pages through the user's default reader only
+    toInput: async (a) => ({ url: a.url, title: a.title }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: 'specreview_wait',
