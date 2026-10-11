@@ -19,6 +19,9 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Snipping](#snipping)
 - [The review loop, step by step](#the-review-loop-step-by-step)
+- [Plan-mode gate](#plan-mode-gate)
+- [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text)
+- [Folders](#folders)
 - [Command reference](#command-reference)
 - [Storage layout and git](#storage-layout-and-git)
 - [Configuration](#configuration)
@@ -91,7 +94,9 @@ The plugin adds:
 
 - the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
 - the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
-- two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
+- the **`/specreview-last`** command: opens Claude's previous message for review (see [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text));
+- two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up;
+- the **plan-mode gate**: `specreview plan-gate` (PermissionRequest on `ExitPlanMode`) sends every plan through SpecReview before Claude may leave plan mode (see [Plan-mode gate](#plan-mode-gate)).
 
 The plugin's hooks run `specreview` from your `PATH`. That works when Claude Code starts from a terminal. If you use nvm, asdf or Volta and start Claude Code from the Dock or the desktop app, it may not see your shell's `PATH`, so the hooks fail with `command not found` (non-blocking, but they do nothing). Use 2b instead.
 
@@ -290,6 +295,36 @@ If the edit touched agreed text, deleted content no thread asked about, or rewro
 
 The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP tools) is in [docs/agent-protocol.md](docs/agent-protocol.md).
 
+## Plan-mode gate
+
+With the plugin installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in SpecReview and Claude waits for your review. Comment on it as on any spec, then submit:
+
+- **Approve**: Claude leaves plan mode and starts on the plan.
+- **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed.
+
+Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so request changes when they matter.
+
+Without the plugin, add the hook to your Claude Code settings:
+
+```json
+{"hooks": {"PermissionRequest": [{"matcher": "ExitPlanMode", "hooks": [{"type": "command", "command": "specreview plan-gate", "timeout": 345600}]}]}}
+```
+
+`specreview plan-gate --timeout 30m` gives up after that long; `--browser none` (or `SPECREVIEW_BROWSER=none`) keeps the browser closed and prints the URL on stderr.
+
+## Reviewing the last message and piped text
+
+Not everything worth reviewing is a file. SpecReview can review text as a **snapshot**: each version is recorded from the text itself, and threads, **Review changes** and **History** work as usual.
+
+- **Claude's last message:** type `/specreview-last` in Claude Code (or run `specreview last` in the session). The message opens in the review UI and Claude waits in the background. After you submit, Claude revises its answer and records it as the next version (`specreview revise <doc> --source <file>`), so you can review the changes.
+- **Piped text:** `pbpaste | specreview open -` reviews whatever you pipe in (Markdown, up to 5 MB). Give it a name to keep iterating on one doc: `some-command | specreview open - --name notes` records a new version each time you pipe to the same name.
+
+When you run these from your home directory (which can never be a workspace), the doc goes to a scratch workspace under `~/.specreview/scratch/`, and every command SpecReview prints includes the `--workspace` flag it needs. Only Claude Code transcripts are supported by `last` for now.
+
+## Folders
+
+`specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks that lead outside the folder, up to 200 files (it says what it skipped). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
+
 ## Command reference
 
 `<doc>` is a doc id (`token-service`) or a file path. Line numbers are always lines of the current file on disk.
@@ -297,12 +332,16 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | Command | What it does |
 |---|---|
 | `specreview open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track a spec, record v1, start the server, print the UI URL |
+| `specreview open <dir>` | Open every spec file below a folder (at most 200); print the home URL listing them |
+| `specreview open - [--name N] [--title T]` | Review piped Markdown; the same `--name` records a new version |
+| `specreview last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
 | `specreview wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted; print the packet |
 | `specreview feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `specreview apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
 | `specreview edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Exact replace tagged to threads (`--stdin` for a JSON batch) |
 | `specreview reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without recording a version |
 | `specreview revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies; enforce guards |
+| `specreview revise <doc> --source <file\|-> [--replies <file\|->]` | Record a new version of a snapshot doc (a message or piped text) from a file |
 | `specreview revert <doc> (--hunk hN \| --lock L1)` | Undo one unrecorded hunk, or restore agreed text |
 | `specreview reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor |
 | `specreview ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | The agent asks the reviewer a question |
@@ -317,6 +356,7 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 | `specreview serve [--foreground] [--port N]` · `specreview stop [--rotate]` · `specreview doctor [--fix]` | Server control and health checks |
 | `specreview mcp` | stdio MCP server |
 | `specreview hook pre-write` · `specreview hook prompt` | Claude Code hook entry points |
+| `specreview plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (PermissionRequest hook on ExitPlanMode) |
 | `specreview install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install integrations (prints only, unless `--apply`) |
 
 Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port).

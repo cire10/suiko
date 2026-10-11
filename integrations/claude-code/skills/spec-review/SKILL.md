@@ -105,6 +105,13 @@ Give one line per thread in chat: what you changed, or what you asked. Then star
 - A thread is anchored on the wrong text: `specreview reanchor <doc> tN --lines A-B`.
 - The user explicitly asks for a full rewrite: change the file with Edit (never Write), then `specreview revise <doc> --allow-rewrite --replies -`.
 
+## 8. Plans, your last message and piped text
+
+These docs are **snapshots**, not files: a Claude Code plan (the plan gate), your last message (`/specreview-last`) or text piped to `specreview open -`. The packet header names the kind, e.g. `plan-cache (Claude Code plan)`.
+
+- **Plan gate.** With the plan-mode hook installed, ExitPlanMode opens your plan in SpecReview and waits for the review. Approved: carry on. Otherwise ExitPlanMode is denied with feedback that cites the plan file and its line numbers. Make targeted Edit-tool changes to that plan file (never rewrite it), address every thread, then call ExitPlanMode again. The reviewer sees a diff.
+- **Other snapshots** have no file to edit, so `apply`, `edit` and `revert` are refused. Write your complete revised text to a temporary file outside the project (`specreview show <doc>` prints the current version), address every thread in it, then record it with `specreview revise <doc> --source <file> --replies -` (replies JSON on stdin, as in section 5). If the `next:` line includes `--workspace <dir>`, keep that flag on every command for the doc.
+
 ## Cheat-sheet
 
 | Command | Use |
@@ -120,6 +127,8 @@ Give one line per thread in chat: what you changed, or what you asked. Then star
 | `specreview threads <doc>` / `specreview show <doc> <tid>` | List threads / one full thread |
 | `specreview diff <doc> --stat` / `specreview log <doc>` / `specreview status` | What changed / timeline / overview |
 | `specreview final <doc> --decisions` | Check the final version and export the decision log |
+| `specreview last` / `specreview open - [--name N]` | Review your last message / piped Markdown (snapshot docs) |
+| `specreview revise <doc> --source <file> --replies -` | Record a new version of a snapshot doc |
 
 Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, conflict, not unique) · 4 not found · 5 closed · 6 superseded.
 
