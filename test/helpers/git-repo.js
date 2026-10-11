@@ -108,3 +108,91 @@ export function lines(n, fn = (i) => `line ${i}`) {
   for (let i = 1; i <= n; i++) s += `${fn(i)}\n`;
   return s;
 }
+
+/**
+ * A reviewer draft on lines of a file side of round `version` (default head), as the UI's DiffTable sends it.
+ * @param {any} ctx
+ * @param {string} docId
+ * @param {{ file: string, lines: [number, number] | number, side?: 'new' | 'old', type?: string, severity?: string,
+ *   body?: string, suggestion?: string, version?: number }} o suggestion: the replacement text (type suggestion)
+ */
+export async function lineDraft(ctx, docId, o) {
+  const { saveDraft } = await import('../../src/core/review/ops.js');
+  const [a, b] = Array.isArray(o.lines) ? o.lines : [o.lines, o.lines];
+  const doc = await ctx.store.requireDoc(docId);
+  return saveDraft(ctx, docId, {
+    kind: 'thread',
+    type: o.suggestion !== undefined ? 'suggestion' : o.type ?? 'comment',
+    ...(o.severity ? { severity: o.severity } : {}),
+    version: o.version ?? doc.head,
+    capture: { kind: 'line', file: o.file, side: o.side ?? 'new', startLine: a, endLine: b },
+    body: o.body ?? 'Say more.',
+    ...(o.suggestion !== undefined ? { suggestion: { new: o.suggestion } } : {}),
+  });
+}
+
+/**
+ * A reviewer draft on a whole file (binary, deleted, skipped) or, without `file`, on the whole review.
+ * @param {any} ctx
+ * @param {string} docId
+ * @param {{ file?: string, type?: string, body?: string }} o
+ */
+export async function fileDraft(ctx, docId, o) {
+  const { saveDraft } = await import('../../src/core/review/ops.js');
+  const doc = await ctx.store.requireDoc(docId);
+  return saveDraft(ctx, docId, {
+    kind: 'thread',
+    type: o.type ?? 'comment',
+    version: doc.head,
+    capture: o.file ? { kind: 'file', file: o.file } : { kind: 'doc' },
+    body: o.body ?? 'Say more.',
+  });
+}
+
+/**
+ * Submits the reviewer's drafts.
+ * @param {any} ctx
+ * @param {string} docId
+ * @param {{ verdict?: string, body?: string }} [o]
+ */
+export async function submit(ctx, docId, o = {}) {
+  const { submitReview } = await import('../../src/core/review/ops.js');
+  return submitReview(ctx, docId, { verdict: o.verdict ?? 'changes_requested', body: o.body ?? '', by: 'Eric' });
+}
+
+/**
+ * The packet a `wait` would deliver now (nothing is marked delivered): { text, packet }.
+ * @param {any} ctx
+ * @param {string} docId
+ * @param {{ allOpen?: boolean }} [o]
+ */
+export async function packetOf(ctx, docId, o = {}) {
+  const { buildDocPacket } = await import('../../src/core/review/ops.js');
+  return buildDocPacket(ctx, await ctx.store.requireDoc(docId), o);
+}
+
+/**
+ * The repository of the design's round-1 example (design 4.10): main with src/auth/refresh.js and
+ * src/auth/store.js, origin/main (and origin/HEAD) at main, and feat/token-refresh checked out with a reuse check at
+ * refresh.js L41-44, the TTL at L88, legacyLookup (base L12-14) removed from store.js and a new test file.
+ * @returns {Promise<TestRepo & { mergeBase: string }>}
+ */
+export async function designRepo() {
+  const refreshBase = lines(96, (i) => (i === 84 ? 'const ttlSec = 3600;' : `// refresh ${i}`));
+  const storeBase = lines(20, (i) =>
+    i === 12 ? 'export function legacyLookup(id) {' : i === 13 ? '  return db.tokens.findOne({ id });' : i === 14 ? '}' : `// store ${i}`,
+  );
+  const r = await makeRepo({ files: { 'src/auth/refresh.js': refreshBase, 'src/auth/store.js': storeBase } });
+  const mergeBase = r.git('rev-parse', 'HEAD');
+  r.git('update-ref', 'refs/remotes/origin/main', mergeBase);
+  r.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+  r.git('checkout', '-q', '-b', 'feat/token-refresh');
+  const refresh = refreshBase.split('\n');
+  refresh.splice(40, 0, 'if (stored.used) {', '  await revokeFamily(stored.family);', '  throw new TokenReuseError();', '}');
+  refresh[87] = 'const ttlSec = 30 * 24 * 3600;';
+  r.write('src/auth/refresh.js', refresh.join('\n'));
+  r.commit('reuse check');
+  r.write('src/auth/store.js', storeBase.split('\n').filter((_, i) => i < 11 || i > 13).join('\n'));
+  r.write('test/refresh.test.js', "import { test } from 'node:test';\n\ntest('refresh', () => {});\n");
+  return Object.assign(r, { mergeBase });
+}
