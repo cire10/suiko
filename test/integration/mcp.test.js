@@ -82,7 +82,7 @@ describe('mcp (in-process)', () => {
     const expected = [
       'specreview_apply', 'specreview_ask', 'specreview_diff', 'specreview_edit', 'specreview_feedback', 'specreview_final',
       'specreview_log', 'specreview_open', 'specreview_reanchor', 'specreview_reply', 'specreview_revert', 'specreview_review', 'specreview_revise',
-      'specreview_show', 'specreview_status', 'specreview_threads', 'specreview_wait',
+      'specreview_show', 'specreview_snapshot', 'specreview_status', 'specreview_threads', 'specreview_wait',
     ];
     assert.deepEqual(names, expected);
     assert.equal(TOOLS.length, expected.length);
@@ -91,7 +91,24 @@ describe('mcp (in-process)', () => {
     const revise = res.result.tools.find((/** @type {any} */ t) => t.name === 'specreview_revise');
     assert.deepEqual(revise.inputSchema.required.sort(), ['doc', 'summary', 'threads']);
     assert.equal(revise.inputSchema.properties.force, undefined);
+    // the network tool: public hosts through the default reader only
+    const snap = res.result.tools.find((/** @type {any} */ t) => t.name === 'specreview_snapshot');
+    assert.deepEqual(Object.keys(snap.inputSchema.properties).sort(), ['title', 'url', 'workspace']);
+    assert.equal(snap.annotations.openWorldHint, true);
     await c.close();
+  });
+
+  test('specreview_snapshot refuses a private host and an offline environment without fetching', async () => {
+    const c = await connect();
+    const priv = await c.call('specreview_snapshot', { url: 'http://127.0.0.1:9/spec.html' });
+    assert.equal(priv.isError, true);
+    assert.match(priv.content[0].text, /non-public address/);
+    await c.close();
+    const off = await connect({}, { env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, SPECREVIEW_OFFLINE: '1' } });
+    const r = await off.call('specreview_snapshot', { url: 'https://example.com/' });
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /network is turned off/);
+    await off.close();
   });
 
   test('specreview_feedback: CLI text as content, packet as structuredContent', async () => {

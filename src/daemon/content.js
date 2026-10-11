@@ -32,7 +32,11 @@
 //   live: allowed when the path is in the current live render's `assets`, or lies under the doc's own directory
 //         (recursively) with an allowed extension.
 // Every response: X-Content-Type-Options: nosniff and Content-Security-Policy frame-ancestors <UI origins>
-// (+ default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval' when render.network is "block").
+// (+ default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval' when render.network is "block": the doc's own
+// doc.render.network when it has one, e.g. a fetched web page, else the workspace config's).
+// A snapshot doc (a plan, an agent message, piped text, a fetched web page: not a workspace file) gets the strict
+// profile on top: script-src 'self' (only the guest and the vendored libraries under /__sr/ run: no inline script,
+// no javascript: URL, no remote script), form-action 'none', base-uri 'none', object-src 'none'.
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -48,7 +52,7 @@ import { HttpError, notFound, sendFile, sendText } from './http-util.js';
 import { contentTypeOf } from './mime.js';
 import { encodeRelPath, encodeSegments, isAllowedHost, isSafeMethod, loopbackOrigins, parseTarget, setBaseHeaders } from './security.js';
 import { DOC_KEY_RE } from './workspaces.js';
-import { isCode, isVirtual } from '../core/store/snapshot.js';
+import { isCode, isSnapshot, isVirtual } from '../core/store/snapshot.js';
 
 const log = createLogger('daemon.content');
 
@@ -179,21 +183,25 @@ export class ContentOrigin {
   }
 
   /**
-   * Content-Security-Policy for responses of a workspace (null: no workspace context).
+   * Content-Security-Policy for responses of a workspace (null: no workspace context) and doc (see the header).
    * @param {string | null} wsId
+   * @param {Doc | null} [doc]
    * @returns {Promise<string>}
    */
-  async #csp(wsId) {
+  async #csp(wsId, doc = null) {
     const parts = [`frame-ancestors ${loopbackOrigins(this.deps.ports().uiPort).join(' ')}`];
     if (wsId) {
-      try {
-        if ((await this.deps.index.config(wsId)).render?.network === 'block') {
-          parts.push("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'");
+      let network = /** @type {any} */ (doc)?.render?.network;
+      if (network !== 'allow' && network !== 'block') {
+        try {
+          network = (await this.deps.index.config(wsId)).render?.network;
+        } catch {
+          // unreadable config: no extra restriction
         }
-      } catch {
-        // unreadable config: no extra restriction
       }
+      if (network === 'block') parts.push("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'");
     }
+    if (doc && isSnapshot(doc)) parts.push("script-src 'self'", "form-action 'none'", "base-uri 'none'", "object-src 'none'");
     return parts.join('; ');
   }
 
@@ -281,7 +289,7 @@ export class ContentOrigin {
       res.end();
       return;
     }
-    const policy = await this.#csp(ref.wsId);
+    const policy = await this.#csp(ref.wsId, doc);
     if (rel === doc.path) await this.#serveDoc(req, res, { store, doc, wsId: ref.wsId, ver, policy });
     else await this.#serveAsset(req, res, { store, doc, wsId: ref.wsId, ver, rel, policy });
   }
@@ -308,7 +316,7 @@ export class ContentOrigin {
     await sendFile(req, res, abs, {
       contentType: contentTypeOf(rest[0]),
       cacheControl: 'private, no-cache',
-      headers: { 'Content-Security-Policy': await this.#csp(ref.wsId) },
+      headers: { 'Content-Security-Policy': await this.#csp(ref.wsId, doc) },
       maxBytes: LIMITS.maxAttachmentBytes,
     });
   }

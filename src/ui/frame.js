@@ -16,6 +16,13 @@ import { MSG } from 'protocol';
 export const FRAME_SANDBOX =
   'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads';
 
+/**
+ * Sandbox flags for a snapshot doc (a plan, an agent message, piped text, a fetched web page: not a file the spec
+ * author wrote): no forms and no downloads. Popups stay, so a link the reviewer clicks still opens in a new tab (the
+ * guest opens it there); the content origin's strict CSP keeps every script but the guest's out.
+ */
+export const FRAME_SANDBOX_STRICT = 'allow-scripts allow-same-origin allow-modals allow-popups allow-popups-to-escape-sandbox';
+
 export class GuestBridge {
   constructor() {
     /** @type {HTMLIFrameElement|null} */

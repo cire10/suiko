@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Token Service Spec</title>
+<script src="/app.js"></script>
+</head>
+<body>
+<nav><a href="/">Home</a> · <a href="/docs/">Docs</a></nav>
+<main>
+<h1>Token Service</h1>
+<p>Refresh tokens are rotated on every use, and the previous token is invalidated immediately.</p>
+<h2>Retries</h2>
+<p>The client MUST retry 3 times with exponential backoff, starting at 200 ms.</p>
+<ul>
+<li>Idempotent requests only.</li>
+<li>Give up after <code>3</code> attempts.</li>
+</ul>
+<p><img src="img/flow.png" alt="Flow"> <a href="https://example.org/rfc" onclick="track()">RFC</a></p>
+<script>document.title = 'changed'</script>
+</main>
+<footer>Copyright</footer>
+</body>
+</html>

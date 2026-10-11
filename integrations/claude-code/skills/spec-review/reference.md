@@ -34,6 +34,7 @@
 | `open <dir>` | Every `.md`/`.markdown`/`.html`/`.htm` file below the folder (no dot-directories or `node_modules`, at most 200; says what it skipped): one line per doc, then the UI's home URL listing them. | 0 |
 | `open - [--name N] [--title T]` | Review Markdown piped on stdin (at most 5 MB) as a snapshot doc: a new doc each time, or with `--name` the doc of that name (piping it again records a new version). | 0 |
 | `last [--session <id>] [--transcript <path>] [--title T]` | Open your last message (Claude Code transcript of `$CLAUDE_CODE_SESSION_ID`) as a snapshot doc; prints the URL and the background `wait` command and returns. Codex transcripts are not supported. | 0 / 4 |
+| `snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page as a snapshot doc (the only command that uses the network; refused when `SPECREVIEW_OFFLINE=1`). Public hosts only unless `--allow-private`. Again for the same URL records the next version when the page changed; `--replies -` posts replies with it. | 0 / 1 / 3 / 4 |
 | `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted, print the packet for **all** undelivered reviews, mark them delivered. Returns at once if one is already waiting. Exits 3 at once if the working copy differs from head (unless `--allow-dirty`). | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The same packet without blocking. Marks it delivered unless `--peek`. `--all-open` also lists threads waiting on the reviewer. | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestion threads verbatim to the working copy (staged, not recorded). | 0 / 3 |
@@ -278,6 +279,7 @@ If an anchor is wrong, move it: `specreview reanchor <doc> tN --lines A-B` or `-
 A plan, your last message or piped text is a **snapshot doc**: no working file (its synthetic path, e.g. `plans/<slug>.md`, is never read or written), versions recorded from text. Threads, re-anchoring, attribution, Changes and History work as for files. Differences:
 - `apply`, `edit` and `revert` are refused; revise with `revise <doc> --source <file> --replies -` (or, for a plan, edit the plan file and call ExitPlanMode again).
 - Guards still run, but their errors are recorded as warnings: nothing is refused.
+- A **web page** (`snapshot <url>`, path `web/<slug>.md`): the packet's line basis names the page (`Line numbers = lines of SpecReview's Markdown snapshot of <url> (fetched …)`). For a page you build (`--allow-private`), change its sources as the threads ask and run the `NEXT:` command, `specreview snapshot <url> --allow-private --replies -`, with the replies JSON on stdin. A public page has nothing to edit: answer each thread with `specreview reply <doc> <tid> -m <md> --status answered|declined`.
 - When the current directory cannot be a workspace (your home directory or `/`), the doc goes to a scratch workspace under `$SPECREVIEW_HOME/scratch/`, and every printed command carries `--workspace <dir>`: keep it.
 
 ## MCP tools
@@ -287,6 +289,7 @@ A plan, your last message or piped text is a **snapshot doc**: no working file (
 | Tool | Input |
 |---|---|
 | `specreview_open` | `{path, title?}` -> `{doc, version, url}` |
+| `specreview_snapshot` | `{url, title?}` -> `{doc, version, url, page}`: a public web page only |
 | `specreview_wait` | `{doc?, timeout_sec?}` (default 50, max 600) -> the packet, `{status:"waiting"}` (call again) or `{status:"closed"}` |
 | `specreview_feedback` | `{doc, peek?, include_drafts?}` |
 | `specreview_apply` | `{doc, thread_ids}` |

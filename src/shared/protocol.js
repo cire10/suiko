@@ -169,6 +169,12 @@ export const LIMITS = Object.freeze({
   codeFileMaxBytesHard: 20 * 1024 * 1024,
   untrackedExcludeMax: 1000,              // untracked files listed before the rest are summarised as excluded
   codePollMs: 5000,                       // daemon poll of a code doc's working tree (no chokidar on a repo)
+  // `specreview snapshot <url>` (design 6.2): body cap (after decompression), total time, redirect hops, and the
+  // text length under which a page that had scripts gets the "rendered by JavaScript" note
+  urlMaxBytes: 10 * 1024 * 1024,
+  urlTimeoutMs: 30000,
+  urlMaxRedirects: 10,
+  urlLowTextChars: 200,
 });
 
 /** Doc kinds (doc.json `kind`; absent means 'file'). 'snapshot' and 'code' are virtual: no working file of their own. */

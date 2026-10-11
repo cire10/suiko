@@ -429,16 +429,18 @@ export class Store {
    * Creates a snapshot doc (see snapshot.js): no working file, synthetic path '<dir>/<id>.md', head 0 until the first
    * version is committed from bytes. With an origin key, an existing doc with that key is returned instead
    * (`created: false`); the check and the creation run under the workspace lock, so concurrent callers with the same
-   * key get one doc.
+   * key get one doc. `render: { network: 'allow' | 'block' }` overrides the workspace's render.network for this doc
+   * (a fetched web page blocks remote assets: doc.render).
    *
    * `kind: 'code'` creates a code review doc instead: format 'text', origin type 'diff', `code` (the CodeSpec) kept
    * in doc.json, synthetic path 'code/<id>.diff', and always ephemeral: the doc dir gets a '.gitignore' of '*' (its
    * versions and blobs hold repo file contents and are never committed) and `doc.ephemeral` is set.
    * @param {{ title?: string, format?: DocFormat, origin: { type: string, key?: string | null } & Record<string, unknown>,
-   *   slug?: string, createdBy?: Actor, kind?: 'snapshot' | 'code', code?: import('../../shared/types.js').CodeSpec }} input
+   *   slug?: string, createdBy?: Actor, kind?: 'snapshot' | 'code', code?: import('../../shared/types.js').CodeSpec,
+   *   render?: { network?: 'allow' | 'block' } }} input
    * @returns {Promise<{ doc: Doc, created: boolean }>}
    */
-  async createSnapshotDoc({ title, kind = SNAPSHOT_KIND, format = kind === CODE_KIND ? 'text' : 'markdown', origin, slug, createdBy, code = undefined }) {
+  async createSnapshotDoc({ title, kind = SNAPSHOT_KIND, format = kind === CODE_KIND ? 'text' : 'markdown', origin, slug, createdBy, code = undefined, render = undefined }) {
     const o = normalizeOrigin(origin);
     if (kind === CODE_KIND) {
       if (format !== 'text') throw new UsageError(`a code doc has format 'text', not ${JSON.stringify(format)}`);
@@ -451,6 +453,8 @@ export class Store {
     } else if (o.type === 'diff') {
       throw new UsageError("origin type 'diff' is reserved for code reviews");
     }
+    const network = render?.network;
+    if (network !== undefined && network !== 'allow' && network !== 'block') throw new UsageError(`invalid render.network: ${JSON.stringify(network)}`);
     return this.withWorkspaceLock(async () => {
       if (o.key) {
         const existing = await this.findDocByOrigin(o.key);
@@ -474,6 +478,7 @@ export class Store {
         ...(isCodeDoc ? { code: { ...code }, ephemeral: true } : {}),
         path: isCodeDoc ? codePath(id) : snapshotPath(o.type, id, /** @type {'markdown' | 'html'} */ (format)),
         format,
+        ...(network ? { render: { network } } : {}),
         title: title || id,
         createdAt: nowIso(),
         createdBy: createdBy ?? { kind: 'agent', name: 'agent' },

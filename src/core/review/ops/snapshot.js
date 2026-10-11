@@ -1,8 +1,10 @@
 // @ts-check
 // Snapshot docs (store/snapshot.js): docs whose versions are recorded from bytes, not from a workspace file.
-//   openSnapshot(ctx, { source, format, title, origin, slug })  -> { doc, version, created, lines, externals }
+//   openSnapshot(ctx, { source, format, title, origin, slug, render })  -> { doc, version, created, lines, externals }
 //     creates the doc (or finds it by origin key) and records v1; an existing doc is reported as is (a closed
-//     session is reopened), like openDoc.
+//     session is reopened), like openDoc. `render` ({ network }) is the doc's render override (a web page blocks
+//     remote assets); taking an existing doc again updates it, and for origin types that refresh (a web page) the
+//     origin fields too. An existing doc of another format is refused (the format is part of what was tracked).
 //   recordSnapshot(ctx, doc, { source, origin, summary, replies, other, breakLocks, dryRun, autoAddress })
 //     -> ReviseReport
 //     records vN+1 from the bytes: the usual attribution, re-anchoring and replies of `revise`, with the snapshot
@@ -11,7 +13,8 @@
 //     with no reply channel (the plan gate), so a thread already handled is not sent back as still open.
 //   takeSnapshot(ctx, input) -> { doc, created, reopened, version, report, externals }
 //     openSnapshot, then (when the doc already existed and its origin type re-records: store/snapshot.js
-//     ORIGIN_TYPES) recordSnapshot (the plan gate, `last`, `open -`). A message is never re-recorded: re-taking it
+//     ORIGIN_TYPES) recordSnapshot with input.replies / other / summary (the plan gate, `last`, `open -`,
+//     `snapshot <url> --replies`). A message is never re-recorded: re-taking it
 //     only reopens the doc, so the agent's revisions are not reverted to the original text.
 
 import { SSE } from '../../../shared/protocol.js';
@@ -29,7 +32,8 @@ import { revise } from './revise.js';
  * @typedef {import('../../../shared/types.js').Doc} Doc
  * @typedef {import('../../../shared/types.js').VersionManifest} VersionManifest
  * @typedef {{ source: string | Buffer, format?: 'markdown' | 'html', title?: string | null,
- *   origin: { type: string, key?: string | null } & Record<string, unknown>, slug?: string | null }} SnapshotInput
+ *   origin: { type: string, key?: string | null } & Record<string, unknown>, slug?: string | null,
+ *   render?: { network?: 'allow' | 'block' } }} SnapshotInput
  */
 
 /**
@@ -47,14 +51,20 @@ function toBuffer(source) {
  * @param {Ctx} ctx
  * @param {SnapshotInput} input
  */
-export async function openSnapshot(ctx, { source, format = 'markdown', title = null, origin, slug = null }) {
+export async function openSnapshot(ctx, { source, format = 'markdown', title = null, origin, slug = null, render: renderOpt = undefined }) {
   const buf = toBuffer(source);
   const o = normalizeOrigin(origin);
   const text = decodeText(buf).text;
   const render = await renderSource({ format, source: text, docPath: snapshotPath(o.type, 'snapshot', format) });
   const name = title || render.title || null;
-  const { doc } = await ctx.store.createSnapshotDoc({ title: name ?? undefined, format, origin: o, slug: slug ?? name ?? o.type, createdBy: agentActor(ctx) });
+  const { doc } = await ctx.store.createSnapshotDoc({ title: name ?? undefined, format, origin: o, slug: slug ?? name ?? o.type, createdBy: agentActor(ctx), render: renderOpt });
   return withDoc(ctx, doc.id, async (d) => {
+    if (d.format !== format) {
+      throw new UsageError(`${d.id} already tracks this ${originInfo(o.type).noun} as ${d.format}; it cannot become ${format}`, {
+        details: { doc: d.id, format: d.format },
+      });
+    }
+    if (d.head > 0 && refreshDoc(d, o, renderOpt)) await ctx.store.saveDoc(d);
     if (d.head === 0) {
       const lines = lineIndex(text).count;
       const manifest = await ctx.store.commitVersion(d, {
@@ -87,6 +97,31 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
 }
 
 /**
+ * Applies what a re-take may change on an existing doc: the render override, and (origin types that refresh) the
+ * origin's fields other than its type and key. Mutates `d`; true when something changed.
+ * @param {Doc} d
+ * @param {{ type: string, key: string | null } & Record<string, unknown>} o
+ * @param {{ network?: 'allow' | 'block' } | undefined} renderOpt
+ * @returns {boolean}
+ */
+function refreshDoc(d, o, renderOpt) {
+  const doc = /** @type {any} */ (d);
+  let changed = false;
+  if (renderOpt?.network && doc.render?.network !== renderOpt.network) {
+    doc.render = { ...(doc.render ?? {}), network: renderOpt.network };
+    changed = true;
+  }
+  if (originInfo(o.type).refresh && doc.origin?.type === o.type) {
+    const next = { ...doc.origin, ...o, type: doc.origin.type, key: doc.origin.key };
+    if (JSON.stringify(next) !== JSON.stringify(doc.origin)) {
+      doc.origin = next;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
  * Records a new version of a snapshot doc from bytes (see revise: snapshot profile). Identical bytes record nothing
  * (replies, if any, are still added).
  * @param {Ctx} ctx
@@ -105,7 +140,8 @@ export async function recordSnapshot(ctx, ref, { source, origin = null, summary 
 /**
  * openSnapshot, then recordSnapshot when the doc existed already (same origin key) and its origin type re-records.
  * @param {Ctx} ctx
- * @param {SnapshotInput & { summary?: string, autoAddress?: boolean }} input
+ * @param {SnapshotInput & { summary?: string, autoAddress?: boolean,
+ *   replies?: Record<string, { status: string, reply: string, at?: string }>, other?: Array<{ at: string, why: string }> }} input
  * @returns {Promise<{ doc: Doc, created: boolean, reopened: boolean, version: VersionManifest, report: any, externals: string[] }>}
  */
 export async function takeSnapshot(ctx, input) {
@@ -115,7 +151,14 @@ export async function takeSnapshot(ctx, input) {
   if (!originInfo(String(opened.doc.origin?.type ?? '')).rerecord) {
     return { doc: opened.doc, created: false, reopened: true, version: opened.version, report: null, externals };
   }
-  const report = await recordSnapshot(ctx, opened.doc.id, { source: input.source, origin: input.origin, summary: input.summary ?? '', autoAddress: Boolean(input.autoAddress) });
+  const report = await recordSnapshot(ctx, opened.doc.id, {
+    source: input.source,
+    origin: input.origin,
+    summary: input.summary ?? '',
+    replies: input.replies ?? {},
+    other: input.other ?? [],
+    autoAddress: Boolean(input.autoAddress),
+  });
   const doc = await ctx.store.requireDoc(opened.doc.id);
   const { manifest } = await ctx.store.readVersion(doc.id, doc.head);
   return { doc, created: false, reopened: false, version: manifest, report, externals };

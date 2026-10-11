@@ -52,15 +52,22 @@ const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code
 const ORIGIN_CHIP = /** @type {Record<string, string>} */ ({ plan: 'plan', message: 'message', stdin: 'text', url: 'web' });
 
 /**
- * A doc without a file of its own (docSummary kind 'snapshot' or 'code'): what it shows in place of its path, and its
- * kind chip ('code', 'plan', 'message', 'text', 'web'). Null for a spec file.
+ * A doc without a file of its own (docSummary kind 'snapshot' or 'code'): what it shows in place of its path (a web
+ * page also names its host), and its kind chip ('code', 'plan', 'message', 'text', 'web'). Null for a spec file.
  * @param {any} d
  * @returns {{ where: string, chip: string } | null}
  */
 function virtualDoc(d) {
   if (d.kind === 'code') return { where: 'code review', chip: 'code' };
-  if (d.kind === 'snapshot') return { where: ORIGIN_LABEL[d.origin] || 'snapshot', chip: ORIGIN_CHIP[d.origin] || 'snapshot' };
-  return null;
+  if (d.kind !== 'snapshot') return null;
+  const label = ORIGIN_LABEL[d.origin] || 'snapshot';
+  const chip = ORIGIN_CHIP[d.origin] || 'snapshot';
+  if (d.origin !== 'url' || typeof d.source !== 'string') return { where: label, chip };
+  try {
+    return { where: `${label} · ${new URL(d.source).host}`, chip };
+  } catch {
+    return { where: label, chip };
+  }
 }
 
 /** @param {{ d: any }} props */
@@ -75,7 +82,7 @@ function DocRow({ d }) {
       navigate(href);
     }}>
       <span class="doc-title">${d.title || d.id}</span>
-      <span class="doc-path">${virtual ? virtual.where : d.path}</span>
+      <span class="doc-path" title=${d.source || undefined}>${virtual ? virtual.where : d.path}</span>
     </a>
     <span class="doc-meta">
       ${virtual ? html`<${Chip} tone="info" class="kind-chip">${virtual.chip}<//>` : null}

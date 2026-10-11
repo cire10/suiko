@@ -9,7 +9,7 @@
 import { html, useEffect, useRef } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { contentOrigin, frameLost, frameNavigating, frameUrl } from '../actions.js';
-import { FRAME_SANDBOX, guest } from '../frame.js';
+import { FRAME_SANDBOX, FRAME_SANDBOX_STRICT, guest } from '../frame.js';
 import { useStore } from '../state.js';
 
 const LOST_AFTER_MS = 1500;
@@ -20,6 +20,7 @@ export function DocFrame() {
   const nonce = useStore((s) => s.frameNonce);
   const mode = useStore((s) => s.mode);
   const title = useStore((s) => s.ds?.doc?.title || 'Document');
+  const strict = useStore((s) => s.ds?.doc?.kind === 'snapshot');
   const tool = useStore((s) => s.tool);
   const connected = useStore((s) => s.guest.connected);
   const ref = useRef(/** @type {HTMLIFrameElement|null} */ (null));
@@ -65,6 +66,6 @@ export function DocFrame() {
   return html`<div class=${`frame-wrap ${hidden ? 'is-hidden' : ''} ${tool === 'pick' ? 'is-picking' : ''} ${tool === 'snip' ? 'is-snipping' : ''}`}
     aria-hidden=${hidden ? 'true' : undefined} data-guest=${connected ? 'ready' : 'loading'} data-tool=${tool}>
     <iframe ref=${ref} class="doc-frame" data-testid=${TESTID.docFrame} title=${`Document: ${title}`} onLoad=${onLoad}
-      sandbox=${FRAME_SANDBOX} referrerpolicy="no-referrer" allow="fullscreen; clipboard-write"></iframe>
+      sandbox=${strict ? FRAME_SANDBOX_STRICT : FRAME_SANDBOX} referrerpolicy="no-referrer" allow="fullscreen; clipboard-write"></iframe>
   </div>`;
 }

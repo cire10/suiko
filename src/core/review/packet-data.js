@@ -27,7 +27,7 @@ import { lineIndex } from '../text/index.js';
 import { attachmentKind, envOf, label as anchorLabel, quoteText } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
 import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
-import { docOriginType, docRefFor, isCode, isSnapshot, originType, planFileOf } from '../store/snapshot.js';
+import { docOriginType, docRefFor, isCode, isSnapshot, originType, pageUrlOf, planFileOf, resnapshotCommand } from '../store/snapshot.js';
 import { kindOf } from './kinds.js';
 import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js';
 
@@ -88,11 +88,13 @@ import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js'
  * @property {string} path workspace-relative POSIX path (synthetic for a snapshot doc)
  * @property {'file' | 'snapshot' | 'code'} [kind] a snapshot doc has no working file (store/snapshot.js); a code doc
  *   reviews repo files
- * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin'...; 'diff' for code)
+ * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin', 'url'...; 'diff' for code)
  * @property {{ label: string, baseSha: string | null, newSha: string | null, worktree: boolean, root: string | null }} [code]
  *   code docs: the header label, the old- and new-side commits (newSha null for a working-tree side), whether line
  *   numbers are of the working tree, the repo root
  * @property {string[]} [basis] code docs: the basis lines under the header (code/packet.js codeLineBasis)
+ * @property {{ url: string, finalUrl: string, fetchedAt: string | null, private: boolean, format: string } | null} [page]
+ *   a web-page snapshot: the page it was fetched from (the line basis names it)
  * @property {string} [ref] the doc as follow-up commands name it (adds `--workspace` for a scratch workspace)
  * @property {string | null} [root] absolute workspace root
  * @property {string | null} [file] absolute path of the working copy (a plan snapshot: its plan file; other
@@ -261,6 +263,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     path: doc.path,
     kind: snapshot ? 'snapshot' : 'file',
     origin: snapshot ? originType(doc) : null,
+    ...(pageUrlOf(doc) ? { page: pageOf(doc) } : {}),
     ref,
     root,
     file,
@@ -280,7 +283,24 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     firstPacket,
     replyOnly,
     agent,
-    next: snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable) : nextStep(doc, approval, counts.actionable),
+    next: snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable, root) : nextStep(doc, approval, counts.actionable),
+  };
+}
+
+/**
+ * The page of a web-page snapshot, for the packet.
+ * @param {Doc} doc
+ * @returns {{ url: string, finalUrl: string, fetchedAt: string | null, private: boolean, format: string }}
+ */
+function pageOf(doc) {
+  const o = /** @type {any} */ (doc).origin ?? {};
+  const url = /** @type {string} */ (pageUrlOf(doc));
+  return {
+    url,
+    finalUrl: typeof o.finalUrl === 'string' && o.finalUrl ? o.finalUrl : url,
+    fetchedAt: typeof o.fetchedAt === 'string' ? o.fetchedAt : null,
+    private: o.private === true,
+    format: doc.format,
   };
 }
 
@@ -514,12 +534,15 @@ function nextStep(doc, { approved, finalNow }, actionable) {
 /**
  * The NEXT line of a snapshot doc: it is revised by recording new text (`revise --source`), or, for a plan, by
  * editing the plan file and calling ExitPlanMode again (the plan gate records the version).
+ * A web-page snapshot is never edited by hand: a page you build (a private host) is changed at its sources and
+ * snapshotted again; a public page gets replies.
  * @param {Doc} doc
  * @param {string} ref
  * @param {{ approved: boolean, finalNow: boolean }} approval
  * @param {number} actionable
+ * @param {string | null} [root]
  */
-function snapshotNextStep(doc, ref, { approved, finalNow }, actionable) {
+function snapshotNextStep(doc, ref, { approved, finalNow }, actionable, root = null) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (originType(doc) === 'plan') {
     if (approved && actionable === 0) return 'the plan is approved; go ahead with it';
@@ -533,5 +556,11 @@ function snapshotNextStep(doc, ref, { approved, finalNow }, actionable) {
     return `approved: answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined (no new version) -> specreview final ${ref}   (then stop waiting)`;
   }
   if (actionable === 0) return `nothing to act on; specreview wait ${ref} (background)`;
+  const again = resnapshotCommand(doc, root);
+  if (again) {
+    return /** @type {any} */ (doc).origin?.private === true
+      ? `edit the sources that produce the page -> ${again} --replies - (records v${doc.head + 1}) -> specreview wait ${ref} (background)`
+      : `answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined -> specreview wait ${ref} (background)`;
+  }
   return `write the complete revised text to a file -> specreview revise ${ref} --source <file> --replies - -> specreview wait ${ref} (background)`;
 }

@@ -38,9 +38,13 @@
 //     core/review/ops/docs.js        status: the snapshot fields (kind, origin, plan file); code has its own branch
 //     core/review/ops/final.js       decisions file of a snapshot in the cwd (a code doc's goes to its doc dir first)
 //     core/review/packet-data.js     snapshot NEXT, plan file and lines (the code branch comes first)
-//     core/review/packet.js          packet / status objects of kind 'snapshot' (code packets have their own branch)
+//     core/review/packet.js          packet / status objects of kind 'snapshot', incl. web-page lines and protocol
+//                                    (code packets have their own branch)
 //     cli/hooks.js                   `hook prompt` skips plan docs
 //     ui/model.js                    kindCaps: snapshot docs have no "Apply now" (ThreadCard)
+//     daemon/api.js                  a web-page snapshot's source URL in the doc summary
+//     daemon/content.js              the strict CSP of snapshot docs (code docs are never served there)
+//     ui/components/DocFrame.js      the strict sandbox of snapshot docs (code docs have their own view)
 //   became isVirtual (no working file of their own):
 //     core/store/store.js (workingPath, readWorking, writeWorking, findDoc, findDocByOrigin, createDoc duplicates),
 //     core/review/ops/record.js (asset skips, autoCommit docPath), core/review/ops/common.js (changedWorkingAssets),
@@ -247,8 +251,11 @@ export const SNAPSHOT_SITES = Object.freeze({
   'core/review/ops/docs.js': 1,
   'core/review/ops/final.js': 1,
   'core/review/packet-data.js': 1,
-  'core/review/packet.js': 6,
+  'core/review/packet.js': 8,
   'cli/hooks.js': 1,
+  'daemon/api.js': 1,
+  'daemon/content.js': 1,
+  'ui/components/DocFrame.js': 1,
   'ui/components/Home.js': 1,
   'ui/model.js': 1,
 });

@@ -33,6 +33,7 @@ Your agent runs `specreview open <file>`, which opens the review UI in your defa
 - The URL contains an access token (`?k=…`). It works only on this machine; don't share it.
 - The doc list (top-left) shows every tracked doc with its head version, open threads and whether an agent is listening.
 - If the local server restarts, the UI shows "Reconnecting to SpecReview…" and recovers on its own. Your drafts are saved on the server, so a reload loses nothing.
+- A web page can be reviewed too: `specreview snapshot <url>` fetches it once and opens a cleaned copy (no scripts; remote images blocked unless `--allow-remote-assets`). The doc list shows it as "web page · <host>". Running the command again records the next version when the page changed. See the README's "Snapshot a web page".
 
 ## The screen
 

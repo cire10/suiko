@@ -432,10 +432,12 @@ async function docSummary(store, wsId, root, doc, allListening) {
     root,
     id: doc.id,
     path: doc.path,
-    // snapshot docs (a plan, an agent message, piped text) and code reviews have no working file: the UI labels them
-    // by kind and origin ('file' | 'snapshot' | 'code'; origin 'plan', 'message', 'stdin', 'diff'... or null)
+    // snapshot docs (a plan, an agent message, piped text, a web page) and code reviews have no working file: the UI
+    // labels them by kind and origin ('file' | 'snapshot' | 'code'; origin 'plan', 'message', 'stdin', 'url', 'diff'...)
     kind: docKind(doc),
     origin: docOriginType(doc),
+    // a fetched web page: the page URL (the Home list shows its host)
+    ...(doc.kind === 'snapshot' && doc.origin?.type === 'url' && typeof doc.origin.url === 'string' ? { source: doc.origin.url } : {}),
     title: doc.title ?? doc.path,
     format: doc.format,
     head: doc.head ?? 0,
