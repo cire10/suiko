@@ -315,3 +315,29 @@ If you need something from a file you do not own: code against the frozen contra
   matter, raw HTML, image with relative path) and `test/fixtures/docs/app-spec.html` (inline script that builds DOM,
   inline SVG, canvas chart, `<details>`, tabs, table, image, mermaid `<pre class="mermaid">`), plus
   `test/fixtures/docs/img/arch.png` (generate a small PNG with plain Node zlib, no deps).
+
+## 10. Code reviews: the kind seams (2026-10-11, WP0b of the code-review design)
+- **Doc kind `code`** (`createSnapshotDoc({kind: 'code'})`): format `'text'`, origin type `diff` (reserved for code
+  reviews; an origin key never crosses kinds), synthetic path `code/<id>.diff`, `doc.code` (CodeSpec), always
+  `ephemeral` (the doc dir gets a `.gitignore` of `*`; autoCommit skips it). `isVirtual(doc)` = snapshot or code (no
+  working file); `isCode(doc)`. Per-doc blobs (`Store#putDocBlob` / `readDocBlob`, `docs/<id>/blobs/<xx>/<hex>`) and
+  repo-file access (`Store#readRepoFile`, the CAS `Store#writeRepoFile`, never through symlinks or into `.git` /
+  `.specreview`).
+- **The `text` render format** is an empty RenderResult (no HTML, no srcmap, no outline): a code doc is never
+  rendered or stamped; its versions are canonical diff text and its UI renders diffs as text nodes.
+- **Kind adapter** (`src/core/review/kinds.js`): `kindOf(doc)` -> `fileKind` (file and snapshot docs, today's code
+  unchanged) | `codeKind` (delegates to `src/core/code/*`). Whole ops dispatch on `isCode(doc)` at their entry (the
+  table is in the kinds.js header); `SNAPSHOT_SITES` + `test/unit/kind-classification.test.js` keep every remaining
+  snapshot check classified. `src/core/code/*` ship as stubs that throw `UsageError('code review is not available in
+  this build')` until the code engine replaces them.
+- **Record seams** (`ops/record.js` Prepared): `stepFor`, `landed`, `assetFiles`; hunks carry `file`; `capturedBy`
+  adds `'round'`.
+- **`at` forms**: code reviews take repo-file locations (`src/a.js:L12-14`, `src/a.js#h3`, `del:src/a.js#h3`;
+  `src/core/util/code-at.js`); spec docs refuse them.
+- **CLI / MCP**: `specreview review` (stub with its final spec) and `specreview_review`.
+- **UI kind seam** (`src/ui/components/kinds/index.js`): `KindBanners` / `KindMain` / `KindRail` / `KindSide` replace
+  the banner stack / doc frame / outline / Changes list for a kind; `kindCaps(ds)` and `modesFor(ds)` (model.js) gate
+  the frame tools and the modes; `registerKindFocus` / `registerKindSelection` (actions.js) replace guest focus and
+  selection for a kind without a frame.
+- **Tests**: `test/helpers/hermetic-env.js` (`hermeticEnv(tmp, extra)`, `GIT_TEST_ARGS`, `GIT_TEST_DATES`) for spawned
+  processes and git fixtures.
