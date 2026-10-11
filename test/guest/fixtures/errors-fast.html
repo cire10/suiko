@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Animated chart</title>
+</head>
+<body data-srid="1">
+<p data-srid="2">This page redraws a chart ten times a second, but drawFrame is not defined.</p>
+<canvas data-srid="3" id="c" width="40" height="20"></canvas>
+<script>
+  const c = document.getElementById('c');
+  setInterval(() => drawFrame(c), 100);
+</script>
+</body>
+</html>

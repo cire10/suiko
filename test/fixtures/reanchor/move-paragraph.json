@@ -1,0 +1,48 @@
+{
+  "name": "move-paragraph",
+  "description": "A paragraph moved to another section keeps its thread ('moved', same text, found by exact search with context scoring); the section it left changes ('changed', a lock there would refuse) and the section it did not touch stays 'exact'.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } }, "endSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } },
+        "exact": "never stores tokens", "prefix": "Note: the gateway ", "suffix": "; it only forwards them to the" },
+      "expect": { "lines": [38, 38], "text": "never stores tokens", "sectionTail": "2 Architecture" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } }, "endSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } },
+        "exact": "Note: the gateway never stores tokens; it only forwards them\nto the auth service for validation.", "prefix": "", "suffix": "" },
+      "expect": { "lines": [38, 39], "mappedBy": "narrowed" }
+    },
+    "L1": {
+      "capture": { "kind": "section", "headingSrid": { "$srid": { "tag": "h2", "text": "1 Goals" } } },
+      "expect": { "kind": "section", "lines": [13, 25] }
+    },
+    "L2": {
+      "capture": { "kind": "section", "headingSrid": { "$srid": { "tag": "h2", "text": "2 Architecture" } } },
+      "expect": { "kind": "section", "lines": [27, 39] }
+    },
+    "t3": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Should the grace window" } }, "endSrid": { "$srid": { "tag": "p", "text": "Should the grace window" } },
+        "exact": "configurable per client", "prefix": "Should the grace window be 30 s or ", "suffix": "?" },
+      "expect": { "lines": [75, 75] }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: the note blockquote moves from section 2 to section 3.2 (before the code fence)",
+      "edits": [
+        { "find": "> **Note:** the gateway never stores tokens; it only forwards them\n> to the auth service for validation.\n\n", "replace": "" },
+        { "find": "```ts\n", "replace": "> **Note:** the gateway never stores tokens; it only forwards them\n> to the auth service for validation.\n\n```ts\n" }
+      ],
+      "expect": {
+        "t1": { "state": "moved", "lines": [55, 55], "text": "never stores tokens", "sridTag": "p", "sectionTail": "3.2 Token refresh" },
+        "t2": { "state": "moved", "lines": [55, 56], "textIncludes": "never stores tokens" },
+        "L1": { "state": "exact", "lines": [13, 25] },
+        "L2": { "state": "changed", "lines": [27, 36], "sridTag": "h2" },
+        "t3": { "state": "exact", "lines": [75, 75] }
+      }
+    }
+  ]
+}

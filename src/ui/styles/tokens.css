@@ -1,0 +1,134 @@
+/* SpecReview UI design tokens: colours (light + dark), type, radii, spacing and elevation.
+   Dark applies with prefers-color-scheme unless the user picked light (html[data-theme="light"]), and always with
+   html[data-theme="dark"]. Components use only these custom properties. */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-subtle: #f6f7f9;
+  --bg-muted: #eceff3;
+  --bg-inset: #f3f4f6;
+  --panel: #fbfbfc;
+  --fg: #1c2027;
+  --fg-muted: #57606a;
+  --fg-subtle: #7c8591;
+  --border: #dfe3e8;
+  --border-strong: #c3c9d1;
+  --accent: #2563d6;
+  --accent-hover: #1d4fb0;
+  --accent-fg: #ffffff;
+  --accent-soft: #e7efff;
+  --ok: #1a7f37;
+  --ok-soft: #dcf5e2;
+  --warn: #8a5a00;
+  --warn-soft: #fff4cc;
+  --attn: #b54800;
+  --attn-soft: #ffeedd;
+  --danger: #c4242e;
+  --danger-soft: #ffe8e7;
+  --info: #6a3fc7;
+  --info-soft: #f1eafe;
+  --lock: #0f6e74;
+  --lock-soft: #dcf3f3;
+  --draft: #7a5900;
+  --draft-soft: #fff1c2;
+  --ins-bg: #d8f5df;
+  --ins-strong: #a6e7b6;
+  --del-bg: #ffe5e3;
+  --del-strong: #ffc5c0;
+  --focus: #2563d6;
+  --scrim: rgba(20, 24, 31, 0.35);
+  --shadow-sm: 0 1px 2px rgba(20, 24, 31, 0.08);
+  --shadow: 0 10px 30px rgba(20, 24, 31, 0.16);
+  --radius: 8px;
+  --radius-sm: 5px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs: 14px;
+  --fs-sm: 12.5px;
+  --fs-xs: 11.5px;
+  --rail-left: 232px;
+  --rail-right: 380px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #15181d;
+    --bg-subtle: #1b1f25;
+    --bg-muted: #262b33;
+    --bg-inset: #101317;
+    --panel: #191c22;
+    --fg: #e4e7eb;
+    --fg-muted: #a3acb8;
+    --fg-subtle: #7f8995;
+    --border: #2e343d;
+    --border-strong: #434b57;
+    --accent: #6ea2ff;
+    --accent-hover: #93baff;
+    --accent-fg: #0b1220;
+    --accent-soft: #1c2a45;
+    --ok: #5bd17c;
+    --ok-soft: #173723;
+    --warn: #e8bd52;
+    --warn-soft: #3a2f12;
+    --attn: #ff9a52;
+    --attn-soft: #3d2513;
+    --danger: #ff7b78;
+    --danger-soft: #3f1d1e;
+    --info: #b79bff;
+    --info-soft: #2a2042;
+    --lock: #5fd0d6;
+    --lock-soft: #13363a;
+    --draft: #f0c95a;
+    --draft-soft: #3a3013;
+    --ins-bg: #183a24;
+    --ins-strong: #22603a;
+    --del-bg: #45201f;
+    --del-strong: #74302d;
+    --focus: #8ab4ff;
+    --scrim: rgba(0, 0, 0, 0.55);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15181d;
+  --bg-subtle: #1b1f25;
+  --bg-muted: #262b33;
+  --bg-inset: #101317;
+  --panel: #191c22;
+  --fg: #e4e7eb;
+  --fg-muted: #a3acb8;
+  --fg-subtle: #7f8995;
+  --border: #2e343d;
+  --border-strong: #434b57;
+  --accent: #6ea2ff;
+  --accent-hover: #93baff;
+  --accent-fg: #0b1220;
+  --accent-soft: #1c2a45;
+  --ok: #5bd17c;
+  --ok-soft: #173723;
+  --warn: #e8bd52;
+  --warn-soft: #3a2f12;
+  --attn: #ff9a52;
+  --attn-soft: #3d2513;
+  --danger: #ff7b78;
+  --danger-soft: #3f1d1e;
+  --info: #b79bff;
+  --info-soft: #2a2042;
+  --lock: #5fd0d6;
+  --lock-soft: #13363a;
+  --draft: #f0c95a;
+  --draft-soft: #3a3013;
+  --ins-bg: #183a24;
+  --ins-strong: #22603a;
+  --del-bg: #45201f;
+  --del-strong: #74302d;
+  --focus: #8ab4ff;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}

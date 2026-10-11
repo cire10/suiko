@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Token Service Spec</title>
+<style>
+  body { font: 16px/1.5 Georgia, serif; margin: 30px 60px; max-width: 700px; color: #222; background: #fff; }
+  [role=tabpanel][hidden] { display: none; }
+  .spacer { height: 1400px; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2" id="title">Token Service</h1>
+<p data-srid="3">Refresh tokens are <em data-srid="4">rotated on every use</em> and expire after <code data-srid="5">30 days</code>.</p>
+<p data-srid="6">A reuse-detection grace window of 30 s applies to <a data-srid="7" href="#rollout">concurrent refreshes</a>.</p>
+<h2 data-srid="8" id="rollout">Rollout plan</h2>
+<ul data-srid="9">
+  <li data-srid="10">Phase one ships to internal users.</li>
+  <li data-srid="11">Phase two ships to everyone.</li>
+</ul>
+<p data-srid="12">Energy is <span class="sr-math" data-sr-kind="math" data-srid="13"><span class="katex"><span class="katex-mathml"><math><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></math></span><span class="katex-html" aria-hidden="true">E=mc²</span></span></span> in this note.</p>
+<details data-srid="14"><summary data-srid="15">Advanced settings</summary><p data-srid="16">The secret rotation interval is ninety days.</p></details>
+<div class="tabs" data-srid="17">
+  <div role="tablist" data-srid="18"><button role="tab" type="button" data-srid="19" aria-controls="panel-a" id="tab-a">Overview</button> <button role="tab" type="button" data-srid="20" aria-controls="panel-b" id="tab-b">Limits</button></div>
+  <div role="tabpanel" id="panel-a" data-srid="21"><p data-srid="22">Overview panel text is visible first.</p></div>
+  <div role="tabpanel" id="panel-b" data-srid="23" hidden><p data-srid="24">Rate limits are 100 requests per minute.</p></div>
+</div>
+<p data-srid="25">Rotated tokens are logged. Tokens are rotated on every use in the legacy path too.</p>
+<form data-srid="26" onsubmit="return false"><input id="name" type="text" data-srid="27" aria-label="name"></form>
+<p id="clicks" data-srid="28">clicks: 0</p>
+<div class="spacer" data-srid="29"></div>
+<p data-srid="30">The end.</p>
+<script>
+  // Author script: tab switching, a click counter, a key handler and its own message log.
+  for (const tab of document.querySelectorAll('[role=tab]')) {
+    tab.addEventListener('click', () => {
+      for (const p of document.querySelectorAll('[role=tabpanel]')) p.hidden = p.id !== tab.getAttribute('aria-controls');
+    });
+  }
+  let clicks = 0;
+  const counter = document.getElementById('clicks');
+  counter.addEventListener('click', () => { clicks++; counter.textContent = 'clicks: ' + clicks; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'z') e.preventDefault(); });
+  window.__authorMessages = [];
+  window.addEventListener('message', (e) => window.__authorMessages.push(e.data));
+</script>
+</body>
+</html>

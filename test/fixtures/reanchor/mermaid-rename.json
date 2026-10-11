@@ -1,0 +1,44 @@
+{
+  "name": "mermaid-rename",
+  "description": "Mermaid node threads are narrowed to the fence line defining the node; renaming a node's label makes its thread 'changed' on the same line with the new label, other nodes stay 'exact'; a line inserted above moves them.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "tag": "pre", "label": "mermaid node \"API Gateway\"",
+        "svg": { "nodeId": "Gateway", "label": "API Gateway" } },
+      "expect": { "kind": "element", "generated": true, "lines": [33, 33], "text": "  Client[Client app] --> Gateway[API Gateway]", "sridTag": "pre" }
+    },
+    "t2": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "tag": "pre", "label": "mermaid node \"Auth service\"",
+        "svg": { "nodeId": "Auth", "label": "Auth service" } },
+      "expect": { "lines": [34, 34] }
+    },
+    "t3": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "tag": "pre", "label": "mermaid node \"Token store\"",
+        "svg": { "nodeId": "Store", "label": "Token store" } },
+      "expect": { "lines": [35, 35] }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: the Gateway node is relabelled",
+      "edits": [ { "find": "Gateway[API Gateway]", "replace": "Gateway[Edge Gateway]" } ],
+      "expect": {
+        "t1": { "state": "changed", "lines": [33, 33], "svgLabel": "Edge Gateway", "sridTag": "pre", "text": "  Client[Client app] --> Gateway[Edge Gateway]" },
+        "t2": { "state": "exact", "lines": [34, 34], "svgLabel": "Auth service" },
+        "t3": { "state": "exact", "lines": [35, 35] }
+      }
+    },
+    {
+      "note": "v3: a node is added above",
+      "edits": [ { "find": "flowchart LR\n", "replace": "flowchart LR\n  Client --> CDN[CDN edge]\n" } ],
+      "expect": {
+        "t1": { "state": "moved", "lines": [34, 34], "svgLabel": "Edge Gateway" },
+        "t2": { "state": "moved", "lines": [35, 35] },
+        "t3": { "state": "moved", "lines": [36, 36] }
+      }
+    }
+  ]
+}

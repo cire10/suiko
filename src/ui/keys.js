@@ -1,0 +1,271 @@
+// @ts-check
+// Keyboard map (design 11.8, amendments 7).
+//
+// Keys come from two places:
+//   - keydown in the UI document (ignored while typing in an input / textarea, except Esc and Cmd+Shift+Enter;
+//     the composer and reply boxes handle their own Cmd+Enter and Esc);
+//   - `key` messages forwarded by the guest while focus is inside the doc iframe.
+// Forwarded keys may only trigger non-mutating actions (navigation, opening a composer, toggling panels). So x / o /
+// y (resolve, reopen, accept a decline) and Cmd+Enter (add a draft) are honoured only from the UI itself.
+// c / s / q / a typed in the doc with a selection are handled by the guest, which posts `action` (like its toolbar)
+// instead of forwarding the key; a forwarded key that still races such an action for the same selection is dropped
+// by openComposer (same capture and type within DUPLICATE_OPEN_MS), so the composer never opens twice.
+
+import {
+  closeDialog, cancelComposer, cancelReply, clearFocus, cycleTheme, navChange, navThread, openComposer, openSubmit,
+  resolveThread, setFilter, setKeyForwarder, setMode, setTool, startReply, stepVersion, submitComposer, toast,
+  toggleBaseKind, toggleHidden, togglePick, toggleSidebar, unresolveThread,
+} from './actions.js';
+import { isComposerDirty, isReplyDirty } from './model.js';
+import { store } from './state.js';
+import { isEditable } from './util.js';
+
+/** Shown by the help overlay (keep in sync with handleKey). */
+export const KEYMAP = Object.freeze([
+  { keys: ['c', 's', 'q', 'a'], label: 'Comment, suggest, question, or mark agreed on the selection' },
+  { keys: ['e'], label: 'Pick mode for images, diagrams, tables, code ([ ] parent / child, Esc exits)' },
+  { keys: ['j', 'k'], label: 'Next / previous thread' },
+  { keys: ['n', 'p'], label: 'Next / previous change' },
+  { keys: ['r'], label: 'Reply to the focused thread' },
+  { keys: ['x'], label: 'Resolve / accept the focused thread' },
+  { keys: ['o'], label: 'Reopen the focused thread' },
+  { keys: ['y'], label: 'Accept a decline' },
+  { keys: ['v'], label: 'Verify queue' },
+  { keys: ['f', '⌘⇧↵'], label: 'Submit review' },
+  { keys: ['⌘↵'], label: 'Add the comment to the review' },
+  { keys: ['1', '2', '3', '4'], label: 'Review / Changes / Source / History' },
+  { keys: ['[', ']'], label: 'Previous / next version' },
+  { keys: ['d'], label: 'Toggle the base: your last review / previous version' },
+  { keys: ['h'], label: 'Hide all annotations (clean read)' },
+  { keys: ['\\'], label: 'Toggle the thread panel' },
+  { keys: ['t'], label: 'Cycle theme (system, light, dark)' },
+  { keys: ['?'], label: 'This help' },
+  { keys: ['Esc'], label: 'Close or cancel' },
+]);
+
+const MODES = /** @type {const} */ (['review', 'changes', 'source', 'history']);
+
+/** @typedef {{ key: string, meta?: boolean, ctrl?: boolean, shift?: boolean, alt?: boolean }} KeyInput */
+
+/**
+ * Runs the action bound to a key. Returns true when the key was handled.
+ * @param {KeyInput} k
+ * @param {boolean} fromGuest the key was forwarded by the doc iframe
+ */
+export function handleKey(k, fromGuest) {
+  const s = store.get();
+  const key = String(k.key || '');
+  const mod = !!(k.meta || k.ctrl);
+
+  if (s.dialog === 'help') {
+    if (key === 'Escape' || key === '?') {
+      closeDialog();
+      return true;
+    }
+    return false;
+  }
+  if (s.dialog === 'submit') {
+    if (key === 'Escape') {
+      closeDialog();
+      return true;
+    }
+    return false;
+  }
+  if (mod && key === 'Enter') {
+    if (k.shift) {
+      openSubmit();
+      return true;
+    }
+    if (fromGuest || !s.composer) return false;
+    submitComposer();
+    return true;
+  }
+  if (mod || k.alt) return false;
+  if (key === 'Escape') return escape(fromGuest);
+  if (key === '?') {
+    store.set({ dialog: 'help' });
+    return true;
+  }
+  if (s.route.view !== 'doc' || !s.ds) return false;
+
+  switch (key) {
+    case 'c':
+    case 's':
+    case 'q':
+    case 'a':
+      return selectionAction(key);
+    case 'e':
+      togglePick();
+      return true;
+    case 'j':
+      navThread(1);
+      return true;
+    case 'k':
+      navThread(-1);
+      return true;
+    case 'n':
+      navChange(1);
+      return true;
+    case 'p':
+      navChange(-1);
+      return true;
+    case 'r':
+      if (focusedThread()) startReply(/** @type {string} */ (s.focusedId));
+      return true;
+    case 'x':
+      return !fromGuest && acceptFocused();
+    case 'o':
+      return !fromGuest && reopenFocused();
+    case 'y':
+      return !fromGuest && acceptDecline();
+    case 'v':
+      if (s.mode !== 'review') setMode('review');
+      setFilter('verify');
+      store.set({ sidePane: 'threads', drawer: s.narrow ? true : s.drawer, sidebar: true });
+      return true;
+    case 'f':
+      openSubmit();
+      return true;
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+      setMode(MODES[Number(key) - 1]);
+      return true;
+    case '[':
+      if (s.tool === 'pick') return false;
+      stepVersion(-1);
+      return true;
+    case ']':
+      if (s.tool === 'pick') return false;
+      stepVersion(1);
+      return true;
+    case 'd':
+      toggleBaseKind();
+      return true;
+    case 'h':
+      toggleHidden();
+      return true;
+    case '\\':
+      toggleSidebar();
+      return true;
+    case 't':
+      cycleTheme();
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** c / s / q / a on the current selection (doc selection, or selected lines in Source mode). @param {string} key */
+function selectionAction(key) {
+  const s = store.get();
+  const action = /** @type {Record<string, string>} */ ({ c: 'comment', s: 'suggest', q: 'question', a: 'agree' })[key];
+  if (s.mode === 'source') {
+    if (s.sourceSel && key === 'c') {
+      openComposer({ capture: { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to }, action });
+    } else if (key === 'c') {
+      toast('Click a line number (shift-click for a range), then press C.', { timeout: 3000 });
+    }
+    return true;
+  }
+  if (s.mode === 'history') return false;
+  const capture = s.guest.selection;
+  if (!capture) {
+    toast('Select text in the document first, or press E to pick an image, diagram, table or code block.', { timeout: 3500 });
+    return true;
+  }
+  openComposer({ capture, action });
+  return true;
+}
+
+function focusedThread() {
+  const s = store.get();
+  return (s.ds?.threads || []).find((/** @type {any} */ t) => t.id === s.focusedId) || null;
+}
+
+function acceptFocused() {
+  const t = focusedThread();
+  if (!t || t.status === 'resolved') return false;
+  resolveThread(t.id);
+  return true;
+}
+
+function reopenFocused() {
+  const t = focusedThread();
+  if (!t) return false;
+  if (t.status === 'resolved') unresolveThread(t.id);
+  else startReply(t.id, { reopen: true });
+  return true;
+}
+
+function acceptDecline() {
+  const t = focusedThread();
+  if (!t || t.status !== 'declined') return false;
+  resolveThread(t.id);
+  return true;
+}
+
+/**
+ * Esc: closes the innermost thing that is open. Esc pressed inside the doc (forwarded by the guest) is usually meant
+ * for the doc itself (clearing a selection, closing the page's own popup or dialog), so it never discards a composer
+ * or reply that holds input (Esc in the UI does, with Undo).
+ * @param {boolean} fromGuest
+ */
+function escape(fromGuest) {
+  const s = store.get();
+  if (s.composer || s.reply) {
+    const keep = fromGuest && (s.composer
+      ? isComposerDirty(s.composer) || s.composer.busy
+      : isReplyDirty(s.reply, s.ds?.drafts) || !!s.reply?.busy);
+    if (!keep) {
+      if (s.composer) cancelComposer();
+      else cancelReply();
+      return true;
+    }
+    // Kept: only leave pick mode; closing the drawer (narrow) would hide the input the reviewer is writing.
+    if (s.tool === 'pick') setTool('select');
+    return true;
+  }
+  if (s.tool === 'pick') {
+    setTool('select');
+    return true;
+  }
+  if (s.narrow && (s.drawer || s.nav)) {
+    store.set({ drawer: false, nav: false });
+    return true;
+  }
+  if (s.sourceSel) {
+    store.set({ sourceSel: null });
+    return true;
+  }
+  if (s.focusedId) {
+    clearFocus();
+    return true;
+  }
+  return false;
+}
+
+/** @param {KeyboardEvent} ev */
+function onKeyDown(ev) {
+  if (ev.defaultPrevented || ev.isComposing) return;
+  if (ev.repeat && !['j', 'k', 'n', 'p'].includes(ev.key)) return;
+  const k = { key: ev.key, meta: ev.metaKey, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey };
+  if (isEditable(ev.target)) {
+    const submitCombo = (k.meta || k.ctrl) && k.shift && k.key === 'Enter';
+    if (k.key !== 'Escape' && !submitCombo) return;
+    if (k.key === 'Escape' && !store.get().dialog) {
+      /** @type {HTMLElement} */ (ev.target).blur();
+      return;
+    }
+  }
+  if (handleKey(k, false)) ev.preventDefault();
+}
+
+export function installKeys() {
+  setKeyForwarder((d) => {
+    if (!d || typeof d.key !== 'string') return;
+    handleKey({ key: d.key, meta: !!d.meta, ctrl: !!d.ctrl, shift: !!d.shift, alt: !!d.alt }, true);
+  });
+  document.addEventListener('keydown', onKeyDown);
+}

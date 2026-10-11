@@ -1,0 +1,190 @@
+{
+  "name": "code-line-insert",
+  "description": "A comment on a code line (text selection inside a fence) keeps pointing at that line when lines are inserted above it inside the fence ('moved', code.fromLine follows) and when text is inserted above the fence.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": {
+        "kind": "text",
+        "startSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "endSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "exact": "if (family.revoked) throw new ReuseError(family.id);",
+        "prefix": "await store.familyOf(token); ",
+        "suffix": " return issuePair(family);"
+      },
+      "expect": {
+        "kind": "code",
+        "mappedBy": "textmap",
+        "lines": [
+          61,
+          61
+        ],
+        "code": {
+          "fromLine": 3,
+          "toLine": 3
+        },
+        "sridTag": "code"
+      }
+    },
+    "t2": {
+      "capture": {
+        "kind": "text",
+        "startSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "endSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "exact": "const family = await store.familyOf(token);\n  if (family.revoked)",
+        "prefix": "Promise<TokenPair> { ",
+        "suffix": " throw new ReuseError"
+      },
+      "expect": {
+        "kind": "code",
+        "lines": [
+          60,
+          61
+        ],
+        "code": {
+          "fromLine": 2,
+          "toLine": 3
+        }
+      }
+    },
+    "t3": {
+      "capture": {
+        "kind": "text",
+        "startSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "endSrid": {
+          "$srid": {
+            "tag": "code",
+            "text": "family.revoked"
+          }
+        },
+        "exact": "return issuePair(family);",
+        "prefix": "throw new ReuseError(family.id); ",
+        "suffix": " }"
+      },
+      "expect": {
+        "kind": "code",
+        "lines": [
+          62,
+          62
+        ],
+        "code": {
+          "fromLine": 4,
+          "toLine": 4
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: two lines inserted inside the fence after line 60 (t2 spans lines 60-61, so its text is split: 'changed')",
+      "edits": [
+        {
+          "find": "  const family = await store.familyOf(token);\n",
+          "replace": "  const family = await store.familyOf(token);\n  const now = Date.now();\n  log.debug('refresh', { family: family.id, now });\n"
+        }
+      ],
+      "expect": {
+        "t1": {
+          "state": "moved",
+          "kind": "code",
+          "lines": [
+            63,
+            63
+          ],
+          "code": {
+            "fromLine": 5,
+            "toLine": 5
+          },
+          "sridTag": "code"
+        },
+        "t2": {
+          "state": "changed",
+          "lines": [
+            60,
+            61
+          ],
+          "kind": "code",
+          "textIncludes": "const family = await store.familyOf(token);"
+        },
+        "t3": {
+          "state": "moved",
+          "lines": [
+            64,
+            64
+          ],
+          "code": {
+            "fromLine": 6,
+            "toLine": 6
+          }
+        }
+      }
+    },
+    {
+      "note": "v3: a paragraph inserted above the fence",
+      "edits": [
+        {
+          "find": "```ts\n",
+          "replace": "Implementation sketch:\n\n```ts\n"
+        }
+      ],
+      "expect": {
+        "t1": {
+          "state": "moved",
+          "lines": [
+            65,
+            65
+          ],
+          "code": {
+            "fromLine": 5,
+            "toLine": 5
+          }
+        },
+        "t3": {
+          "state": "moved",
+          "lines": [
+            66,
+            66
+          ],
+          "code": {
+            "fromLine": 6,
+            "toLine": 6
+          }
+        },
+        "t2": {
+          "state": "moved",
+          "lines": [
+            62,
+            63
+          ]
+        }
+      }
+    }
+  ]
+}

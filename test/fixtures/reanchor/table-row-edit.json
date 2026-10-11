@@ -1,0 +1,57 @@
+{
+  "name": "table-row-edit",
+  "description": "Table anchors follow rows by rowKey and columns by colHeader: an edited cell is 'changed' in place, cells below a new row are 'moved', a row-scope anchor on an untouched row is 'exact'; a renamed column header falls back to the column index (the table was found by position); a deleted row orphans its cell thread.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "td", "text": "30 d" } }, "tag": "td", "label": "td refresh_token / TTL",
+        "cell": { "row": 2, "col": 1, "rowKey": "refresh_token", "colHeader": "TTL", "text": "30 d" }, "scope": "cell" },
+      "expect": { "kind": "cell", "lines": [46, 46], "sridTag": "td", "cell": { "rowKey": "refresh_token", "colHeader": "TTL" } }
+    },
+    "t2": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "td", "text": "none" } }, "tag": "td", "label": "td id_token / Storage",
+        "cell": { "row": 3, "col": 2, "rowKey": "id_token", "colHeader": "Storage", "text": "none" }, "scope": "cell" },
+      "expect": { "kind": "cell", "lines": [47, 47] }
+    },
+    "t3": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "tr", "text": "access_token" } }, "tag": "tr", "label": "table row \"access_token\"",
+        "cell": { "row": 1, "col": 0, "rowKey": "access_token", "colHeader": "Token", "text": "access_token" }, "scope": "row" },
+      "expect": { "kind": "cell", "lines": [45, 45], "sridTag": "tr" }
+    },
+    "t4": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "table" } }, "tag": "table", "label": "table column \"Storage\"",
+        "cell": { "row": 1, "col": 2, "rowKey": "access_token", "colHeader": "Storage", "text": "memory" }, "scope": "column" },
+      "expect": { "kind": "cell", "lines": [43, 47], "sridTag": "table" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: the refresh_token TTL changes and a new row is inserted above it",
+      "edits": [
+        { "find": "| refresh_token | 30 d |", "replace": "| refresh_token | 7 d |" },
+        { "find": "| access_token | 15 min | memory |\n", "replace": "| access_token | 15 min | memory |\n| api_key | 90 d | vault |\n" }
+      ],
+      "expect": {
+        "t1": { "state": "changed", "lines": [47, 47], "sridTag": "td", "cell": { "row": 3, "col": 1, "rowKey": "refresh_token", "colHeader": "TTL", "text": "7 d" } },
+        "t2": { "state": "moved", "lines": [48, 48], "sridTag": "td", "cell": { "row": 4, "col": 2, "rowKey": "id_token", "text": "none" } },
+        "t3": { "state": "exact", "lines": [45, 45], "sridTag": "tr" },
+        "t4": { "state": "changed", "lines": [43, 48], "sridTag": "table" }
+      }
+    },
+    {
+      "note": "v3: the TTL header is renamed and the id_token row is deleted",
+      "edits": [
+        { "find": "| Token | TTL | Storage |", "replace": "| Token | Lifetime | Storage |" },
+        { "find": "| id_token | 15 min | none |\n", "replace": "" }
+      ],
+      "expect": {
+        "t1": { "state": "exact", "lines": [47, 47], "cell": { "rowKey": "refresh_token", "colHeader": "Lifetime", "text": "7 d" } },
+        "t2": { "state": "orphaned" },
+        "t3": { "state": "exact", "lines": [45, 45] },
+        "t4": { "state": "changed", "lines": [43, 47], "cell": { "colHeader": "Storage" } }
+      }
+    }
+  ]
+}

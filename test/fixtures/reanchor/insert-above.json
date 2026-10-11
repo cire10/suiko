@@ -1,0 +1,60 @@
+{
+  "name": "insert-above",
+  "description": "Lines inserted above shift every later anchor ('moved', same text, new lines); anchors above stay 'exact'. An agent override re-anchors a thread on given text ('exact', mappedBy 'override').",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "h1" } }, "endSrid": { "$srid": { "tag": "h1" } },
+        "exact": "Token Service Implementation Spec", "prefix": "", "suffix": " This spec describes" },
+      "expect": { "lines": [7, 7], "sridTag": "h1", "mappedBy": "textmap" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } }, "endSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } },
+        "exact": "rotated on every use", "prefix": "Refresh tokens are ", "suffix": ", and the previous token is" },
+      "expect": { "lines": [51, 51] }
+    },
+    "t3": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "code", "text": "issuePair" } }, "endSrid": { "$srid": { "tag": "code", "text": "issuePair" } },
+        "exact": "return issuePair(family);", "prefix": "throw new ReuseError(family.id); ", "suffix": " }" },
+      "expect": { "kind": "code", "lines": [62, 62], "code": { "fromLine": 4, "toLine": 4 } }
+    },
+    "t4": {
+      "capture": { "kind": "section", "headingSrid": { "$srid": { "tag": "h2", "text": "3 Tokens" } } },
+      "expect": { "kind": "section", "lines": [41, 64], "sridTag": "h2" }
+    },
+    "t5": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "img" } }, "tag": "img", "label": "img \"System overview\"", "region": { "x": 0.4, "y": 0.1, "w": 0.22, "h": 0.2 } },
+      "expect": { "kind": "element", "lines": [29, 29], "sridTag": "img" }
+    },
+    "t6": {
+      "capture": { "kind": "source", "startLine": 2, "endLine": 3 },
+      "expect": { "kind": "source", "mappedBy": "lines", "lines": [2, 3] }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: a status note is inserted right after the title (2 lines)",
+      "edits": [ { "find": "# Token Service Implementation Spec\n", "replace": "# Token Service Implementation Spec\n\n> **Status:** draft for review.\n" } ],
+      "expect": {
+        "t1": { "state": "exact", "lines": [7, 7], "sridTag": "h1" },
+        "t2": { "state": "moved", "lines": [53, 53], "sridTag": "p" },
+        "t3": { "state": "moved", "lines": [64, 64], "code": { "fromLine": 4, "toLine": 4 } },
+        "t4": { "state": "moved", "lines": [43, 66], "sridTag": "h2" },
+        "t5": { "state": "moved", "lines": [31, 31], "sridTag": "img" },
+        "t6": { "state": "exact", "lines": [2, 3] }
+      }
+    },
+    {
+      "note": "v3: unrelated edit far below; the agent overrides t2 onto a quote",
+      "edits": [ { "find": "Last revised 2026-10-10.", "replace": "Last revised 2026-10-11." } ],
+      "override": { "t2": { "quote": "previous token is invalidated" } },
+      "expect": {
+        "t2": { "state": "exact", "mappedBy": "override", "lines": [53, 53], "text": "previous token is invalidated" },
+        "t4": { "state": "exact", "lines": [43, 66] },
+        "t1": { "state": "exact" }
+      }
+    }
+  ]
+}

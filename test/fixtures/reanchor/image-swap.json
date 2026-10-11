@@ -1,0 +1,47 @@
+{
+  "name": "image-swap",
+  "description": "An image whose file changed (same path, new bytes) and whose alt text changed stays on the image: 'changed' with assetChanged; a later asset-only change linked to the thread is 'edited'; no change is 'exact' again.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "assets": { "docs/img/arch.png": "sha256:1111111111111111111111111111111111111111111111111111111111111111" },
+  "threads": {
+    "t1": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "img" } }, "tag": "img", "label": "img \"System overview\" region x40-62% y10-30%",
+        "region": { "x": 0.4, "y": 0.1, "w": 0.22, "h": 0.2 } },
+      "expect": { "kind": "element", "lines": [29, 29], "sridTag": "img" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } }, "endSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } },
+        "exact": "rotated on every use", "prefix": "Refresh tokens are ", "suffix": ", and the previous token is" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: new image bytes at the same path, alt text reworded (not linked)",
+      "edits": [ { "find": "![System overview]", "replace": "![System overview with the gateway in front]" } ],
+      "assets": { "docs/img/arch.png": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
+      "expect": {
+        "t1": { "state": "changed", "assetChanged": true, "lines": [29, 29], "sridTag": "img", "kind": "element" },
+        "t2": { "state": "exact" }
+      }
+    },
+    {
+      "note": "v3: only the image bytes change; the agent linked the thread (asset change counts as linked)",
+      "edits": [],
+      "assets": { "docs/img/arch.png": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
+      "links": { "t1": { "linked": true } },
+      "expect": {
+        "t1": { "state": "edited", "assetChanged": true, "lines": [29, 29], "sridTag": "img" },
+        "t2": { "state": "exact" }
+      }
+    },
+    {
+      "note": "v4: nothing about the image changes",
+      "edits": [ { "find": "Last revised 2026-10-10.", "replace": "Last revised 2026-10-12." } ],
+      "expect": {
+        "t1": { "state": "exact", "assetChanged": false, "lines": [29, 29], "sridTag": "img" }
+      }
+    }
+  ]
+}

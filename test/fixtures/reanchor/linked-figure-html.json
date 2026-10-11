@@ -1,0 +1,109 @@
+{
+  "name": "linked-figure-html",
+  "description": "Inline HTML where the image and its caption share one source line: a linked caption edit touches the image's line but not its characters, so the image thread stays 'exact' on the <img>; the caption thread (linked, rewritten beyond fuzzy similarity) is 'edited' on the whole linked line, painted inside <figure> with the new caption as its quote.",
+  "format": "html",
+  "docPath": "docs/figure.html",
+  "v1": [
+    "<!doctype html>",
+    "<html><head><title>Figure test</title></head>",
+    "<body>",
+    "<h1>Gateway</h1>",
+    "<figure><img src=\"img/arch.png\" alt=\"Overview\"><figcaption>Old caption about the gateway.</figcaption></figure>",
+    "<p>Trailing paragraph.</p>",
+    "</body></html>",
+    ""
+  ],
+  "threads": {
+    "t1": {
+      "capture": {
+        "kind": "element",
+        "srid": {
+          "$srid": {
+            "tag": "img"
+          }
+        },
+        "tag": "img",
+        "label": "img \"Overview\""
+      },
+      "expect": {
+        "kind": "element",
+        "lines": [
+          5,
+          5
+        ],
+        "text": "<img src=\"img/arch.png\" alt=\"Overview\">"
+      }
+    },
+    "t2": {
+      "capture": {
+        "kind": "text",
+        "startSrid": {
+          "$srid": {
+            "tag": "figcaption"
+          }
+        },
+        "endSrid": {
+          "$srid": {
+            "tag": "figcaption"
+          }
+        },
+        "exact": "Old caption about the gateway.",
+        "prefix": "",
+        "suffix": "Trailing paragraph."
+      },
+      "expect": {
+        "kind": "text",
+        "lines": [
+          5,
+          5
+        ],
+        "sridTag": "figcaption"
+      }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: the caption is rewritten (linked to both threads)",
+      "edits": [
+        {
+          "find": "Old caption about the gateway.",
+          "replace": "The gateway forwards every request to the auth service."
+        }
+      ],
+      "links": {
+        "t1": {
+          "newLines": [
+            5,
+            5
+          ]
+        },
+        "t2": {
+          "newLines": [
+            5,
+            5
+          ]
+        }
+      },
+      "expect": {
+        "t1": {
+          "state": "exact",
+          "lines": [
+            5,
+            5
+          ],
+          "sridTag": "img"
+        },
+        "t2": {
+          "state": "edited",
+          "lines": [
+            5,
+            5
+          ],
+          "sridTag": "figure",
+          "quote": "The gateway forwards every request to the auth service.",
+          "textIncludes": "<figcaption>The gateway forwards"
+        }
+      }
+    }
+  ]
+}

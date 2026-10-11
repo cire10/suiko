@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design system</title>
+<style>
+  body { font: 16px/1.5 Helvetica, Arial, sans-serif; margin: 20px; background: #fff; color: #111; }
+  nav#toc { border: 1px solid #ccc; padding: 4px 12px; margin-bottom: 24px; }
+  nav#toc h2 { font-size: 14px; margin: 2px 0; }
+  section { margin-bottom: 600px; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Button component</h1>
+<nav data-srid="3" id="toc"></nav>
+<section data-srid="4"><h2 data-srid="5" id="usage">Usage</h2><p data-srid="6">Use a button for actions, a link for navigation.</p></section>
+<section data-srid="7"><h2 data-srid="8" id="props">Props</h2><p data-srid="9">The variant prop picks primary, secondary or danger.</p></section>
+<section data-srid="10"><h2 data-srid="11" id="a11y">Accessibility</h2><p data-srid="12">Icon-only buttons need an aria-label.</p></section>
+<script>
+  // Builds the table of contents from copies of the section headings (the copies keep their data-srid).
+  const toc = document.getElementById('toc');
+  for (const h of document.querySelectorAll('section > h2')) toc.appendChild(h.cloneNode(true));
+</script>
+</body>
+</html>

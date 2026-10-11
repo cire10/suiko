@@ -1,0 +1,18 @@
+[
+  "00-protocol.js",
+  "05-env.js",
+  "10-textwalk.js",
+  "20-channel.js",
+  "25-scheduler.js",
+  "30-highlights.js",
+  "40-overlay.js",
+  "45-capture.js",
+  "50-selection.js",
+  "60-picker.js",
+  "70-targets.js",
+  "80-changes.js",
+  "85-keys.js",
+  "87-navigation.js",
+  "90-errors.js",
+  "99-main.js"
+]

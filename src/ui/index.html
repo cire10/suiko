@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>SpecReview</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/ui/styles/tokens.css">
+<link rel="stylesheet" href="/ui/styles/base.css">
+<link rel="stylesheet" href="/ui/styles/layout.css">
+<link rel="stylesheet" href="/ui/styles/components.css">
+<link rel="stylesheet" href="/ui/styles/views.css">
+<script type="importmap">
+{
+  "imports": {
+    "preact-htm": "/vendor/htm/preact/standalone.module.js",
+    "marked": "/vendor/marked/marked.esm.js",
+    "dompurify": "/vendor/dompurify/purify.es.mjs",
+    "diff": "/vendor/diff/index.js",
+    "protocol": "/ui-shared/protocol.js"
+  }
+}
+</script>
+<link rel="modulepreload" href="/vendor/htm/preact/standalone.module.js">
+<link rel="modulepreload" href="/ui-shared/protocol.js">
+<script type="module" src="/ui/main.js"></script>
+</head>
+<body>
+<div id="app"><p class="boot">Loading SpecReview…</p></div>
+<noscript><p class="boot">SpecReview needs JavaScript.</p></noscript>
+</body>
+</html>

@@ -1,0 +1,29 @@
+SPECREVIEW FEEDBACK · kitchen-sink (docs/kitchen-sink.md) · review rv1 on v1 · CHANGES REQUESTED
+Line numbers = current file on disk (identical to v1).
+Reviewer summary: Good start. The note about the gateway is agreed - keep it.
+4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
+
+[t3] suggestion · L23 · §1 Goals > 1.1 Milestones · apply verbatim: specreview apply kitchen-sink t3
+  - Prototype the issuer.
+  + Prototype the issuer behind the gateway.
+  Eric: Name where it runs.
+
+[t2] question · L29 · §2 Architecture · <img alt="System overview"> region x40-62% y10-30%
+  src> ![System overview](./img/arch.png "Architecture overview")
+  crop: <root>/.specreview/docs/kitchen-sink/attachments/a1.png  (Read it to see the region)
+  Eric: Does the gateway sit in front of the auth service or beside it? The arrow is ambiguous.
+
+[t4] comment · L46 · §3 Tokens · table cell row "refresh_token" x col "TTL" = "30 d"
+  src> | refresh_token | 30 d | `token_store` |
+  Eric: 30 days is too long for admin accounts; split by role.
+
+[t1] blocking · comment · L51 · §3 Tokens > 3.2 Token refresh
+  on: "rotated on every use"
+  src> Refresh tokens are rotated on every use, and the previous token is invalidated
+  Eric: Rotation on every use breaks multi-tab sessions. Use a 30 s reuse-detection grace window.
+
+LOCKED (agreed - do not modify): L1 §2 Architecture "the gateway never stores tokens" (L38)
+DECISIONS to keep true: (none yet)
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
+  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+NEXT: edits -> specreview revise kitchen-sink --replies - (JSON, one entry per thread) -> specreview wait kitchen-sink (background)

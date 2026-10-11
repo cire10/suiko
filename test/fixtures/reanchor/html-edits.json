@@ -1,0 +1,77 @@
+{
+  "name": "html-edits",
+  "description": "Edits in a messy HTML spec: an edited table cell and an edited SVG node are 'changed' on the same elements; a mermaid node whose definition line changed is 'changed'; text whose own characters are intact on an edited line stays 'exact'; an untouched row and image stay 'exact'; a linked rewrite of a paragraph is 'edited'; a section with new content is 'changed'.",
+  "doc": "app-spec.html",
+  "format": "html",
+  "docPath": "docs/app-spec.html",
+  "assets": { "docs/img/arch.png": "sha256:44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab" },
+  "threads": {
+    "t1": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "td", "text": "any cart with a valid code" } }, "tag": "td", "label": "td coupon / Applies to",
+        "cell": { "row": 2, "col": 1, "rowKey": "coupon", "colHeader": "Applies to", "text": "any cart with a valid code" }, "scope": "cell" },
+      "expect": { "kind": "cell", "lines": [65, 65], "text": "<td>any cart with a valid code</td>" }
+    },
+    "t2": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "tr", "text": "loyalty" } }, "tag": "tr", "label": "table row \"loyalty\"",
+        "cell": { "row": 3, "col": 0, "rowKey": "loyalty", "colHeader": "Rule", "text": "loyalty" }, "scope": "row" },
+      "expect": { "kind": "cell", "lines": [66, 66], "sridTag": "tr" }
+    },
+    "t3": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "g", "id": "node-gateway" } }, "tag": "g", "label": "svg g \"Gateway\"" },
+      "expect": { "kind": "element", "lines": [35, 38], "sridTag": "g" }
+    },
+    "t4": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "tag": "pre", "label": "mermaid node \"Payments\"",
+        "svg": { "nodeId": "Payments", "label": "Payments" } },
+      "expect": { "kind": "element", "generated": true, "lines": [52, 53] }
+    },
+    "t5": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "The checkout service turns" } }, "endSrid": { "$srid": { "tag": "p", "text": "The checkout service turns" } },
+        "exact": "cart into a paid order.\nIt owns", "prefix": "The checkout service turns a ", "suffix": " pricing, tax & payment" },
+      "expect": { "kind": "text", "mappedBy": "narrowed", "lines": [22, 22], "text": "<strong>cart</strong> into a paid <em>order</em>.<br/>It owns" }
+    },
+    "t6": {
+      "capture": { "kind": "section", "headingSrid": { "$srid": { "tag": "h2", "text": "4. API" } } },
+      "expect": { "kind": "section", "lines": [73, 88], "sridTag": "h2" }
+    },
+    "t7": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "img" } }, "tag": "img", "label": "img \"Checkout architecture\"", "region": { "x": 0.5, "y": 0, "w": 0.5, "h": 0.5 } },
+      "expect": { "kind": "element", "lines": [28, 28], "sridTag": "img" }
+    },
+    "t8": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Requests arrive" } }, "endSrid": { "$srid": { "tag": "p", "text": "Requests arrive" } },
+        "exact": "Requests arrive through the API gateway", "prefix": "1. Overview ", "suffix": " and are processed in three" },
+      "expect": { "kind": "text", "lines": [27, 27] }
+    },
+    "t9": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "code", "text": "order.created" } }, "endSrid": { "$srid": { "tag": "code", "text": "order.paid" } },
+        "exact": "order.created and order.paid", "prefix": "Emits ", "suffix": " on the event bus." },
+      "expect": { "kind": "text", "lines": [82, 82], "mappedBy": "narrowed", "sridTag": "p" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: several targeted edits",
+      "edits": [
+        { "find": "<td>any cart with a valid code</td>", "replace": "<td>carts with a valid, unexpired code</td>" },
+        { "find": ">Gateway</text>", "replace": ">API Gateway</text>" },
+        { "find": "Payments-->>Checkout: approved", "replace": "Payments-->>Checkout: approved or declined" },
+        { "find": "It owns pricing", "replace": "It owns all pricing" },
+        { "find": "<p>Requests arrive through the API gateway and are processed in three stages.</p>", "replace": "<p>Every request enters through the API gateway, which forwards it to three stages.</p>" },
+        { "find": "<code>order.paid</code> on the event bus.", "replace": "<code>order.paid</code> on the event bus (and <code>order.refunded</code> on refunds)." }
+      ],
+      "links": { "t8": { "newLines": [27, 27] } },
+      "expect": {
+        "t1": { "state": "changed", "lines": [65, 65], "sridTag": "td", "cell": { "rowKey": "coupon", "colHeader": "Applies to", "text": "carts with a valid, unexpired code" } },
+        "t2": { "state": "exact", "lines": [66, 66], "sridTag": "tr" },
+        "t3": { "state": "changed", "lines": [35, 38], "sridTag": "g" },
+        "t4": { "state": "changed", "lines": [52, 53], "sridTag": "pre" },
+        "t5": { "state": "exact", "lines": [22, 22] },
+        "t6": { "state": "changed", "lines": [73, 88], "sridTag": "h2" },
+        "t7": { "state": "exact", "lines": [28, 28], "sridTag": "img" },
+        "t8": { "state": "edited", "lines": [27, 27], "sridTag": "p" },
+        "t9": { "state": "exact", "lines": [82, 82] }
+      }
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "name": "reword",
+  "description": "Rewording: an unlinked minor reword is 'changed'; a linked rewrite is 'edited'; text on a changed line whose own characters are intact stays 'exact'; a deleted sentence orphans its threads, which are found again (from lastKnown) when the sentence comes back.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } }, "endSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } },
+        "exact": "rotated on every use", "prefix": "Refresh tokens are ", "suffix": ", and the previous token is" },
+      "expect": { "kind": "text", "mappedBy": "textmap", "lines": [51, 51], "text": "rotated on every use", "sridTag": "p", "sectionTail": "3.2 Token refresh" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "li", "text": "Detect reuse" } }, "endSrid": { "$srid": { "tag": "li", "text": "Detect reuse" } },
+        "exact": "Detect reuse of a rotated token.", "prefix": "Rotate refresh tokens safely. ", "suffix": " Revoke the whole token family" },
+      "expect": { "kind": "text", "lines": [17, 17], "text": "Detect reuse of a rotated token.", "sridTag": "li" }
+    },
+    "t3": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "li", "text": "Ship rotation" } }, "endSrid": { "$srid": { "tag": "li", "text": "Ship rotation" } },
+        "exact": "Ship rotation behind a flag.", "prefix": "Prototype the issuer. ", "suffix": " Remove the legacy" },
+      "expect": { "lines": [24, 24], "text": "Ship rotation behind a flag." }
+    },
+    "t4": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } }, "endSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } },
+        "exact": "invalidated", "prefix": ", and the previous token is ", "suffix": " immediately. The expected" },
+      "expect": { "lines": [51, 51], "text": "invalidated" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: minor unlinked reword of t1's phrase on line 51; linked rewrite of t2's list item",
+      "edits": [
+        { "find": "rotated on every use", "replace": "rotated on each use" },
+        { "find": "Detect reuse of a rotated token.", "replace": "Flag any second use of a rotated refresh token and alert on-call." }
+      ],
+      "links": { "t2": { "newLines": [17, 17] } },
+      "expect": {
+        "t1": { "state": "changed", "lines": [51, 51], "text": "rotated on each use", "quote": "rotated on each use" },
+        "t2": { "state": "edited", "lines": [17, 17], "textIncludes": "rotated refresh token", "sridTag": "li" },
+        "t3": { "state": "exact", "lines": [24, 24] },
+        "t4": { "state": "exact", "lines": [51, 51], "text": "invalidated", "quote": "invalidated" }
+      }
+    },
+    {
+      "note": "v3: the first sentence of the paragraph is deleted",
+      "edits": [ { "find": "Refresh tokens are rotated on each use, and the previous token is invalidated\nimmediately. ", "replace": "" } ],
+      "expect": {
+        "t1": { "state": "orphaned" },
+        "t2": { "state": "exact", "lines": [17, 17] },
+        "t3": { "state": "exact" },
+        "t4": { "state": "orphaned" }
+      }
+    },
+    {
+      "note": "v4: the original sentence comes back; orphans are found again from their lastKnown text",
+      "edits": [ { "find": "The expected number of refreshes", "replace": "Refresh tokens are rotated on every use, and the previous token is invalidated\nimmediately. The expected number of refreshes" } ],
+      "expect": {
+        "t1": { "state": "changed", "lines": [51, 51], "text": "rotated on every use" },
+        "t4": { "state": "moved", "lines": [51, 51], "text": "invalidated" },
+        "t2": { "state": "exact" }
+      }
+    }
+  ]
+}

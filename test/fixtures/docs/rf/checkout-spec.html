@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout Redesign — Technical Spec</title>
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <style>
+    :root { --accent: #4f46e5; --muted: #6b7280; --border: #e5e7eb; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; color: #111827; line-height: 1.6; }
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .badge { display: inline-block; font-size: .75rem; padding: 2px 8px; border-radius: 9999px; background: #eef2ff; color: var(--accent); }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    .tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--border); }
+    .tab-btn { background: none; border: 0; padding: .5rem 1rem; cursor: pointer; color: var(--muted); }
+    .tab-btn.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+    .tab-panel { display: none; padding: 1rem 0; }
+    .tab-panel.active { display: block; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid var(--border); padding: .5rem .75rem; text-align: left; vertical-align: top; }
+    th { background: #f9fafb; }
+    code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; font-size: .9em; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    pre code { background: none; padding: 0; }
+    figure { margin: 1.5rem 0; text-align: center; }
+    figcaption { color: var(--muted); font-size: .875rem; }
+    .callout { border-left: 4px solid #f59e0b; background: #fffbeb; padding: .75rem 1rem; }
+    section > :last-child { margin-bottom: 0; }
+    body > :last-child { margin-bottom: 4rem; }
+    .toc li:first-child { font-weight: 600; }
+  </style>
+</head>
+<body class="bg-gray-50">
+<div class="container">
+  <header class="mb-8">
+    <div class="flex items-center gap-3">
+      <h1 class="text-3xl font-bold">Checkout Redesign</h1>
+      <span class="badge">Draft v2</span>
+    </div>
+    <p class="text-gray-500">Owner: Payments Platform &middot; Last updated: 2026-10-01</p>
+  </header>
+
+  <nav class="toc card">
+    <ol>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#flow">Payment flow</a></li>
+      <li><a href="#api">API changes</a></li>
+      <li><a href="#rollout">Rollout</a></li>
+    </ol>
+  </nav>
+
+  <section id="overview">
+    <div class="flex items-baseline justify-between">
+      <h2 class="text-2xl font-semibold">1. Overview</h2>
+      <span class="badge">P0</span>
+    </div>
+    <p>The current checkout takes <strong>4 steps</strong> and loses ~23% of users between
+      <em>Shipping</em> and <em>Payment</em>. This spec collapses checkout into a single page
+      with progressive disclosure, and moves card tokenization to the client using
+      <code>Stripe.js&nbsp;v3</code>.</p>
+    <div class="callout">
+      <strong>Note:</strong> the &ldquo;Express Pay&rdquo; buttons (Apple&nbsp;Pay, Google&nbsp;Pay) are out of scope for v1 &mdash; see <a href="#rollout">Rollout</a>.
+    </div>
+    <p>Success metric: checkout conversion &ge; 78% (baseline 71.4%), measured over 14&nbsp;days.<br>
+      Guardrail: payment error rate must stay &lt; 0.5%.</p>
+  </section>
+
+  <section id="flow">
+    <div class="flex items-baseline justify-between">
+      <h2 class="text-2xl font-semibold">2. Payment flow</h2>
+    </div>
+    <figure>
+      <svg width="640" height="160" viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Payment flow diagram">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#4f46e5"/>
+          </marker>
+        </defs>
+        <g id="node-cart">
+          <rect x="10" y="50" width="140" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5"/>
+          <text x="80" y="85" text-anchor="middle" font-size="14">Cart</text>
+        </g>
+        <g id="node-details">
+          <rect x="250" y="50" width="140" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5"/>
+          <text x="320" y="78" text-anchor="middle" font-size="14">Details +</text>
+          <text x="320" y="96" text-anchor="middle" font-size="14">Payment</text>
+        </g>
+        <g id="node-confirm">
+          <rect x="490" y="50" width="140" height="60" rx="8" fill="#ecfdf5" stroke="#059669"/>
+          <text x="560" y="85" text-anchor="middle" font-size="14">Confirmation</text>
+        </g>
+        <line x1="150" y1="80" x2="248" y2="80" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="390" y1="80" x2="488" y2="80" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+      </svg>
+      <figcaption>Figure 1. The single-page flow: cart &rarr; details + payment &rarr; confirmation.</figcaption>
+    </figure>
+
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="web">Web</button>
+      <button class="tab-btn" data-tab="ios">iOS</button>
+      <button class="tab-btn" data-tab="android">Android</button>
+    </div>
+    <div class="tab-panel active" id="tab-web">
+      <p>Web uses the <code>PaymentElement</code> with <code>layout: "accordion"</code>. Address autocomplete is provided by the Places API.</p>
+    </div>
+    <div class="tab-panel" id="tab-ios">
+      <p>iOS uses <code>PaymentSheet</code> with the <code>FlowController</code> API so we keep our own Confirm button.</p>
+    </div>
+    <div class="tab-panel" id="tab-android">
+      <p>Android mirrors iOS via <code>PaymentSheet.FlowController</code>; minimum SDK 24.</p>
+    </div>
+
+    <details class="card">
+      <summary>Why not keep the multi-step flow?</summary>
+      <p>User research (n=12) showed that the step indicator created &ldquo;false progress&rdquo;: users expected to be done after step 3.</p>
+    </details>
+  </section>
+
+  <section id="api">
+    <div class="flex items-baseline justify-between">
+      <h2 class="text-2xl font-semibold">3. API changes</h2>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Endpoint</th><th>Method</th><th>Change</th><th>Owner</th></tr>
+      </thead>
+      <tbody>
+        <tr><td rowspan="2"><code>/v2/checkout/sessions</code></td><td>POST</td><td>New: creates a session with cart snapshot</td><td rowspan="3">Payments</td></tr>
+        <tr><td>PATCH</td><td>New: updates shipping address &amp; recalculates tax</td></tr>
+        <tr><td><code>/v2/checkout/sessions/{id}/confirm</code></td><td>POST</td><td>Idempotent via <code>Idempotency-Key</code> header</td></tr>
+        <tr><td><code>/v1/cart/checkout</code></td><td>POST</td><td colspan="2"><em>Deprecated</em> &mdash; returns <code>410 Gone</code> after 2027-01-01</td></tr>
+      </tbody>
+    </table>
+
+    <h3 class="text-xl mt-6">3.1 Request example</h3>
+<pre><code class="language-json">{
+  "cart_id": "crt_8f2a",
+  "currency": "USD",
+  "items": [{ "sku": "SKU-1", "qty": 2 }],
+  "return_url": "https://shop.example.com/checkout/done?session={CHECKOUT_SESSION_ID}&amp;src=web"
+}</code></pre>
+
+    <figure>
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAPklEQVR42mNk+M9Qz0AEYBxVSF+FjAwM/xkYGP4TowmbYkYGBob/xGjCppiRgYHhPzGasClmZGBg+E+MJgB5xB8R5Yz8dQAAAABJRU5ErkJggg==" alt="Session state machine" width="160" height="160">
+      <figcaption>Figure 2. Session states: <code>open</code> &rarr; <code>complete</code> | <code>expired</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section id="rollout">
+    <div class="flex items-baseline justify-between">
+      <h2 class="text-2xl font-semibold">4. Rollout</h2>
+    </div>
+    <ul>
+      <li>Week 1: internal dogfood behind <code>checkout_v2</code> flag</li>
+      <li>Week 2&ndash;3: 5% &rarr; 25% &rarr; 50% A/B</li>
+      <li>Week 4: 100%, remove legacy flow in the following sprint</li>
+    </ul>
+    <p id="generated-summary" class="text-sm text-gray-500"></p>
+  </section>
+</div>
+
+<script>
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+  var stepCount = document.querySelectorAll('#rollout li').length;
+  document.getElementById('generated-summary').textContent = 'Rollout spans ' + stepCount + ' phases over four weeks.';
+  console.log('body children', document.body.children.length);
+</script>
+</body>
+</html>

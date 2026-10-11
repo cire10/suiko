@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Caching Options</title>
+<style>
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+  .pill { font-size: 11px; background: #eef; padding: 1px 6px; border-radius: 99px; }
+</style>
+</head>
+<body>
+<h1>Caching Options</h1>
+<p>We evaluated three approaches for the product-catalog cache.</p>
+<div id="cards" class="grid"></div>
+<script>
+const options = [
+  { name: 'Option A: Redis cluster', cost: '$4.1k/mo', verdict: 'Recommended', notes: 'Mature, team already operates it.' },
+  { name: 'Option B: Memcached', cost: '$2.3k/mo', verdict: 'Viable', notes: 'No persistence; cold starts hurt.' },
+  { name: 'Option C: CDN edge cache', cost: '$1.2k/mo', verdict: 'Rejected', notes: 'Cannot vary by tenant.' },
+];
+document.getElementById('cards').innerHTML = options.map((o) => `
+  <div class="card">
+    <h3>${o.name}</h3>
+    <span class="pill">${o.verdict}</span>
+    <p>Estimated cost: <strong>${o.cost}</strong></p>
+    <p>${o.notes}</p>
+  </div>`).join('');
+</script>
+</body>
+</html>

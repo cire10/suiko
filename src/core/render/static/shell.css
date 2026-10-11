@@ -1,0 +1,138 @@
+/* SpecReview Markdown shell: readable page layout on top of github-markdown-css.
+ *
+ * Theme: the active github-markdown stylesheet (link[data-sr-theme], selected by prefers-color-scheme or flipped
+ * by the guest) colours .markdown-body. The article therefore spans the whole page and centres its content with
+ * padding, so the page background always follows the active sheet. Our own components use translucent neutrals
+ * that read well on both themes. html[data-sr-theme="light|dark"], set by the guest when the UI forces a theme,
+ * also pins the page / overscroll background. The root colour scheme follows the system (scrollbars, form
+ * controls); when the UI forces a theme the guest pins it with an inline `color-scheme: light|dark` on <html>. */
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-sr-theme="light"]),
+  html:not([data-sr-theme="light"]) body {
+    background: #0d1117;
+  }
+}
+
+html[data-sr-theme="dark"],
+html[data-sr-theme="dark"] body {
+  background: #0d1117;
+}
+
+.markdown-body {
+  box-sizing: border-box;
+  min-height: 100vh;
+  /* content column of at most 900px, centred; the background covers the full width */
+  padding: 40px max(32px, calc((100% - 900px) / 2)) 96px;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 767px) {
+  .markdown-body {
+    padding: 20px 16px 64px;
+  }
+}
+
+/* Wide content scrolls inside its block instead of widening the page. */
+.markdown-body table,
+.markdown-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-body img,
+.markdown-body video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Wide diagrams shrink to the column (KaTeX svgs are sized by katex.css and are not touched). */
+.markdown-body > svg,
+.markdown-body pre.mermaid > svg {
+  max-width: 100%;
+}
+
+/* highlight.js themes pad code.hljs themselves; the github-markdown pre already provides the box. */
+.markdown-body pre > code.hljs {
+  padding: 0;
+  background: transparent;
+}
+
+/* Front matter */
+.markdown-body details.sr-frontmatter {
+  margin: 0 0 24px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.06);
+}
+
+.markdown-body details.sr-frontmatter > summary {
+  cursor: pointer;
+  padding: 6px 12px;
+  opacity: 0.75;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.markdown-body details.sr-frontmatter > pre {
+  margin: 0;
+  border-top: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 0 0 6px 6px;
+}
+
+/* Math */
+.markdown-body div.sr-math {
+  margin: 0 0 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Mermaid: show the source muted until the diagram renders, then centre the SVG. */
+.markdown-body pre.mermaid {
+  background: transparent;
+  text-align: center;
+}
+
+.markdown-body pre.mermaid:not([data-processed]) {
+  opacity: 0.6;
+  text-align: left;
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.sr-mermaid-error {
+  box-sizing: border-box;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(220, 60, 60, 0.55);
+  border-radius: 6px;
+  background: rgba(255, 80, 80, 0.1);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.sr-mermaid-error > strong {
+  color: #e5534b;
+}
+
+.sr-mermaid-error pre {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  background: rgba(127, 127, 127, 0.1);
+  border-radius: 4px;
+}

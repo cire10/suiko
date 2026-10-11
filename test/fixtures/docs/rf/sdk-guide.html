@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SDK Retry Policy</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 760px; margin: 2rem auto; }
+  pre { background: #272822; color: #f8f8f2; padding: 12px; }
+  .kw { color: #f92672; } .str { color: #e6db74; } .num { color: #ae81ff; } .cm { color: #75715e; }
+  .eyebrow { text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+  q { font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <p class="eyebrow">Engineering RFC 0117</p>
+  <h1>SDK Retry Policy</h1>
+</header>
+<main>
+<article>
+<h2>Motivation</h2>
+<p>Customers report that the SDK <q>gives up too early</q> during regional failovers. The current policy retries
+3&nbsp;times with a fixed 200&#8239;ms delay, which is shorter than a typical DNS TTL.</p>
+
+<h2>Proposed policy</h2>
+<pre><code><span class="kw">const</span> policy = {
+  maxAttempts: <span class="num">6</span>,
+  backoff: <span class="str">"exponential"</span>, <span class="cm">// 100ms, 200ms, 400ms...</span>
+  jitter: <span class="str">"full"</span>,
+  retryOn: [<span class="num">429</span>, <span class="num">502</span>, <span class="num">503</span>, <span class="num">504</span>],
+};
+</code></pre>
+<p>Delay for attempt <var>n</var> is <code>random(0, min(cap, base &times; 2<sup>n</sup>))</code>.</p>
+
+<h2>Compatibility</h2>
+<ol start="3">
+  <li><label><input type="checkbox" checked> Keep the <code>maxRetries</code> option as an alias</label></li>
+  <li><label><input type="checkbox"> Log a deprecation warning once per process</label></li>
+</ol>
+<blockquote cite="https://example.com/sre-book">
+  <p>Retries are a <mark>load multiplier</mark>; budget them.</p>
+</blockquote>
+</article>
+</main>
+<footer><p>Questions? Ping <a href="mailto:sdk@example.com">#sdk-team</a>.</p></footer>
+</body>
+</html>

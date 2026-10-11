@@ -1,0 +1,93 @@
+{
+  "name": "full-regeneration",
+  "description": "The agent regenerated the whole spec. Nothing may be silently wrong: anchors whose text is gone are 'orphaned' (with lastKnown); the image (same file) and the section (heading 'Tokens') are found again but reported 'changed'.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "assets": { "docs/img/arch.png": "sha256:44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab" },
+  "threads": {
+    "t1": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } }, "endSrid": { "$srid": { "tag": "p", "text": "Refresh tokens are rotated" } },
+        "exact": "rotated on every use", "prefix": "Refresh tokens are ", "suffix": ", and the previous token is" }
+    },
+    "t2": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "img" } }, "tag": "img", "label": "img \"System overview\"", "region": { "x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3 } }
+    },
+    "t3": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "code", "text": "family.revoked" } }, "endSrid": { "$srid": { "tag": "code", "text": "family.revoked" } },
+        "exact": "if (family.revoked) throw new ReuseError(family.id);", "prefix": "", "suffix": "" }
+    },
+    "t4": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "td", "text": "30 d" } }, "tag": "td", "label": "td refresh_token / TTL",
+        "cell": { "row": 2, "col": 1, "rowKey": "refresh_token", "colHeader": "TTL", "text": "30 d" }, "scope": "cell" }
+    },
+    "L1": {
+      "capture": { "kind": "section", "headingSrid": { "$srid": { "tag": "h2", "text": "3 Tokens" } } }
+    },
+    "t6": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Should the grace window" } }, "endSrid": { "$srid": { "tag": "p", "text": "Should the grace window" } },
+        "exact": "configurable per client", "prefix": "Should the grace window be 30 s or ", "suffix": "?" }
+    },
+    "t7": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "pre", "kind": "mermaid" } }, "tag": "pre", "label": "mermaid node \"API Gateway\"",
+        "svg": { "nodeId": "Gateway", "label": "API Gateway" } }
+    },
+    "t8": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "li", "text": "Load test the issuer" } }, "endSrid": { "$srid": { "tag": "li", "text": "Load test the issuer" } },
+        "exact": "Load test the issuer", "prefix": "Write the design doc ", "suffix": " Enable rotation for 10%" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: a complete rewrite (Write tool) with different wording and structure",
+      "source": [
+        "# Credential Issuer Design",
+        "",
+        "The issuer mints credentials for services that sit behind the edge proxy.",
+        "",
+        "## Overview",
+        "",
+        "![Token service architecture](./img/arch.png)",
+        "",
+        "```mermaid",
+        "flowchart TB",
+        "  App[Mobile app] --> Edge[Edge proxy]",
+        "  Edge --> Issuer[Credential issuer]",
+        "```",
+        "",
+        "## Tokens",
+        "",
+        "| Kind | Lifetime |",
+        "|------|----------|",
+        "| session | 1 h |",
+        "| renewal | 14 d |",
+        "",
+        "Each renewal credential may be presented once; a second presentation revokes the lineage.",
+        "",
+        "```go",
+        "func Renew(c Credential) (Pair, error) {",
+        "\tl, err := lineageOf(c)",
+        "\tif err != nil { return Pair{}, err }",
+        "\treturn mint(l)",
+        "}",
+        "```",
+        "",
+        "## Plan",
+        "",
+        "1. Benchmark the issuer under load.",
+        "2. Roll out to a tenth of the clients.",
+        ""
+      ],
+      "expect": {
+        "t1": { "state": "orphaned" },
+        "t2": { "state": "changed", "lines": [7, 7], "sridTag": "img", "text": "![Token service architecture](./img/arch.png)" },
+        "t3": { "state": "orphaned" },
+        "t4": { "state": "orphaned" },
+        "L1": { "state": "changed", "lines": [15, 30], "sridTag": "h2", "sectionTail": "Tokens" },
+        "t6": { "state": "orphaned" },
+        "t7": { "states": ["changed", "orphaned"] },
+        "t8": { "state": "orphaned" }
+      }
+    }
+  ]
+}

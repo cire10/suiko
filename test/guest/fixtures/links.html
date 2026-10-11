@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Links fixture</title>
+<style>
+  body { font: 16px/1.6 Helvetica, Arial, sans-serif; margin: 20px; background: #fff; color: #111; }
+  a, button { display: inline-block; margin: 4px 0; }
+  .spacer { height: 1200px; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2" id="top">Linked spec</h1>
+<p data-srid="3"><a data-srid="4" id="rel" href="prose.html">companion doc</a></p>
+<p data-srid="5"><a data-srid="6" id="abs" href="/raw/prose.html?from=abs">absolute same-origin link</a></p>
+<p data-srid="7"><a data-srid="8" id="frag" href="#end">jump to the end</a></p>
+<p data-srid="9"><a data-srid="10" id="blank" href="/raw/prose.html?from=blank" target="_blank" rel="noopener">new tab link</a></p>
+<p data-srid="11"><a data-srid="12" id="router" href="/raw/prose.html?from=router">client-side routed link</a></p>
+<p data-srid="13"><a data-srid="14" id="js" href="javascript:void(window.__jsLink = (window.__jsLink || 0) + 1)">script link</a></p>
+<p data-srid="15"><a data-srid="16" id="top-link" href="/raw/prose.html?from=top" target="_top">top-level link</a></p>
+<p data-srid="17"><button data-srid="18" id="scripted" type="button">go via location.href</button></p>
+<p data-srid="19"><a data-srid="20" id="nested" href="/raw/prose.html?from=nested"><span data-srid="21" id="nested-inner">nested span inside a link</span></a></p>
+<p data-srid="22"><svg data-srid="23" width="160" height="30" xmlns="http://www.w3.org/2000/svg"><a data-srid="24" id="svg-link" href="/raw/prose.html?from=svg"><text x="4" y="20">svg link</text></a></svg></p>
+<p data-srid="27"><a data-srid="28" id="nav-router" href="routed/page">link handled by a Navigation API router</a></p>
+<div class="spacer" data-srid="25"></div>
+<p data-srid="26" id="end">The end.</p>
+<script>
+  window.__routed = 0;
+  document.getElementById('router').addEventListener('click', (e) => {
+    e.preventDefault();
+    window.__routed++;
+  });
+  document.getElementById('scripted').addEventListener('click', () => {
+    location.href = '/raw/prose.html?from=script';
+  });
+  // A client-side router built on the Navigation API: it takes over navigations to /doc/routed/*.
+  window.__navRouted = 0;
+  if (window.navigation) {
+    navigation.addEventListener('navigate', (e) => {
+      if (e.canIntercept && new URL(e.destination.url).pathname.startsWith('/doc/routed/')) {
+        e.intercept({ handler() { window.__navRouted++; } });
+      }
+    });
+  }
+</script>
+</body>
+</html>

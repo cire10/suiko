@@ -1,0 +1,44 @@
+{
+  "name": "html-generated",
+  "description": "HTML doc with script-built content: a selection in the generated list is anchored on the script's string literal ('raw-source', generated: true) and painted in the host <ul>; a selection spanning generated items falls back to the host block. Both follow the host element across versions; editing the string makes the thread 'changed'.",
+  "doc": "app-spec.html",
+  "format": "html",
+  "docPath": "docs/app-spec.html",
+  "threads": {
+    "t1": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "ul", "id": "generated" } }, "endSrid": { "$srid": { "tag": "ul", "id": "generated" } },
+        "exact": "Price & tax", "prefix": "Validate cart", "suffix": "Authorize payment" },
+      "expect": { "kind": "text", "mappedBy": "raw-source", "generated": true, "lines": [96, 96], "text": "Price & tax", "hostTag": "ul", "sridTag": "ul", "sectionTail": "1. Overview" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "ul", "id": "generated" } }, "endSrid": { "$srid": { "tag": "ul", "id": "generated" } },
+        "exact": "Validate cart\nPrice & tax", "prefix": "", "suffix": "Authorize payment" },
+      "expect": { "kind": "text", "mappedBy": "block", "generated": true, "lines": [29, 29], "hostTag": "ul", "sridTag": "ul" }
+    },
+    "t3": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "Requests arrive" } }, "endSrid": { "$srid": { "tag": "p", "text": "Requests arrive" } },
+        "exact": "processed in three stages", "prefix": "through the API gateway and are ", "suffix": "." },
+      "expect": { "kind": "text", "mappedBy": "textmap", "generated": false, "lines": [27, 27], "sridTag": "p" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: a new section is inserted above #overview (srids shift)",
+      "edits": [ { "find": "<section id=\"overview\">", "replace": "<section id=\"intro\">\n  <h2>0. Intro</h2>\n  <p>New intro paragraph.</p>\n</section>\n\n<section id=\"overview\">" } ],
+      "expect": {
+        "t1": { "state": "moved", "lines": [101, 101], "hostTag": "ul", "sridTag": "ul", "quote": "Price & tax", "sectionTail": "1. Overview" },
+        "t2": { "state": "moved", "lines": [34, 34], "sridTag": "ul" },
+        "t3": { "state": "moved", "lines": [32, 32], "sridTag": "p" }
+      }
+    },
+    {
+      "note": "v3: the script's stage name is edited",
+      "edits": [ { "find": "'Price & tax'", "replace": "'Price, tax & discounts'" } ],
+      "expect": {
+        "t1": { "state": "changed", "lines": [101, 101], "textIncludes": "Price", "sridTag": "ul", "generated": true },
+        "t2": { "state": "exact", "lines": [34, 34] },
+        "t3": { "state": "exact", "lines": [32, 32] }
+      }
+    }
+  ]
+}

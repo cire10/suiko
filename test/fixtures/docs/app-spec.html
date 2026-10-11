@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout Service &mdash; App Spec</title>
+<style>
+  :root { --accent: #0b6bcb; --bg: #ffffff; --fg: #1d2330; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1115; --fg: #e6e9ef; } }
+  body { font: 16px/1.55 system-ui, sans-serif; max-width: 920px; margin: 0 auto; padding: 24px; background: var(--bg); color: var(--fg); }
+  .hero { background: url("img/arch.png") no-repeat right top / 64px; padding-right: 80px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #c8ccd4; padding: 6px 10px; text-align: left; }
+  .tabs [role="tab"][aria-selected="true"] { border-bottom: 2px solid var(--accent); }
+  .panel[hidden] { display: none; }
+  #generated li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <h1 id="title">Checkout Service</h1>
+  <p class="lede">The checkout service turns a <strong>cart</strong> into a paid <em>order</em>.<br/>It owns pricing, tax &amp; payment orchestration.</p>
+</header>
+
+<section id="overview">
+  <h2>1. Overview</h2>
+  <p>Requests arrive through the API gateway and are processed in three stages.</p>
+  <img src="img/arch.png" alt="Checkout architecture" width="320" height="180">
+  <ul id="generated" aria-label="Pipeline stages"></ul>
+</section>
+
+<section id="flow">
+  <h2>2. Request flow</h2>
+  <svg id="flow-diagram" viewBox="0 0 420 120" width="420" height="120" role="img" aria-label="Request flow">
+    <g id="node-gateway">
+      <rect x="10" y="40" width="110" height="40" rx="6" fill="#dbe9ff" stroke="#0b6bcb"/>
+      <text x="65" y="65" text-anchor="middle">Gateway</text>
+    </g>
+    <g id="node-checkout">
+      <rect x="155" y="40" width="110" height="40" rx="6" fill="#e3f7e8" stroke="#1f8a4c"/>
+      <text x="210" y="65" text-anchor="middle">Checkout</text>
+    </g>
+    <g id="node-payments">
+      <rect x="300" y="40" width="110" height="40" rx="6" fill="#fff1d6" stroke="#b7791f"/>
+      <text x="355" y="65" text-anchor="middle">Payments</text>
+    </g>
+    <path d="M120 60 H155 M265 60 H300" stroke="#555" fill="none"/>
+  </svg>
+  <pre class="mermaid">
+sequenceDiagram
+  Gateway->>Checkout: POST /orders
+  Checkout->>Payments: authorize(amount)
+  Payments-->>Checkout: approved
+</pre>
+</section>
+
+<section id="pricing">
+  <h2>3. Pricing rules</h2>
+  <table id="pricing-table">
+    <thead>
+      <tr><th>Rule</th><th>Applies to</th><th>Priority</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>volume_discount</td><td>carts over 10 items</td><td>2</td></tr>
+      <tr><td>coupon</td><td>any cart with a valid code</td><td>1</td></tr>
+      <tr><td>loyalty</td><td>members only</td><td>3</td></tr>
+    </tbody>
+  </table>
+  <canvas id="latency-chart" width="360" height="140" aria-label="p95 latency by stage"></canvas>
+</section>
+
+<section id="api">
+  <h2>4. API</h2>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" aria-controls="panel-rest" id="tab-rest">REST</button>
+    <button role="tab" aria-selected="false" aria-controls="panel-events" id="tab-events">Events</button>
+  </div>
+  <div class="panel" id="panel-rest" role="tabpanel">
+    <p>Create an order with <code>POST /orders</code>; the response carries the order id.</p>
+  </div>
+  <div class="panel" id="panel-events" role="tabpanel" hidden>
+    <p>Emits <code>order.created</code> and <code>order.paid</code> on the event bus.</p>
+  </div>
+  <details id="errors">
+    <summary>Error codes</summary>
+    <p>Payment failures return <code>402</code>; stale carts return <code>409</code>.</p>
+  </details>
+</section>
+
+<hr/>
+<footer><p>Last revised 2026-10-10.</p></footer>
+
+<script>
+  // Builds the pipeline list and draws the latency chart (script-generated content).
+  (function () {
+    var stages = ['Validate cart', 'Price & tax', 'Authorize payment'];
+    var ul = document.getElementById('generated');
+    stages.forEach(function (s) {
+      var li = document.createElement('li');
+      li.textContent = s;
+      ul.appendChild(li);
+    });
+    var c = document.getElementById('latency-chart');
+    var ctx = c.getContext && c.getContext('2d');
+    if (ctx) {
+      var data = [42, 95, 180];
+      data.forEach(function (v, i) {
+        ctx.fillStyle = ['#0b6bcb', '#1f8a4c', '#b7791f'][i];
+        ctx.fillRect(20 + i * 110, 130 - v / 1.5, 80, v / 1.5);
+      });
+    }
+    document.querySelectorAll('[role="tab"]').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        document.querySelectorAll('[role="tab"]').forEach(function (t) {
+          var on = t === tab;
+          t.setAttribute('aria-selected', String(on));
+          document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+        });
+      });
+    });
+  })();
+</script>
+</body>
+</html>

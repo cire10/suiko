@@ -1,0 +1,42 @@
+{
+  "name": "linked-adjacent-image",
+  "description": "Amendments 4.2: a hunk linked to an image thread but adjacent to the image (a caption added right below it) never moves the anchor: the image's own text is untouched, so it stays 'exact' on the image.",
+  "doc": "kitchen-sink.md",
+  "format": "markdown",
+  "docPath": "docs/kitchen-sink.md",
+  "assets": { "docs/img/arch.png": "sha256:44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab44ab" },
+  "threads": {
+    "t1": {
+      "capture": { "kind": "element", "srid": { "$srid": { "tag": "img" } }, "tag": "img", "label": "img \"System overview\" region x40-62% y10-30%",
+        "region": { "x": 0.4, "y": 0.1, "w": 0.22, "h": 0.2 } },
+      "expect": { "kind": "element", "lines": [29, 29], "sridTag": "img" }
+    },
+    "t2": {
+      "capture": { "kind": "text", "startSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } }, "endSrid": { "$srid": { "tag": "p", "text": "the gateway never stores" } },
+        "exact": "never stores tokens", "prefix": "Note: the gateway ", "suffix": "; it only forwards them to the" }
+    }
+  },
+  "steps": [
+    {
+      "note": "v2: the agent answers t1 by adding a caption line directly below the image (hint: at L30)",
+      "edits": [ { "find": "![System overview](./img/arch.png \"Architecture overview\")\n", "replace": "![System overview](./img/arch.png \"Architecture overview\")\n*Figure 1: the gateway sits in front of the auth service.*\n" } ],
+      "links": { "t1": { "newLines": [30, 30] } },
+      "expect": {
+        "t1": { "state": "exact", "lines": [29, 29], "sridTag": "img", "text": "![System overview](./img/arch.png \"Architecture overview\")" },
+        "t2": { "state": "moved", "lines": [39, 39] }
+      }
+    },
+    {
+      "note": "v3: the caption is rewritten and a blank line added above the image, both linked to t1",
+      "edits": [
+        { "find": "*Figure 1: the gateway sits in front of the auth service.*", "replace": "*Figure 1: requests pass the gateway before the auth service (sync arrows).*" },
+        { "find": "## 2 Architecture\n\n", "replace": "## 2 Architecture\n\nThe diagram below shows the request path.\n\n" }
+      ],
+      "links": { "t1": { "newLines": [29, 32] } },
+      "expect": {
+        "t1": { "state": "moved", "lines": [31, 31], "sridTag": "img" },
+        "t2": { "state": "moved", "lines": [41, 41] }
+      }
+    }
+  ]
+}

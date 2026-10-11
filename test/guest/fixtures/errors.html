@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Errors fixture</title>
+</head>
+<body data-srid="1">
+<p data-srid="2">This page has a failing external image and a throwing script.</p>
+<img data-srid="3" src="http://127.0.0.1:9/missing.png" alt="external" width="20" height="20">
+<img data-srid="4" src="/img/nope.png" alt="local" width="20" height="20">
+<script>
+  setTimeout(() => { throw new Error('boom from author'); }, 30);
+  Promise.reject(new Error('rejected by author'));
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "description": "SpecReview: deny Write calls that would rewrite most of a spec under review (use Edit instead), and surface submitted reviews that no background wait picked up. Both hooks call the specreview CLI on PATH, finish in well under a second, print nothing on error and always exit 0.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "specreview hook pre-write",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "specreview hook prompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

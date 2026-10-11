@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dialog fixture</title>
+<style>
+  body { font: 16px/1.5 Helvetica, Arial, sans-serif; margin: 20px; background: #fff; color: #111; }
+  dialog { width: 520px; padding: 24px; border: 1px solid #888; }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Checkout spec</h1>
+<p data-srid="3">Before paying, the user confirms the terms in a modal dialog.</p>
+<p data-srid="4"><button data-srid="5" id="open" type="button">Show terms</button></p>
+<dialog data-srid="6" id="terms">
+  <h2 data-srid="7">Terms of sale</h2>
+  <p data-srid="8">Refunds are accepted within fourteen days of delivery for unopened items.</p>
+  <p data-srid="9">Shipping costs are not refundable unless the item arrived damaged.</p>
+  <form data-srid="10" method="dialog"><button data-srid="11" id="close" type="submit">I agree</button></form>
+</dialog>
+<script>
+  window.__dialogClicks = 0;
+  const dlg = document.getElementById('terms');
+  dlg.addEventListener('click', () => { window.__dialogClicks++; });
+  document.getElementById('open').addEventListener('click', () => dlg.showModal());
+</script>
+</body>
+</html>

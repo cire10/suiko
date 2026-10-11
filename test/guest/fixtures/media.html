@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Media fixture</title>
+<style>
+  body { margin: 20px; font: 15px/1.4 Helvetica, Arial, sans-serif; background: #fff; color: #111; }
+  img { display: block; width: 300px; height: 200px; }
+  figure { margin: 0 0 12px; }
+  table { border-collapse: collapse; margin-bottom: 12px; }
+  td, th { border: 1px solid #999; padding: 4px 8px; }
+  svg text { font: 14px Helvetica, Arial, sans-serif; }
+  pre.mermaid { margin: 0 0 12px; }
+  .row { display: flex; gap: 12px; align-items: flex-start; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Media</h1>
+<div class="row" data-srid="3">
+  <figure data-srid="4"><img data-srid="5" src="/img/arch.png" alt="System overview"><figcaption data-srid="6">Architecture</figcaption></figure>
+  <table data-srid="7">
+    <thead data-srid="8"><tr data-srid="9"><th data-srid="10">Token</th><th data-srid="11">TTL</th><th data-srid="12">Notes</th></tr></thead>
+    <tbody data-srid="13">
+      <tr data-srid="14"><td data-srid="15" rowspan="2">refresh_token</td><td data-srid="16">30 days</td><td data-srid="17">rotated</td></tr>
+      <tr data-srid="18"><td data-srid="19" colspan="2">sliding window</td></tr>
+      <tr data-srid="20"><td data-srid="21">access_token</td><td data-srid="22">15 min</td><td data-srid="23">JWT</td></tr>
+    </tbody>
+  </table>
+</div>
+<svg data-srid="24" width="320" height="80" viewBox="0 0 320 80" xmlns="http://www.w3.org/2000/svg">
+  <g data-srid="25" id="auth-box"><rect data-srid="26" x="10" y="10" width="140" height="60" fill="#dde"/><text data-srid="27" x="40" y="45">Auth</text></g>
+  <g data-srid="28"><rect data-srid="29" x="170" y="10" width="140" height="60" fill="#ede"/><text data-srid="30" x="200" y="45">Gateway</text></g>
+</svg>
+<pre class="mermaid" data-sr-kind="mermaid" data-srid="31" data-processed="true"><svg id="mermaid-1" width="420" height="80" viewBox="0 0 420 80" xmlns="http://www.w3.org/2000/svg"><g class="root"><g class="nodes"><g class="node default" id="flowchart-Gateway-1" data-id="Gateway" transform="translate(80,40)"><rect x="-60" y="-25" width="120" height="50" fill="#cde"></rect><g class="label"><text x="-28" y="5">Gateway</text></g></g><g class="node default" id="flowchart-Auth-2" transform="translate(320,40)"><rect x="-60" y="-25" width="120" height="50" fill="#cde"></rect><g class="label"><text x="-16" y="5">Auth</text></g></g></g></g></svg></pre>
+<canvas data-srid="32" id="chart" width="200" height="60"></canvas>
+<p data-srid="33">Closing paragraph after the media.</p>
+<script>
+  const ctx = document.getElementById('chart').getContext('2d');
+  ctx.fillStyle = '#c33'; ctx.fillRect(0, 0, 100, 60);
+  ctx.fillStyle = '#33c'; ctx.fillRect(100, 0, 100, 60);
+</script>
+</body>
+</html>
