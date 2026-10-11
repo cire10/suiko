@@ -9,9 +9,10 @@
 
 import fs from 'node:fs';
 import { SSE } from '../../../shared/protocol.js';
-import { NotFoundError, UsageError } from '../../store/errors.js';
+import { NotFoundError, RefusedError, UsageError } from '../../store/errors.js';
 import { changedAssets, hashWorkingAssets } from '../assets.js';
 import { preciseMapper } from '../workmap.js';
+import { docRefFor, isSnapshot, snapshotRefusal } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -162,11 +163,23 @@ export async function requireWorking(ctx, doc, head) {
  * @returns {Promise<string[]>} changed workspace-relative paths, sorted
  */
 export async function changedWorkingAssets(ctx, doc, head) {
+  if (isSnapshot(doc)) return [];
   const recorded = head.manifest.assets ?? {};
   const render = await ctx.render(doc, head.v);
   const rels = [...new Set([...render.assets, ...Object.keys(recorded)])];
   if (!rels.length) return [];
   return changedAssets(recorded, await hashWorkingAssets(ctx.root, rels, ctx.config.assets.maxBytes));
+}
+
+/**
+ * Refuses an agent edit of a snapshot doc (it has no working file) with what to do instead (RefusedError, exit 3).
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {string} what 'apply suggestions to', 'edit', 'revert'...
+ */
+export function refuseSnapshot(ctx, doc, what) {
+  if (!isSnapshot(doc)) return;
+  throw new RefusedError(snapshotRefusal(doc, what, docRefFor(doc.id, ctx.root)), { details: { doc: doc.id, kind: 'snapshot' } });
 }
 
 /**

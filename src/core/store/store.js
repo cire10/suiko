@@ -32,6 +32,7 @@ import { countLines, decodeText, encodeText, roundTrips, stableRead } from '../u
 import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
+import { isSnapshot, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
 
 const log = createLogger('store');
 
@@ -221,11 +222,14 @@ export class Store {
 
   /**
    * Absolute path of a doc's working copy. RefusedError when doc.path (e.g. a hand-edited or malicious doc.json)
-   * would resolve outside the workspace root.
-   * @param {Pick<Doc, 'path'>} doc
+   * would resolve outside the workspace root, and for a snapshot doc (its path is synthetic: there is no file).
+   * @param {Pick<Doc, 'path'> & { kind?: string }} doc
    * @returns {string}
    */
   workingPath(doc) {
+    if (isSnapshot(doc)) {
+      throw new RefusedError(`${/** @type {any} */ (doc).id ?? doc.path} is a snapshot doc: it has no working file`, { details: { path: doc.path, kind: SNAPSHOT_KIND } });
+    }
     const rel = String(doc?.path ?? '');
     const abs = path.resolve(this.root, ...rel.split('/'));
     if (!rel || path.isAbsolute(rel) || abs === this.root || !isWithin(this.root, abs)) {
@@ -313,6 +317,7 @@ export class Store {
 
   /**
    * Finds a doc by id, by path (absolute, relative to the cwd, or relative to the root), or by a unique basename.
+   * Snapshot docs match by id only: their synthetic path must never shadow (or be taken for) a real file.
    * @param {string} idOrPath
    * @returns {Promise<Doc | null>}
    */
@@ -320,7 +325,7 @@ export class Store {
     if (typeof idOrPath !== 'string' || !idOrPath) return null;
     const byId = await this.getDoc(idOrPath);
     if (byId) return byId;
-    const docs = await this.listDocs();
+    const docs = (await this.listDocs()).filter((d) => !isSnapshot(d));
     const candidates = path.isAbsolute(idOrPath)
       ? [idOrPath]
       : [path.resolve(process.cwd(), idOrPath), path.resolve(this.root, idOrPath)];
@@ -362,39 +367,100 @@ export class Store {
       throw new UsageError(`unsupported spec type: ${rel} (expected .md, .markdown, .html or .htm)`, { details: { path: rel } });
     }
     return this.withWorkspaceLock(async () => {
-      const existing = (await this.listDocs()).find((d) => d.path === rel);
+      const existing = (await this.listDocs()).find((d) => d.path === rel && !isSnapshot(d));
       if (existing) {
         throw new ConflictError(`${rel} is already tracked as ${existing.id}`, { details: { doc: existing.id, path: rel } });
       }
-      const docsDir = path.join(this.storeDir, 'docs');
-      await fsp.mkdir(docsDir, { recursive: true });
-      const base = slugify(rel);
-      for (let n = 1; ; n += 1) {
-        const id = n === 1 ? base : `${base}-${n}`;
-        try {
-          await fsp.mkdir(path.join(docsDir, id));
-        } catch (err) {
-          if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') continue;
-          throw err;
-        }
-        /** @type {Doc} */
-        const doc = {
-          schema: 1,
-          id,
-          path: rel,
-          format: fmt,
-          title: title || path.posix.basename(rel),
-          createdAt: nowIso(),
-          createdBy: createdBy ?? { kind: 'agent', name: 'agent' },
-          state: 'in_review',
-          head: 0,
-          lastReviewedVersion: null,
-          final: null,
-          counters: { thread: 0, comment: 0, review: 0, lock: 0, decision: 0, draft: 0, attachment: 0 },
-        };
-        await this.saveDoc(doc);
-        return doc;
+      const id = await this.#allocateDocDir(slugify(rel));
+      /** @type {Doc} */
+      const doc = {
+        schema: 1,
+        id,
+        path: rel,
+        format: fmt,
+        title: title || path.posix.basename(rel),
+        createdAt: nowIso(),
+        createdBy: createdBy ?? { kind: 'agent', name: 'agent' },
+        state: 'in_review',
+        head: 0,
+        lastReviewedVersion: null,
+        final: null,
+        counters: { thread: 0, comment: 0, review: 0, lock: 0, decision: 0, draft: 0, attachment: 0 },
+      };
+      await this.saveDoc(doc);
+      return doc;
+    });
+  }
+
+  /**
+   * Creates the directory of a new doc: `base`, else `base-2`, `base-3`... (atomic mkdir). Returns the id.
+   * Call under the workspace lock.
+   * @param {string} base
+   * @returns {Promise<string>}
+   */
+  async #allocateDocDir(base) {
+    const docsDir = path.join(this.storeDir, 'docs');
+    await fsp.mkdir(docsDir, { recursive: true });
+    for (let n = 1; ; n += 1) {
+      const id = n === 1 ? base : `${base}-${n}`;
+      try {
+        await fsp.mkdir(path.join(docsDir, id));
+        return id;
+      } catch (err) {
+        if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') continue;
+        throw err;
       }
+    }
+  }
+
+  /**
+   * The snapshot doc with this origin key, or null (see snapshot.js).
+   * @param {string} key
+   * @returns {Promise<Doc | null>}
+   */
+  async findDocByOrigin(key) {
+    if (typeof key !== 'string' || !key) return null;
+    return (await this.listDocs()).find((d) => isSnapshot(d) && /** @type {any} */ (d).origin?.key === key) ?? null;
+  }
+
+  /**
+   * Creates a snapshot doc (see snapshot.js): no working file, synthetic path '<dir>/<id>.md', head 0 until the first
+   * version is committed from bytes. With an origin key, an existing doc with that key is returned instead
+   * (`created: false`); the check and the creation run under the workspace lock, so concurrent callers with the same
+   * key get one doc.
+   * @param {{ title?: string, format?: DocFormat, origin: { type: string, key?: string | null } & Record<string, unknown>,
+   *   slug?: string, createdBy?: Actor }} input
+   * @returns {Promise<{ doc: Doc, created: boolean }>}
+   */
+  async createSnapshotDoc({ title, format = 'markdown', origin, slug, createdBy }) {
+    const o = normalizeOrigin(origin);
+    if (format !== 'markdown' && format !== 'html') throw new UsageError(`unsupported snapshot format: ${format}`);
+    return this.withWorkspaceLock(async () => {
+      if (o.key) {
+        const existing = await this.findDocByOrigin(o.key);
+        if (existing) return { doc: existing, created: false };
+      }
+      const base = slugify(String(slug || title || o.type).replace(/[\\/.]+/g, ' ')).slice(0, 60).replace(/-+$/, '') || o.type;
+      const id = await this.#allocateDocDir(base);
+      /** @type {Doc} */
+      const doc = /** @type {any} */ ({
+        schema: 1,
+        id,
+        kind: SNAPSHOT_KIND,
+        origin: o,
+        path: snapshotPath(o.type, id, format),
+        format,
+        title: title || id,
+        createdAt: nowIso(),
+        createdBy: createdBy ?? { kind: 'agent', name: 'agent' },
+        state: 'in_review',
+        head: 0,
+        lastReviewedVersion: null,
+        final: null,
+        counters: { thread: 0, comment: 0, review: 0, lock: 0, decision: 0, draft: 0, attachment: 0 },
+      });
+      await this.saveDoc(doc);
+      return { doc, created: true };
     });
   }
 
@@ -1040,10 +1106,12 @@ export class Store {
 
   /**
    * Stable read of the tracked file (see util/stable-read.js). NotFoundError when it does not exist.
-   * @param {Pick<Doc, 'path'>} doc
+   * The working copy of a snapshot doc is its newest committed version (never dirty; NotFoundError before v1).
+   * @param {Pick<Doc, 'path'> & { id?: string, kind?: string }} doc
    * @returns {Promise<StableReadResult>}
    */
   async readWorking(doc) {
+    if (isSnapshot(doc)) return this.#snapshotWorking(/** @type {Doc} */ (doc));
     try {
       return await stableRead(this.workingPath(doc));
     } catch (err) {
@@ -1052,6 +1120,21 @@ export class Store {
       }
       throw err;
     }
+  }
+
+  /**
+   * readWorking of a snapshot doc: the bytes of its newest committed version, in the StableReadResult shape.
+   * @param {Doc} doc
+   * @returns {Promise<StableReadResult>}
+   */
+  async #snapshotWorking(doc) {
+    const versions = await this.listVersions(doc.id);
+    const last = versions[versions.length - 1];
+    if (!last) throw new NotFoundError(`${doc.id} has no version yet`, { details: { doc: doc.id, path: doc.path } });
+    const { buf } = await this.readVersion(doc.id, last.v);
+    const { text, encoding } = decodeText(buf);
+    const mtimeMs = Date.parse(String(last.createdAt ?? '')) || 0;
+    return { buf, text, sha256: sha256(buf), mtimeMs, mode: 0o644, size: buf.length, encoding, stable: true };
   }
 
   /**
@@ -1066,6 +1149,7 @@ export class Store {
    * @returns {Promise<{ sha256: string, bytes: number }>}
    */
   async writeWorking(doc, text, { expectSha256 }) {
+    if (isSnapshot(doc)) throw new RefusedError(snapshotRefusal(doc, 'write'), { details: { doc: /** @type {any} */ (doc).id, kind: SNAPSHOT_KIND } });
     if (typeof expectSha256 !== 'string' || !expectSha256) throw new UsageError('writeWorking requires expectSha256');
     const abs = this.workingPath(doc);
     let real;

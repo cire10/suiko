@@ -14,6 +14,7 @@
 
 import { LIMITS } from '../../shared/protocol.js';
 import { linesLabel, sectionLeaf, truncate } from './labels.js';
+import { originInfo } from '../store/snapshot.js';
 
 /**
  * @typedef {import('./packet-data.js').Packet} Packet
@@ -48,6 +49,18 @@ export function attachmentLine(absPath, kind) {
 const PROTOCOL = [
   'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.',
   '  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.',
+];
+
+/** The protocol reminder of a snapshot doc (no working file: no `specreview apply`, no Edit of a workspace file). */
+const SNAPSHOT_PROTOCOL = [
+  'PROTOCOL: change only what the threads ask for and keep the rest of the text as it is; src> lines quote the current version.',
+  '  Questions: answer in the reply; change the text only if the answer belongs in it. Unsure: status needs_input.',
+];
+
+/** The protocol reminder of a plan snapshot: the plan file is edited in place. */
+const PLAN_PROTOCOL = [
+  'PROTOCOL: targeted Edit-tool changes to the plan file only (never rewrite it); src> lines are exact Edit old_string.',
+  '  Questions: answer in your reply; change the plan only if the answer belongs in it.',
 ];
 
 /** @param {string | null | undefined} v */
@@ -96,9 +109,12 @@ export function formatPacket(packet, opts = {}) {
   const p = packet;
   /** @type {string[]} */
   const head = [packetHeader(p)];
+  const snapshot = p.kind === 'snapshot';
   // The workspace root is not the agent's cwd (a non-git project whose .specreview/ sits next to the spec):
-  // name the file as it is reached from there.
-  if (p.pathFromCwd && p.pathFromCwd !== p.path) head.push(`File: ${p.pathFromCwd} (from your working directory)`);
+  // name the file as it is reached from there. A snapshot has no working file; a plan snapshot names its plan file.
+  if (snapshot) {
+    if (p.origin === 'plan' && p.file) head.push(`Plan file: ${p.file}`);
+  } else if (p.pathFromCwd && p.pathFromCwd !== p.path) head.push(`File: ${p.pathFromCwd} (from your working directory)`);
   const items = p.threads;
   if (items.length) head.push(lineBasis(p));
   for (const r of p.reviews) {
@@ -123,9 +139,23 @@ export function formatPacket(packet, opts = {}) {
     for (const d of p.drafts) footer.push(`  ${draftLine(/** @type {any} */ (d))}`);
   }
   if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the spec (it must stay identical to the final version).`);
-  else if (p.firstPacket && !approvedDone && items.length) footer.push(...PROTOCOL);
+  else if (p.firstPacket && !approvedDone && items.length) footer.push(...(!snapshot ? PROTOCOL : p.origin === 'plan' ? PLAN_PROTOCOL : SNAPSHOT_PROTOCOL));
   footer.push(`NEXT: ${nextText(p)}`);
 
+  return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
+}
+
+/**
+ * Header lines, the thread blocks (as many as fit in maxChars; the rest listed with their `show` command) and the
+ * footer lines, as the packet text.
+ * @param {string[]} head
+ * @param {PacketThread[]} items
+ * @param {string[]} footer
+ * @param {number} maxChars
+ * @param {string} ref the doc as commands name it
+ * @returns {string}
+ */
+function assemble(head, items, footer, maxChars, ref) {
   const headText = head.join('\n');
   const footText = footer.join('\n');
   let budget = maxChars - headText.length - footText.length - 4;
@@ -138,7 +168,7 @@ export function formatPacket(packet, opts = {}) {
       overflow.push(t);
       continue;
     }
-    const block = formatPacketThread(t, p.doc);
+    const block = formatPacketThread(t, ref);
     if (block.length + 2 > budget && blocks.length) {
       overflow.push(t);
       continue;
@@ -148,7 +178,7 @@ export function formatPacket(packet, opts = {}) {
   }
   if (overflow.length) {
     blocks.push(
-      [`(${plural(overflow.length, 'more thread')} - packet size cap; run the commands to see them)`, ...overflow.map((t) => `${itemHeader(t)} · specreview show ${p.doc} ${t.id}`)].join('\n'),
+      [`(${plural(overflow.length, 'more thread')} - packet size cap; run the commands to see them)`, ...overflow.map((t) => `${itemHeader(t)} · specreview show ${ref} ${t.id}`)].join('\n'),
     );
   }
   const parts = [headText];
@@ -157,9 +187,50 @@ export function formatPacket(packet, opts = {}) {
   return `${parts.join('\n\n')}\n`;
 }
 
+/**
+ * The plan gate's feedback for Claude Code when a plan is not approved (the `message` of the PermissionRequest
+ * deny): the packet's threads with their src> lines, citing the real plan file and its line numbers, and what to do
+ * next: targeted Edit-tool changes to that file, every thread addressed, ExitPlanMode again.
+ * @param {Packet} packet a plan snapshot's packet
+ * @param {{ planFilePath?: string | null, maxChars?: number }} [opts]
+ * @returns {string}
+ */
+export function formatPlanFeedback(packet, opts = {}) {
+  const p = packet;
+  const file = opts.planFilePath ?? p.file ?? null;
+  const maxChars = opts.maxChars ?? LIMITS.packetChars;
+  const ids = p.reviews.map((r) => r.id).join(', ');
+  const versions = [...new Set(p.reviews.map((r) => r.version))].sort((a, b) => a - b);
+  const on = versions.length ? ` on v${versions[versions.length - 1]}` : '';
+  const what = p.verdict === 'changes_requested' ? 'the reviewer requested changes' : 'the reviewer commented on it';
+  /** @type {string[]} */
+  const head = [`YOUR PLAN WAS NOT APPROVED: ${what} (SpecReview ${ids || 'review'}${on}).`];
+  head.push(file ? `Plan file: ${file}   (line numbers below are lines of this file)` : `The plan has no plan file: line numbers below are lines of the plan text you submitted.`);
+  for (const r of p.reviews) {
+    if (!r.body?.trim()) continue;
+    const tag = p.reviews.length > 1 ? ` (${r.id})` : '';
+    head.push(`Reviewer summary${tag}: ${indentBody(r.body, '  ')}`);
+  }
+  head.push(countsLine(p));
+
+  /** @type {string[]} */
+  const footer = [];
+  if (p.locks.length) footer.push(`LOCKED (agreed - do not modify): ${p.locks.map((l) => `${l.id} ${l.label}${l.lines ? ` (${linesLabel(l.lines)})` : ''}`).join(' · ')}`);
+  if (p.decisions.length) footer.push(`DECISIONS to keep true: ${p.decisions.map((d) => `${d.id} (${d.thread}) ${oneLine(d.text, 160)}`).join(' · ')}`);
+  footer.push('WHAT TO DO:');
+  if (file) {
+    footer.push(`- Make targeted changes to ${file} with the Edit tool (src> lines are exact old_string). Never rewrite the whole plan or write a new plan file.`);
+  } else {
+    footer.push('- Revise the plan: change only what the threads ask for and keep the rest as it is.');
+  }
+  footer.push('- Address every thread above: change the plan where a thread asks for it; answer questions in the plan (or tell the user, if the answer does not belong in it).');
+  footer.push(`- Then call ExitPlanMode again. The reviewer will see a diff of your changes (v${p.head} -> v${p.head + 1}) and approve or comment again.`);
+  return assemble(head, p.threads, footer, maxChars, p.ref ?? p.doc);
+}
+
 /** @param {Packet} p */
 function packetHeader(p) {
-  const name = p.firstPacket ? `${p.doc} (${p.path})` : p.doc;
+  const name = p.firstPacket ? `${p.doc} (${p.kind === 'snapshot' ? originInfo(p.origin ?? '').label : p.path})` : p.doc;
   /** @type {string[]} */
   const parts = ['SPECREVIEW FEEDBACK', name];
   if (!p.reviews.length) {
@@ -178,6 +249,11 @@ function packetHeader(p) {
 
 /** @param {Packet} p */
 function lineBasis(p) {
+  if (p.kind === 'snapshot') {
+    return p.origin === 'plan' && p.file
+      ? `Line numbers = lines of the plan file as submitted (v${p.head}).`
+      : `Line numbers = v${p.head} of this ${originInfo(p.origin ?? '').noun} (\`specreview show ${p.ref ?? p.doc}\` prints it).`;
+  }
   if (p.working === 'missing') return `Line numbers = v${p.head} (the working copy is missing; restore it before editing).`;
   if (p.working === 'dirty') return `Line numbers = current file on disk (working copy differs from v${p.head}: lines mapped).`;
   return `Line numbers = current file on disk (identical to v${p.head}).`;
@@ -333,13 +409,15 @@ function oneLine(s, max) {
  */
 export function formatReviseReport(r) {
   const doc = r.doc;
-  if (r.nothing) return `specreview: nothing to record (working copy matches v${r.from}, no replies)\n`;
+  const ref = r.ref ?? doc;
+  const same = r.snapshot ? `the text is identical to v${r.from}` : `working copy matches v${r.from}`;
+  if (r.nothing) return `specreview: nothing to record (${same}, no replies)\n`;
   /** @type {string[]} */
   const out = [];
   if (r.repliesOnly) {
-    out.push(`specreview: working copy matches v${r.from}; posted ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
+    out.push(`specreview: ${same}; posted ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
     for (const rep of r.replies) out.push(`  ${rep.thread} ${rep.status}`);
-    out.push(`next: specreview wait ${doc} (background)`);
+    out.push(`next: specreview wait ${ref} (background)`);
     return `${out.join('\n')}\n`;
   }
   if (r.refused) {
@@ -373,7 +451,7 @@ export function formatReviseReport(r) {
   }
   if (r.git?.commit) out.push(`git: committed ${String(r.git.commit).slice(0, 12)}`);
   else if (r.git?.error) out.push(`git: auto-commit failed: ${oneLine(r.git.error, 200)}`);
-  if (!r.dryRun) out.push(`reviewer notified. next: specreview wait ${doc} (background)`);
+  if (!r.dryRun) out.push(`reviewer notified. next: specreview wait ${ref} (background)`);
   return `${out.join('\n')}\n`;
 }
 
@@ -441,15 +519,16 @@ export function formatStatus(s) {
   for (const d of s.docs) {
     const head = d.head ? `head v${d.head}${d.headAuthor ? ` (${d.headAuthor}${d.headAt ? `, ${hhmm(d.headAt)}` : ''})` : ''}` : 'no versions';
     const final = d.final ? `  FINAL = v${d.final.version}` : '';
-    out.push(`${d.doc}  ${d.path}  ${head}  ${d.state}${final}`);
-    if (d.pathFromCwd && d.pathFromCwd !== d.path) out.push(`  file: ${d.pathFromCwd} (from your working directory)`);
+    const where = d.kind === 'snapshot' ? `(${originInfo(d.origin ?? '').label})` : d.path;
+    out.push(`${d.doc}  ${where}  ${head}  ${d.state}${final}`);
+    if (d.kind !== 'snapshot' && d.pathFromCwd && d.pathFromCwd !== d.path) out.push(`  file: ${d.pathFromCwd} (from your working directory)`);
     const c = d.counts;
     out.push(`  threads: open ${c.open} · addressed ${c.addressed} · answered ${c.answered} · declined ${c.declined} · needs_input ${c.needs_input} · resolved ${c.resolved} · outdated ${c.outdated}   locks: ${d.locks.length ? d.locks.join(' ') : 'none'}`);
     const last = d.lastReview ? `last review ${d.lastReview.id} on v${d.lastReview.version}` : 'no reviews yet';
     const und = d.undelivered.length ? d.undelivered.join(', ') : 'none';
     out.push(`  reviewer: ${last} · drafts ${d.drafts} · undelivered reviews: ${und}`);
     const listening = d.listening.length ? d.listening.map((/** @type {any} */ w) => `${w.agent} (pid ${w.pid})`).join(', ') : 'nobody';
-    out.push(`  listening: ${listening}   working copy: ${d.working}`);
+    out.push(`  listening: ${listening}${d.kind === 'snapshot' ? '' : `   working copy: ${d.working}`}`);
   }
   return `${out.join('\n')}\n`;
 }

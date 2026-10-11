@@ -23,6 +23,7 @@ import { lineIndex } from '../text/index.js';
 import { attachmentKind, describe, envOf, label as anchorLabel, quoteText } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
 import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
+import { docRefFor, isSnapshot, originType, planFileOf } from '../store/snapshot.js';
 
 /**
  * @typedef {import('../../shared/types.js').Thread} Thread
@@ -70,9 +71,13 @@ import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from '.
  * @typedef {object} Packet
  * @property {number} schema
  * @property {string} doc
- * @property {string} path workspace-relative POSIX path
+ * @property {string} path workspace-relative POSIX path (synthetic for a snapshot doc)
+ * @property {'file' | 'snapshot'} [kind] a snapshot doc has no working file (store/snapshot.js)
+ * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin'...)
+ * @property {string} [ref] the doc as follow-up commands name it (adds `--workspace` for a scratch workspace)
  * @property {string | null} [root] absolute workspace root
- * @property {string | null} [file] absolute path of the working copy
+ * @property {string | null} [file] absolute path of the working copy (a plan snapshot: its plan file; other
+ *   snapshots: null)
  * @property {string} [pathFromCwd] the working copy as reached from the agent's cwd (relative, or absolute)
  * @property {string} title
  * @property {number} head
@@ -183,14 +188,22 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
   if (replyOnly) for (const i of items) i.apply = null;
   const firstPacket = !snap.reviews.some((r) => r.deliveredTo?.[agent] && !delivering.has(r.id));
 
-  const file = root ? nodePath.join(root, ...doc.path.split('/')) : null;
+  const snapshot = isSnapshot(doc);
+  const planFile = planFileOf(doc);
+  const file = snapshot ? planFile : root ? nodePath.join(root, ...doc.path.split('/')) : null;
+  const ref = docRefFor(doc.id, root);
+  // nothing to apply to a snapshot: it has no working file (the agent revises it with `revise --source`)
+  if (snapshot) for (const i of items) i.apply = null;
   return {
     schema: 1,
     doc: doc.id,
     path: doc.path,
+    kind: snapshot ? 'snapshot' : 'file',
+    origin: snapshot ? originType(doc) : null,
+    ref,
     root,
     file,
-    pathFromCwd: pathFromCwd(doc.path, root, cwd),
+    pathFromCwd: snapshot ? planFile ?? doc.path : pathFromCwd(doc.path, root, cwd),
     title: doc.title,
     head: snap.head.v,
     working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
@@ -206,7 +219,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     firstPacket,
     replyOnly,
     agent,
-    next: nextStep(doc, approval, counts.actionable),
+    next: snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable) : nextStep(doc, approval, counts.actionable),
   };
 }
 
@@ -396,4 +409,29 @@ function nextStep(doc, { approved, finalNow }, actionable) {
   }
   if (actionable === 0) return `nothing to act on; specreview wait ${doc.id} (background)`;
   return `edits -> specreview revise ${doc.id} --replies - -> specreview wait ${doc.id} (background)`;
+}
+
+/**
+ * The NEXT line of a snapshot doc: it is revised by recording new text (`revise --source`), or, for a plan, by
+ * editing the plan file and calling ExitPlanMode again (the plan gate records the version).
+ * @param {Doc} doc
+ * @param {string} ref
+ * @param {{ approved: boolean, finalNow: boolean }} approval
+ * @param {number} actionable
+ */
+function snapshotNextStep(doc, ref, { approved, finalNow }, actionable) {
+  if (doc.state === 'closed') return 'the review session is closed; stop waiting';
+  if (originType(doc) === 'plan') {
+    if (approved && actionable === 0) return 'the plan is approved; go ahead with it';
+    const file = planFileOf(doc);
+    return `targeted Edit-tool changes to the plan file${file ? ` ${file}` : ''} (never rewrite it) -> call ExitPlanMode again (the plan gate records the new version)`;
+  }
+  if (approved && actionable === 0) {
+    return finalNow ? `specreview final ${ref}   (then stop waiting)` : 'approved; stop waiting unless the reviewer asks for more';
+  }
+  if (approved && finalNow) {
+    return `approved: answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined (no new version) -> specreview final ${ref}   (then stop waiting)`;
+  }
+  if (actionable === 0) return `nothing to act on; specreview wait ${ref} (background)`;
+  return `write the complete revised text to a file -> specreview revise ${ref} --source <file> --replies - -> specreview wait ${ref} (background)`;
 }

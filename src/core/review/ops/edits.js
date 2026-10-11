@@ -17,7 +17,7 @@ import { effectivePendingLines } from '../attribution.js';
 import { eolOf, lineWindow, locateSuggestion, matchEol, replaceExact, spliceText, suggestionTarget } from '../apply.js';
 import { anchorAt } from '../threadstate.js';
 import { preciseMapper } from '../workmap.js';
-import { emit, readHead, requireThread, requireWorking, withDoc } from './common.js';
+import { emit, readHead, refuseSnapshot, requireThread, requireWorking, withDoc } from './common.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -70,6 +70,7 @@ export async function applySuggestions(ctx, ref, tids, { dryRun = false } = {}) 
     ref,
     (doc) =>
       withCasRetry(async () => {
+        refuseSnapshot(ctx, doc, 'apply suggestions to');
         const head = await readHead(ctx, doc);
         const working = await requireWorking(ctx, doc, head);
         const mapper = preciseMapper(head.source, working.text);
@@ -195,6 +196,7 @@ export async function taggedEdits(ctx, ref, edits, { expectSha256 } = {}) {
     ctx,
     ref,
     async (doc) => {
+      refuseSnapshot(ctx, doc, 'edit');
       for (const e of normalized) for (const t of e.threads) await requireThread(ctx, doc.id, t);
       return withCasRetry(async () => {
         const head = await readHead(ctx, doc);
@@ -254,6 +256,7 @@ export async function revert(ctx, ref, target) {
     ref,
     (doc) =>
       withCasRetry(async () => {
+        refuseSnapshot(ctx, doc, 'revert');
         const head = await readHead(ctx, doc);
         const working = await requireWorking(ctx, doc, head);
         /** @type {Spliced} */

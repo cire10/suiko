@@ -59,7 +59,7 @@ export function commitMessage(docId, v, summary, threads) {
  * @param {string} p.root workspace root
  * @param {{ git?: { autoCommit?: boolean } }} p.config
  * @param {string} p.docId
- * @param {string} p.docPath workspace-relative path of the working file
+ * @param {string | null} p.docPath workspace-relative path of the working file (null for a snapshot doc)
  * @param {number} p.version
  * @param {string} p.summary
  * @param {string[]} [p.threads]
@@ -69,7 +69,7 @@ export async function autoCommit({ root, config, docId, docPath, version, summar
   if (!config?.git?.autoCommit) return { commit: null, skipped: 'git.autoCommit is off' };
   if (!(await isGitRepo(root))) return { commit: null, skipped: 'not a git repository' };
   // A pathspec that matches nothing (no assets yet) would fail the whole command.
-  const paths = [docPath, `.specreview/docs/${docId}`, '.specreview/assets'].filter((p) => fs.existsSync(path.join(root, p)));
+  const paths = [docPath, `.specreview/docs/${docId}`, '.specreview/assets'].filter((p) => p && fs.existsSync(path.join(root, p)));
   const add = await git(['add', '--', ...paths], root);
   if (add.code !== 0) {
     log.warn(`git add failed: ${add.stderr.trim()}`);

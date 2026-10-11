@@ -23,6 +23,9 @@ import { resolveInPlace } from './submit.js';
 import { addAgentReply } from './threads.js';
 import { commitRecord, prepareRecord, reportHunks } from './record.js';
 import { agentActor, changedWorkingAssets, emit, humanActor, readHead, requireThread, requireWorking, withDoc } from './common.js';
+import { docRefFor, isSnapshot, reviseHint, snapshotNoun } from '../../store/snapshot.js';
+import { decodeText } from '../../util/stable-read.js';
+import { sha256 } from '../../util/hash.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -71,25 +74,40 @@ export function parseReviseInput(input) {
 }
 
 /**
+ * Records a revision. A file doc records its working copy. A snapshot doc (see store/snapshot.js) has no working
+ * file: the new version's bytes come from `snapshot.source` (`revise --source`, the plan gate, re-piped text), its
+ * guards only warn (their errors are stored as warnings, never refuse), and the manifest keeps `snapshot.origin`.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {any} input ReviseInput plus flags { dryRun, force, allowRewrite, breakLocks }
+ * @param {{ source: string | Buffer, origin?: Record<string, unknown> | null } | null} [snapshot]
  */
-export async function revise(ctx, ref, input) {
+export async function revise(ctx, ref, input, snapshot = null) {
   const p = parseReviseInput(input);
   return withDoc(
     ctx,
     ref,
     async (doc) => {
+      const snap = isSnapshot(doc);
+      if (snap && !snapshot) {
+        throw new UsageError(`${doc.id} is ${snapshotNoun(doc)}: there is no working file to record. To revise it, ${reviseHint(doc, docRefFor(doc.id, ctx.root))}.`, {
+          details: { doc: doc.id, kind: 'snapshot' },
+        });
+      }
+      if (!snap && snapshot) {
+        throw new UsageError(`${doc.id} tracks the file ${doc.path}: edit the file, then run revise without --source`, { details: { doc: doc.id } });
+      }
       for (const tid of Object.keys(p.threads)) await requireThread(ctx, doc.id, tid);
       for (const lid of Object.keys(p.breakLocks)) {
         if (!(await ctx.store.getLock(doc.id, lid))) throw new UsageError(`--break-lock ${lid}: no such lock`);
       }
       const head = await readHead(ctx, doc);
-      const working = await requireWorking(ctx, doc, head);
+      const working = snapshot ? snapshotWorking(head, snapshot.source) : await requireWorking(ctx, doc, head);
       const replies = Object.entries(p.threads).map(([thread, r]) => ({ thread, status: r.status }));
       const base = {
         doc: doc.id,
+        ref: docRefFor(doc.id, ctx.root),
+        snapshot: snap,
         from: head.v,
         version: /** @type {number | null} */ (null),
         refused: false,
@@ -135,6 +153,7 @@ export async function revise(ctx, ref, input) {
         flags: { force: p.force, allowRewrite: p.allowRewrite, breakLocks: p.breakLocks },
       });
       const g = /** @type {import('../guards.js').GuardResult} */ (prep.guards);
+      if (snap) warnOnly(g);
       const respondsTo = respondsToOf(prep.reviews, ctx.agent);
       const report = {
         ...base,
@@ -159,10 +178,11 @@ export async function revise(ctx, ref, input) {
       const res = await commitRecord(ctx, doc, prep, {
         author: agentActor(ctx),
         summary,
-        capturedBy: 'revise',
+        capturedBy: snap ? 'snapshot' : 'revise',
         respondsTo,
         replies: p.threads,
         breakLocks: p.breakLocks,
+        manifestExtra: snap ? { origin: snapshot?.origin ?? /** @type {any} */ (doc).origin ?? null } : {},
       });
       return { ...report, version: res.manifest.v, anchors: res.anchors, notified: true, git: res.git };
     },
@@ -190,6 +210,31 @@ async function dropStalePending(ctx, doc) {
   }
   if (changed.length) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { threads: changed.map((t) => t.id) });
   return changed;
+}
+
+/**
+ * The "working copy" of a snapshot revision: the given bytes (a string is UTF-8), compared with head.
+ * @param {import('./common.js').HeadState} head
+ * @param {string | Buffer} source
+ * @returns {import('./common.js').WorkingState & { sha256: string, buf: Buffer }}
+ */
+function snapshotWorking(head, source) {
+  const buf = Buffer.isBuffer(source) ? source : Buffer.from(String(source ?? ''), 'utf8');
+  if (!buf.length) throw new UsageError('the new version is empty');
+  const hash = sha256(buf);
+  return { text: decodeText(buf).text, sha256: hash, buf, missing: false, dirty: hash !== head.manifest.sha256 };
+}
+
+/**
+ * The snapshot guard profile: the guards run and report, but never refuse. Their errors become warnings (stored on
+ * the manifest): a snapshot records what the agent produced, whatever it is; the reviewer judges it in the UI.
+ * @param {import('../guards.js').GuardResult} g mutated
+ */
+function warnOnly(g) {
+  g.warnings = [...g.errors, ...g.warnings];
+  g.errors = [];
+  g.refused = false;
+  g.forced = false;
 }
 
 /**
@@ -252,6 +297,7 @@ export async function applySuggestionAsReviewer(ctx, ref, tid, { by } = {}) {
     const t = await requireThread(ctx, doc.id, tid);
     const s = t.suggestion;
     if (!s) throw new UsageError(`${tid} is not a suggestion`);
+    if (isSnapshot(doc)) throw new RefusedError(`${doc.id} is a snapshot, not a file: its suggestions are applied by the agent when it revises (send the review)`);
     if (s.status === 'applied') throw new RefusedError(`${tid} was already applied in v${s.appliedIn}`);
     const head = await readHead(ctx, doc);
     const working = await requireWorking(ctx, doc, head);

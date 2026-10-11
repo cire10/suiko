@@ -72,13 +72,14 @@ export async function buildDocPacket(ctx, doc, { includeDrafts = false, allOpen 
  * @param {Ctx} ctx
  * @param {Doc} doc
  * @param {{ includeDrafts?: boolean, allOpen?: boolean, write?: Writer, onlyIfUndelivered?: boolean,
- *   isSuperseded?: () => Promise<number | null> }} [opts]
+ *   isSuperseded?: () => Promise<number | null>, minVersion?: number }} [opts] `minVersion` (with onlyIfUndelivered):
+ *   deliver only when an undelivered review is on that version or a later one (the older ones come along)
  * @returns {Promise<{ packet: Packet, text: string, delivered: string[] } | { superseded: number } | null>}
  *   null when onlyIfUndelivered and nothing is pending
  */
-export async function deliverPacket(ctx, doc, { includeDrafts = false, allOpen = false, write, onlyIfUndelivered = false, isSuperseded } = {}) {
+export async function deliverPacket(ctx, doc, { includeDrafts = false, allOpen = false, write, onlyIfUndelivered = false, isSuperseded, minVersion = 0 } = {}) {
   const { packet, text, deliver } = await buildDocPacket(ctx, doc, { includeDrafts, allOpen });
-  if (onlyIfUndelivered && !deliver.length) return null;
+  if (onlyIfUndelivered && !deliver.some((r) => !minVersion || r.version >= minVersion)) return null;
   if (isSuperseded) {
     const by = await isSuperseded();
     if (by) return { superseded: by };

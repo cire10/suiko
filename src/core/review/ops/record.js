@@ -29,6 +29,7 @@ import { preciseMapper } from '../workmap.js';
 import { addAgentReply } from './threads.js';
 import { lastDeliveredAt } from './common.js';
 import { eolOf, matchEol } from '../apply.js';
+import { isSnapshot } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -123,7 +124,8 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
 
   const attribution = attribute({ hunks, headSource: head.source, workingSource: working.text, pending, hints, threads: ranges, other, mapper, scopes });
 
-  const workingAssets = await hashWorkingAssets(ctx.root, render.assets, ctx.config.assets.maxBytes);
+  // A snapshot doc has no workspace files: its versions never reference or snapshot workspace assets.
+  const workingAssets = isSnapshot(doc) ? {} : await hashWorkingAssets(ctx.root, render.assets, ctx.config.assets.maxBytes);
   const changed = changedAssets(head.manifest.assets, workingAssets);
   const links = assetLinks(
     threads.map((t) => ({ id: t.id, anchor: anchorAt(t, head.v) })),
@@ -216,8 +218,9 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
  * @param {object} p
  * @param {Actor} p.author
  * @param {string} p.summary
- * @param {'revise' | 'ui-record' | 'ui-apply'} p.capturedBy
+ * @param {'revise' | 'ui-record' | 'ui-apply' | 'snapshot'} p.capturedBy
  * @param {string | null} p.respondsTo
+ * @param {Record<string, unknown>} [p.manifestExtra] more manifest fields (a snapshot's `origin`)
  * @param {Replies} [p.replies]
  * @param {boolean} [p.autoReply] add "Applied the suggestion verbatim." to applied suggestions without a reply
  * @param {Record<string, string>} [p.breakLocks]
@@ -227,7 +230,7 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
  * @returns {Promise<{ manifest: VersionManifest, anchors: { threads: number, locks: number, exact: number, moved: number,
  *   edited: number, changed: number, orphaned: number }, git: { commit: string | null, skipped?: string, error?: string } }>}
  */
-export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy, respondsTo, replies = {}, autoReply = true, breakLocks = {}, finish }) {
+export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy, respondsTo, replies = {}, autoReply = true, breakLocks = {}, finish, manifestExtra = {} }) {
   const { head, working, attribution, render } = prep;
   const g = prep.guards;
   const brokenLocks = g?.brokenLocks ?? [];
@@ -240,7 +243,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
   };
   /** @type {Record<string, string | null>} */
   const assetFiles = {};
-  for (const rel of render.assets) assetFiles[rel] = null;
+  if (!isSnapshot(doc)) for (const rel of render.assets) assetFiles[rel] = null;
   const counts = { threads: 0, locks: 0, exact: 0, moved: 0, edited: 0, changed: 0, orphaned: 0 };
   for (const tid of Object.keys(replies)) {
     if (prep.threads.some((t) => t.id === tid)) continue;
@@ -256,6 +259,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
   const manifest = await ctx.store.commitVersion(doc, {
     source: working.buf,
     manifest: {
+      ...manifestExtra,
       author,
       summary,
       respondsTo,
@@ -288,7 +292,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
   await ctx.store.applyJournal(doc.id, /** @type {import('../../store/store.js').Journal} */ (/** @type {unknown} */ (journal)));
 
   const threadIds = [...new Set(attribution.hunks.flatMap((h) => h.threads))].sort();
-  const git = await autoCommit({ root: ctx.root, config: ctx.config, docId: doc.id, docPath: doc.path, version: manifest.v, summary, threads: threadIds });
+  const git = await autoCommit({ root: ctx.root, config: ctx.config, docId: doc.id, docPath: isSnapshot(doc) ? null : doc.path, version: manifest.v, summary, threads: threadIds });
   return { manifest, anchors: counts, git };
 }
 

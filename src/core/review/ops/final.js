@@ -12,6 +12,7 @@ import { writeFileAtomic } from '../../store/atomic.js';
 import { toPosix } from '../../util/paths.js';
 import { renderDecisionsMarkdown } from '../export.js';
 import { withDoc } from './common.js';
+import { isSnapshot } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -46,7 +47,8 @@ export async function finalize(ctx, ref, { decisions = false, outDir = null } = 
       let decisionsAbs = null;
       if (decisions) {
         const base = path.posix.basename(doc.path).replace(/\.[^.]+$/, '');
-        const dir = outDir ? path.resolve(ctx.cwd, outDir) : path.dirname(ctx.store.workingPath(doc));
+        // A snapshot doc has no file to sit next to: its decisions go to the cwd.
+        const dir = outDir ? path.resolve(ctx.cwd, outDir) : isSnapshot(doc) ? ctx.cwd : path.dirname(ctx.store.workingPath(doc));
         decisionsAbs = path.join(dir, `${base}.decisions.md`);
         await writeFileAtomic(decisionsAbs, renderDecisionsMarkdown({ doc, threads, reviews, versions: versions.length }));
         const rel = path.relative(ctx.root, decisionsAbs);
