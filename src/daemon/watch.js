@@ -22,6 +22,7 @@ import { homeDir, listWorkspaces } from '../core/store/home.js';
 import { WAITER_LIVE_MS } from '../core/store/store.js';
 import { pidAlive } from '../core/util/proc.js';
 import { createLogger } from '../core/util/log.js';
+import { isSnapshot } from '../core/store/snapshot.js';
 
 const log = createLogger('daemon.watch');
 
@@ -250,7 +251,8 @@ export class DocWatcher {
     for (const t of this.timers) t.unref?.();
     try {
       const doc = await this.store.getDoc(this.docId);
-      if (doc && !this.closed) {
+      // a snapshot doc has no working file: its "working copy" is its head version (it changes with version.created)
+      if (doc && !this.closed && !isSnapshot(doc)) {
         const file = this.store.workingPath(doc);
         this.chokidar = chokidarWatch(file, { ignoreInitial: true, persistent: false });
         this.chokidar.on('all', () => this.#scheduleWorking());
@@ -328,6 +330,7 @@ export class DocWatcher {
     try {
       const doc = await this.store.getDoc(this.docId);
       if (!doc) return 'gone';
+      if (isSnapshot(doc)) return 'snapshot';
       const st = await fsp.stat(this.store.workingPath(doc));
       return `${st.ino}:${st.size}:${st.mtimeMs}`;
     } catch {

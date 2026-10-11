@@ -22,6 +22,7 @@ import { EXIT } from '../../shared/protocol.js';
 import { VENDOR_DOC, VENDOR_UI, listVendorDirs } from '../../shared/vendor.js';
 import { expectPositionals } from '../args.js';
 import { PACKAGE_ROOT, daemonStatus, ensureDaemon, packageVersion, stopDaemon } from '../daemon-client.js';
+import { isSnapshot, snapshotNoun } from '../../core/store/snapshot.js';
 
 export const spec = {
   name: 'doctor',
@@ -242,6 +243,11 @@ async function checkDoc(store, doc, add, fix) {
     } else {
       add('warn', `doc:${id}`, `${id}: doc.json head v${doc.head} but the newest version is v${last}`);
     }
+  }
+  if (isSnapshot(doc)) {
+    // no working file: its versions are its content
+    add('ok', `doc:${id}`, `${id}: ${snapshotNoun(doc)} head v${doc.head} (${doc.state})`);
+    return;
   }
   /** @type {string} */
   let abs;

@@ -388,6 +388,9 @@ async function docSummary(store, wsId, root, doc, allListening) {
     root,
     id: doc.id,
     path: doc.path,
+    // snapshot docs (a plan, an agent message, piped text) have no working file: the UI labels them by origin
+    kind: doc.kind === 'snapshot' ? 'snapshot' : 'file',
+    origin: doc.kind === 'snapshot' ? doc.origin?.type ?? null : null,
     title: doc.title ?? doc.path,
     format: doc.format,
     head: doc.head ?? 0,
