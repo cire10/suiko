@@ -1,5 +1,5 @@
 ---
-description: Open an existing HTML or Markdown spec in SpecReview, show the review UI beside the chat, and wait in the background for the reviewer's feedback.
+description: Open an existing HTML or Markdown spec in SpecReview, show the review UI in the browser, and wait in the background for the reviewer's feedback.
 argument-hint: <path/to/spec.md|.html>
 allowed-tools: Bash(specreview open *) Bash(specreview wait *) Bash(specreview status *)
 ---
@@ -16,7 +16,7 @@ Follow the spec-review skill. Steps:
    - If it says the doc is already tracked, that is fine: it only prints the URL.
    - If it says `working copy differs from vN (unrecorded)`, the file has changes that are not recorded yet. If you made them while addressing review feedback, record them with `specreview revise <doc> --replies -` per the skill. Otherwise tell the user, and suggest they click **Record as my revision** in the UI. Do not start the wait until the working copy is recorded (it would exit 3).
 
-3. **Show the UI.** If the tool `mcp__Claude_Browser__navigate` exists, call it with `{"url": "<url>"}` (or `mcp__Claude_Browser__preview_start` with `{"url": "<url>"}`); load it first if it is deferred. If neither exists, or only a `mcp__remote-devices__…` variant does, give the user the URL.
+3. **Show the UI.** By default `open` has already opened it in the user's browser (`next:` says so). Only when `next:` says `open the URL (browser pane)`: if the tool `mcp__Claude_Browser__navigate` exists, call it with `{"url": "<url>"}` (or `mcp__Claude_Browser__preview_start` with `{"url": "<url>"}`); load it first if it is deferred. If neither exists, only a `mcp__remote-devices__…` variant does, or the system browser could not be opened, give the user the URL.
 
 4. **Wait.** Run Bash `specreview wait <doc>` with `run_in_background: true`.
 

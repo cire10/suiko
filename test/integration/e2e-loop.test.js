@@ -56,7 +56,7 @@ before(async () => {
   ENV = {
     PATH: /** @type {string} */ (process.env.PATH),
     HOME: USER_HOME,
-    SPECREVIEW_HOME: HOME,
+    SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME,
     SPECREVIEW_PORT: String(PORT),
     SPECREVIEW_AGENT: AGENT,
     CLAUDE_CONFIG_DIR: path.join(USER_HOME, '.claude'),

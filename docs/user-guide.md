@@ -28,7 +28,7 @@ SpecReview shows a spec exactly as written (scripts, SVG, images, tables, code, 
 
 ## Opening a document
 
-Your agent runs `specreview open <file>` and opens the printed URL for you. In the Claude desktop app it appears in the browser pane beside the chat; elsewhere, open the URL in any modern browser. You can also run `specreview open <file>` yourself.
+Your agent runs `specreview open <file>`, which opens the review UI in your default browser. If you prefer the Claude desktop app's built-in browser pane beside the chat, set `SPECREVIEW_BROWSER=pane` and the agent opens it there instead. If no browser can be opened (for example over SSH), open the printed URL in any modern browser on the same machine. You can also run `specreview open <file>` yourself.
 
 - The URL contains an access token (`?k=…`). It works only on this machine; don't share it.
 - The doc list (top-left) shows every tracked doc with its head version, open threads and whether an agent is listening.

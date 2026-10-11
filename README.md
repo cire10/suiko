@@ -90,7 +90,7 @@ Or from a shell: `claude plugin marketplace add /path/to/specreview` then `claud
 The plugin adds:
 
 - the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
-- the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in the browser pane, and waits in the background;
+- the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
 - two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
 
 The plugin's hooks run `specreview` from your `PATH`. That works when Claude Code starts from a terminal. If you use nvm, asdf or Volta and start Claude Code from the Dock or the desktop app, it may not see your shell's `PATH`, so the hooks fail with `command not found` (non-blocking, but they do nothing). Use 2b instead.
@@ -126,9 +126,11 @@ With the Claude Code plugin installed, ask Claude:
 
 > Write an implementation spec for the token service. I want to review it.
 
-Claude writes `docs/specs/token-service.md`, runs `specreview open`, opens the review UI in the browser pane next to the chat, starts a background `specreview wait`, and stops. Comment on anything, click **Submit review**, and Claude picks it up automatically.
+Claude writes `docs/specs/token-service.md`, runs `specreview open`, which opens the review UI in your default browser, starts a background `specreview wait`, and stops. Comment on anything, click **Submit review**, and Claude picks it up automatically.
 
 For a spec that already exists: `/review-spec docs/specs/token-service.md`.
+
+To use the Claude desktop app's built-in browser pane next to the chat instead, set `SPECREVIEW_BROWSER=pane` in the environment Claude Code runs in (for example `"env": {"SPECREVIEW_BROWSER": "pane"}` in `~/.claude/settings.json`). `none` only prints the URL.
 
 Without an agent integration:
 
@@ -241,7 +243,7 @@ Bind `specreview snip` to a key that works in every app, so you can snip a bug i
 $ specreview open docs/specs/token-service.md
 specreview: tracking docs/specs/token-service.md as "token-service" (markdown, 212 lines) · recorded v1
 review UI: http://127.0.0.1:4777/d/3f9a1c2e/token-service?k=Zx81Qm0v7c
-next: open the URL (browser pane), then run `specreview wait token-service` in the background
+next: the URL was opened in the system browser; run `specreview wait token-service` in the background
 ```
 
 **2. You review.** Select a phrase and press `c` to comment, `s` to suggest exact replacement text, or `q` to ask a question. Press `b` and drag a box to snip any area (a figure with its caption, half a table, a whole section), or `B` to snip something outside the doc. Press `e` to pick an image, a mermaid node or a table cell, and shift-drag to mark a region of an image. Use the **⋯** menu of a section in the outline and choose **Mark agreed** to lock it. Then **Submit review** with a verdict: Comment, Request changes or Approve. A single urgent comment can skip the queue with **Send now** (`Cmd+Shift+Enter` in the comment box). See the [reviewer guide](docs/user-guide.md).
@@ -398,7 +400,7 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 - **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`.
 - **Hooks and install are conservative.** Hooks never block a prompt on error and always exit 0. `install` prints what it would change and writes nothing without `--apply`.
 
-The access token appears in the pane's address bar; it is not sent as a referrer and the document iframe cannot read it. Rotate it with `specreview stop --rotate`.
+The access token appears in the browser's address bar; it is not sent as a referrer and the document iframe cannot read it. Rotate it with `specreview stop --rotate`.
 
 ## Troubleshooting
 
@@ -406,7 +408,7 @@ The access token appears in the pane's address bar; it is not sent as a referrer
 |---|---|
 | `specreview: command not found` | Run `npm link` in the repository, and check that npm's global `bin` directory is on your `PATH` (`npm prefix -g`). |
 | Claude Code shows a hook error mentioning `specreview` or `node` | Claude Code cannot find them on its `PATH` (common with nvm and GUI launches). Remove the plugin and use `specreview install claude --user --with-hooks --apply`, which writes absolute paths. |
-| The pane stays blank or shows "Reconnecting to SpecReview…" | Run `specreview doctor`. If needed, `specreview stop`, then `specreview open <file>` again and use the new URL. |
+| The review UI stays blank or shows "Reconnecting to SpecReview…" | Run `specreview doctor`. If needed, `specreview stop`, then `specreview open <file>` again and use the new URL. |
 | The old URL returns 401 | The token was rotated. Get a fresh URL from `specreview open <file>`. |
 | Ports 4777/4778 are taken | The server tries the next free pair up to 4799, then random ports, and remembers its choice. Or set `SPECREVIEW_PORT`. |
 | A screen snip shows only the wallpaper or empty windows | macOS has not granted Screen Recording. Turn it on for the app that started SpecReview (or Shortcuts) in System Settings > Privacy & Security > Screen & System Audio Recording, quit and reopen that app, then `specreview stop` and open the doc again. |

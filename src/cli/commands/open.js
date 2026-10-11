@@ -6,6 +6,8 @@
 // is used), create `.specreview/` there if needed, track the doc and record v1 (engine openDoc), then make sure the
 // daemon runs and print the review URL `http://127.0.0.1:<uiPort>/d/<wsId>/<docId>?k=<token>`. Also prints the
 // external hosts the doc loads live, and a warning when the working copy differs from head.
+// The URL opens in the system browser unless --browser (or $SPECREVIEW_BROWSER) says `pane` (print it for the agent
+// to show in its built-in browser pane) or `none`.
 // The `next:` hint names the doc the way follow-up commands run from the cwd should: by id when the cwd's own
 // workspace is the doc's, else by its path relative to the cwd (which resolves from the file, e.g. when the agent
 // runs from the project root and `.specreview/` lives in docs/), else by id with --workspace (see docRef).
@@ -31,9 +33,10 @@ export const spec = {
     browser: { type: 'string' },
   },
   details: [
-    '--browser pane    (default) print the URL for the agent to open in its browser pane',
-    '--browser system  also open the URL in the default browser',
+    '--browser system  (default) also open the URL in the default browser',
+    '--browser pane    print the URL for the agent to open in its built-in browser pane',
     '--browser none    only print the URL',
+    '                  $SPECREVIEW_BROWSER=pane|system|none changes the default',
     '--workspace <dir> choose the workspace root explicitly (required when the root would be $HOME or /)',
   ],
 };
@@ -41,13 +44,30 @@ export const spec = {
 const BROWSERS = ['pane', 'system', 'none'];
 
 /**
+ * --browser, else $SPECREVIEW_BROWSER, else 'system'.
+ * @param {string | undefined} flag
+ * @param {Record<string, string | undefined>} env
+ * @returns {'pane' | 'system' | 'none'}
+ */
+export function resolveBrowser(flag, env) {
+  if (flag !== undefined) {
+    if (!BROWSERS.includes(flag)) throw new UsageError(`open: --browser must be one of ${BROWSERS.join(', ')}`);
+    return /** @type {'pane' | 'system' | 'none'} */ (flag);
+  }
+  const fromEnv = env.SPECREVIEW_BROWSER?.trim();
+  if (!fromEnv) return 'system';
+  if (!BROWSERS.includes(fromEnv)) throw new UsageError(`open: SPECREVIEW_BROWSER must be one of ${BROWSERS.join(', ')} (got "${fromEnv}")`);
+  return /** @type {'pane' | 'system' | 'none'} */ (fromEnv);
+}
+
+/**
  * @param {import('../args.js').ParsedArgs} parsed
+ * @param {import('../runtime.js').Runtime} rt
  * @returns {Promise<{ paths: string[], title?: string, browser: 'pane' | 'system' | 'none' }>}
  */
-export async function parse({ values, positionals }) {
+export async function parse({ values, positionals }, rt) {
   expectPositionals('open', positionals, 1, Infinity, spec.usage);
-  const browser = values.browser ?? 'pane';
-  if (!BROWSERS.includes(browser)) throw new UsageError(`open: --browser must be one of ${BROWSERS.join(', ')}`);
+  const browser = resolveBrowser(/** @type {string | undefined} */ (values.browser), rt.env);
   if (values.title !== undefined && positionals.length > 1) throw new UsageError('open: --title applies to a single file');
   return { paths: positionals, title: values.title, browser };
 }
@@ -58,7 +78,7 @@ export async function parse({ values, positionals }) {
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 export async function execute(rt, input) {
-  const browser = input.browser ?? 'pane';
+  const browser = input.browser ?? resolveBrowser(undefined, rt.env);
   /** @type {Array<Awaited<ReturnType<typeof trackOne>>>} */
   const tracked = [];
   for (const p of input.paths) tracked.push(await trackOne(rt, p, input.paths.length === 1 ? input.title : undefined));
@@ -82,14 +102,16 @@ export async function execute(rt, input) {
   for (const t of tracked) {
     const url = info ? rt.reviewUrl(info, t.wsId, t.doc.id) : null;
     const ref = await docRef(rt, t);
-    text.push(...describe(t, url, daemonError, browser, ref));
+    let shown = browser;
     if (url && browser === 'system') {
       try {
         await rt.openBrowser(url);
       } catch (err) {
         stderr.push(`specreview: could not open the system browser: ${/** @type {Error} */ (err).message}`);
+        shown = 'failed';
       }
     }
+    text.push(...describe(t, url, daemonError, shown, ref));
     docsJson.push({
       doc: t.doc.id,
       path: t.doc.path,
@@ -228,6 +250,8 @@ function describe(t, url, daemonError, browser, ref) {
     out.push(`next: the URL was opened in the system browser; run \`specreview wait ${ref}\` in the background`);
   } else if (browser === 'none') {
     out.push(`next: run \`specreview wait ${ref}\` in the background`);
+  } else if (browser === 'failed') {
+    out.push(`next: the system browser could not be opened; give the user the URL, then run \`specreview wait ${ref}\` in the background`);
   } else {
     out.push(`next: open the URL (browser pane), then run \`specreview wait ${ref}\` in the background`);
   }

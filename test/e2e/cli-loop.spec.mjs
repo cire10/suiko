@@ -88,7 +88,7 @@ test.beforeAll(async () => {
   S.env = {
     PATH: /** @type {string} */ (process.env.PATH),
     HOME: path.join(S.base, 'user-home'),
-    SPECREVIEW_HOME: S.home,
+    SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: S.home,
     SPECREVIEW_PORT: String(S.port),
     SPECREVIEW_AGENT: 'claude',
   };

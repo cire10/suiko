@@ -54,7 +54,7 @@ async function cli(argv, o = {}) {
   const err = memorySink();
   const code = await main(argv, {
     cwd: ws.root,
-    env: { SPECREVIEW_HOME: /** @type {string} */ (process.env.SPECREVIEW_HOME), CLAUDECODE: '1', ...(o.env ?? {}) },
+    env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: /** @type {string} */ (process.env.SPECREVIEW_HOME), CLAUDECODE: '1', ...(o.env ?? {}) },
     stdin: Readable.from(o.input !== undefined ? [Buffer.from(o.input)] : []),
     stdout: out,
     stderr: err,
@@ -72,7 +72,7 @@ async function cli(argv, o = {}) {
  */
 async function hook(name, payload) {
   const out = memorySink();
-  await runHook(name, { stdin: Readable.from([Buffer.from(JSON.stringify(payload))]), stdout: out, env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME }, cwd: ws.root });
+  await runHook(name, { stdin: Readable.from([Buffer.from(JSON.stringify(payload))]), stdout: out, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME }, cwd: ws.root });
   return out.text() ? JSON.parse(out.text()) : null;
 }
 
@@ -88,7 +88,7 @@ function reviewFile(id) {
 function spawnCli(args) {
   const child = spawn(process.execPath, [BIN, ...args], {
     cwd: ws.root,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -129,7 +129,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.match(lines[0], /^specreview: tracking docs\/kitchen-sink\.md as "kitchen-sink" \(markdown, \d+ lines\) · recorded v1$/);
     assert.equal(lines[1], `review UI: http://127.0.0.1:5871/d/${ctx.wsId}/kitchen-sink?k=tok`);
     assert.doesNotMatch(r.stdout, /external hosts/, 'a plain <a href> is not loaded live');
-    assert.match(r.stdout, /^next: open the URL \(browser pane\), then run `specreview wait kitchen-sink` in the background$/m);
+    assert.match(r.stdout, /^next: run `specreview wait kitchen-sink` in the background$/m);
     const again = await cli(['open', 'docs/kitchen-sink.md', '--json']);
     assert.equal(again.code, 0, again.stderr);
     const j = JSON.parse(again.stdout);
@@ -302,7 +302,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
   test('MCP tools on the real engine: status, threads, feedback (peek), show, wait (delivered, then waiting)', async () => {
     const { InMemoryTransport } = await import('@modelcontextprotocol/server');
     const { createMcpServer } = await import('../../src/mcp/server.js');
-    const server = createMcpServer({ cwd: ws.root, env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
+    const server = createMcpServer({ cwd: ws.root, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
     const [client, serverSide] = InMemoryTransport.createLinkedPair();
     /** @type {Map<number, (m: any) => void>} */
     const pending = new Map();

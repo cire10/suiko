@@ -82,20 +82,21 @@ reviewer verifies changes  ──> accepts / reopens / replies, submits again ..
 $ specreview open docs/specs/token-service.md
 specreview: tracking docs/specs/token-service.md as "token-service" (markdown, 212 lines) · recorded v1
 review UI: http://127.0.0.1:4777/d/3f9a1c2e/token-service?k=Zx81Qm0v7c
-next: open the URL (browser pane), then run `specreview wait token-service` in the background
+next: the URL was opened in the system browser; run `specreview wait token-service` in the background
 ```
 
 - `open` creates `.specreview/` at the workspace root if needed, records v1 (the source bytes plus snapshots of local images and other assets), and starts the local server in the background if it is not running.
 - If the doc is already tracked, `open` only prints the URL. If the working copy differs from head, it adds `working copy differs from v3 (unrecorded)`; `wait` will refuse (exit 3) until that is recorded.
 - `open` never silently uses your home directory or `/` as the workspace root (for example when `~` is itself a git repository). Pass `--workspace <dir>` to choose the root explicitly.
-- `--browser system` opens the URL in the default browser; `--browser none` only prints it.
+- By default `open` also opens the URL in the user's default browser. `--browser pane` only prints it, for an agent that shows it in its own built-in browser pane; `--browser none` only prints it. `SPECREVIEW_BROWSER=pane|system|none` changes the default, so a user who prefers the pane can set it once in their environment.
 - The URL carries an access token (`?k=`). It only works on this machine.
 - Run the `wait` (and any `revise`) exactly as the `next:` line prints it. It names the doc by id when the id resolves from the current directory, and by its file path otherwise (for example from the project root when `.specreview/` lives in `notes/specs/`).
 
 **Showing the UI:**
 
-- Claude Code in the Claude desktop app: open the URL in the built-in browser pane with `mcp__Claude_Browser__navigate {"url": …}` or `mcp__Claude_Browser__preview_start {"url": …}`.
-- Anywhere else: give the user the URL, or use `--browser system`.
+- Follow the `next:` line. When it says the URL was opened in the system browser, there is nothing more to show.
+- When it says `open the URL (browser pane)` (the user chose `pane`), Claude Code in the Claude desktop app opens it in the built-in browser pane with `mcp__Claude_Browser__navigate {"url": …}` or `mcp__Claude_Browser__preview_start {"url": …}`. Without a pane, give the user the URL.
+- When the system browser could not be opened (for example over SSH), or with `none`, give the user the URL.
 
 ## 5. Waiting for feedback
 

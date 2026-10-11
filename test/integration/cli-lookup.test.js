@@ -43,7 +43,7 @@ async function cli(cwd, argv, o = {}) {
   const err = memorySink();
   const code = await main(argv, {
     cwd,
-    env: { SPECREVIEW_HOME: HOME, CLAUDECODE: '1' },
+    env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, CLAUDECODE: '1' },
     stdin: Readable.from(o.input !== undefined ? [Buffer.from(o.input)] : []),
     stdout: out,
     stderr: err,
@@ -123,7 +123,7 @@ describe('lookup from a directory above the workspace root', () => {
     assert.equal(JSON.parse(j.stdout).ref, 'docs/my-spec.md');
     // from the workspace root itself (and below it) the id is enough
     const fromRoot = await cli(DOCS, ['open', 'my-spec.md']);
-    assert.match(fromRoot.stdout, /^next: open the URL \(browser pane\), then run `specreview wait my-spec` in the background$/m, fromRoot.stdout);
+    assert.match(fromRoot.stdout, /^next: run `specreview wait my-spec` in the background$/m, fromRoot.stdout);
   });
 
   test('relatedWorkspaceRoots matches through the symlinked tmp dir', async () => {

@@ -40,10 +40,10 @@ export const TOOLS = [
     name: 'specreview_open',
     title: 'Open a spec for review',
     description:
-      'Track an HTML/Markdown spec (recording v1 if new), make sure the local review server runs, and return the review UI URL to show the user. Write the spec once before calling this; afterwards only make targeted edits.',
+      'Track an HTML/Markdown spec (recording v1 if new), make sure the local review server runs, open the review UI in the default browser (unless SPECREVIEW_BROWSER is pane or none), and return its URL. Write the spec once before calling this; afterwards only make targeted edits.',
     schema: z.object({ path: z.string().min(1).describe('Path of the .md/.html spec'), title: z.string().optional(), workspace: workspaceArg }),
     command: 'open',
-    toInput: async (a) => ({ paths: [a.path], title: a.title, browser: 'none' }),
+    toInput: async (a) => ({ paths: [a.path], title: a.title }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
