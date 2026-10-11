@@ -24,7 +24,7 @@ Contents:
 16. [Command reference](#16-command-reference)
 17. [Rules summary](#17-rules-summary)
 18. [Writing specs that review well](#18-writing-specs-that-review-well)
-19. [Snapshot docs: plans, messages, piped text](#19-snapshot-docs-plans-messages-piped-text)
+19. [Snapshot docs: plans, messages, piped text, web pages](#19-snapshot-docs-plans-messages-piped-text-web-pages)
 
 ## 1. Model
 
@@ -510,6 +510,7 @@ The plugin registers the hooks as `specreview hook pre-write` and `specreview ho
 | Tool | Input | Returns |
 |---|---|---|
 | `specreview_open` | `{path, title?}` | `{doc, version, url}` |
+| `specreview_snapshot` | `{url, title?}` | `{doc, version, recorded, url, page}`; public hosts only (a private host or the network turned off is refused); see section 19 |
 | `specreview_wait` | `{doc?, timeout_sec?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}` |
 | `specreview_feedback` | `{doc, peek?, include_drafts?}` | the packet |
 | `specreview_apply` | `{doc, thread_ids}` | `{applied, conflicts}` |
@@ -535,6 +536,7 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `open <dir>` | Open every `.md`/`.markdown`/`.html`/`.htm` file below the folder (at most 200); one line per doc and the UI's home URL | 0 |
 | `open - [--name N] [--title T]` | Piped Markdown (at most 5 MB) as a snapshot doc; the same `--name` records a new version | 0 |
 | `last [--session <id>] [--transcript <path>] [--title T] [--browser pane\|system\|none]` | The agent's last message (Claude Code transcript) as a snapshot doc; prints the URL and the wait command | 0 / 4 |
+| `snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->] [--browser pane\|system\|none]` | A web page as a snapshot doc (the only command that uses the network); again for the same URL records the next version when the page changed; `--replies` posts replies with it | 0 / 1 / 3 / 4 |
 | `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review arrives; print the packet; mark it delivered | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The packet, without blocking; marks delivered unless `--peek` | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim; stage tagged edits | 0 / 3 |
@@ -592,9 +594,9 @@ Do not:
 
 The longer version, with reasons, is in [`integrations/claude-code/skills/spec-review/reference.md`](../integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
 
-## 19. Snapshot docs: plans, messages, piped text
+## 19. Snapshot docs: plans, messages, piped text, web pages
 
-A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code) or Markdown piped to `specreview open -`. Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
+A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code), Markdown piped to `specreview open -`, or a web page (`specreview snapshot <url>`). Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`, `web/<slug>.md` or `web/<slug>.html`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
 
 - The packet header names the kind (`token-plan (Claude Code plan)`), line numbers are lines of the head version, and no thread offers `specreview apply`.
 - `apply`, `edit` and `revert` are refused (exit 3) with what to do instead, and so is `revise` without `--source` (exit 1).
@@ -602,3 +604,15 @@ A **snapshot doc** reviews text that is not a file in the workspace: a Claude Co
 - **Revising a plan:** edit the plan file with targeted Edit-tool changes and call ExitPlanMode again; the plan gate records the version.
 - **Workspace:** found from the current directory as usual. When that is your home directory or `/`, the doc goes to the scratch workspace `$SPECREVIEW_HOME/scratch/<8 hex>/`, and every printed command carries `--workspace <dir>`: keep it on every command for that doc.
 - `specreview last` reads `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<session>.jsonl` (session from `--session`, else `$CLAUDE_CODE_SESSION_ID`; else the newest transcript of the current directory), takes the newest assistant message with text (skipping sidechains, tool results and command echoes), and returns at once. When the newest assistant message is still running a tool call (you ran `specreview last` yourself, maybe after a sentence), that whole turn is skipped. The text is stored with a final newline, as `show` prints it. Running it again for the same message reopens the same doc and records nothing, so your revisions stay. Codex transcripts are not supported.
+
+### Web pages
+
+`specreview snapshot <url>` fetches a page once and records it as a snapshot doc whose key is the URL (normalised: lowercase scheme and host, no default port, no fragment). Running the command is the consent to use the network: it is the only command that does, and it is refused (exit 3) when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false` in `$SPECREVIEW_HOME/config.json`.
+
+- **What is fetched:** http(s) only, no user name or password in the URL, at most 10 MB and 30 s, at most 10 redirects. Hosts that resolve to this machine or a private network (loopback, `10/8`, `172.16/12`, `192.168/16`, link-local, unique-local IPv6 and their mapped forms) are refused (exit 3) unless `--allow-private`, and every redirect is checked again. A name that does not resolve exits 4; a connection error or an HTTP status of 400 or more exits 1.
+- **What is stored:** never the page as served. HTML is cleaned with an allowlist (no scripts, styles, forms, frames, embeds, SVG or event handlers; links `http`/`https`/`mailto` only, resolved against the page), the page's single `<main>` or `<article>` is kept when it has one, and the result is converted to Markdown (`web/<slug>.md`). `--as-html` keeps the cleaned HTML (`web/<slug>.html`); a doc keeps its format, so a later run must use the same choice. Markdown pages (a `.md` URL, `raw.githubusercontent.com`, a `github.com/.../blob/...md` page fetched from its raw URL) are kept as served when they contain no raw HTML, and lose it otherwise. A page rendered by JavaScript is nearly empty: the command says so, and `--reader jina` (public hosts only) has r.jina.ai render it, sending it the URL without its query string.
+- **In the review UI** the doc is served with a strict policy (no scripts but the review overlay, no forms) and its remote images and styles are blocked unless the run had `--allow-remote-assets`.
+- **The packet** names the page instead of a file: `Line numbers = lines of SpecReview's Markdown snapshot of <url> (fetched 2026-10-11 14:05 UTC); there is no file for you to edit.` `src>` lines quote that conversion.
+- **A page you build** (fetched with `--allow-private`): the packet says `PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page …` and `NEXT: edit the sources that produce the page -> specreview snapshot <url> --allow-private --replies - (records vN+1) -> specreview wait <doc> (background)`. Change only what the threads ask for, then run that command with the replies JSON (section 8.1) on stdin: it fetches the page again, records the next version and posts the replies in one step. When the page did not change, it records nothing and only posts the replies. `revise <doc>` without `--source` prints the same command.
+- **A public page**: there is nothing for you to edit. The packet says `PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit.` and `NEXT: answer each thread with specreview reply <doc> <tid> -m <md> --status answered|declined -> specreview wait <doc> (background)`. Running `specreview snapshot <url>` again records a newer version when the page itself changed.
+- **MCP:** `specreview_snapshot` `{url, title?}` does the same for public hosts only (no `--allow-private`, `--reader` or `--as-html`); for a page you build, use the CLI.

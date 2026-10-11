@@ -42,6 +42,7 @@ JSON
 ### Text that is not a file
 
 - Piped Markdown: `<command> | specreview open - [--name N]` opens it as a snapshot doc; piping the same `--name` again records a new version. A folder: `specreview open <dir>` opens every spec below it.
+- A web page: `specreview snapshot <url>` (add `--allow-private` for a page on localhost you build). To revise it, change the sources that produce the page, then run the `NEXT:` command (`specreview snapshot <url> --allow-private --replies -`, replies JSON on stdin). A public page has nothing to edit: answer each thread with `specreview reply`.
 - A snapshot doc has no file, so `apply`, `edit` and `revert` are refused. Write the complete revised text to a temporary file (`specreview show <doc>` prints the current version) and record it with `specreview revise <doc> --source <file> --replies -`. Keep any `--workspace <dir>` the printed commands include.
 
 ### Finish and recover

@@ -110,6 +110,7 @@ Give one line per thread in chat: what you changed, or what you asked. Then star
 These docs are **snapshots**, not files: a Claude Code plan (the plan gate), your last message (`/specreview-last`) or text piped to `specreview open -`. The packet header names the kind, e.g. `plan-cache (Claude Code plan)`.
 
 - **Plan gate.** With the plan-mode hook installed, ExitPlanMode opens your plan in SpecReview and waits for the review. Approved: carry on. Otherwise ExitPlanMode is denied with feedback that cites the plan file and its line numbers. Make targeted Edit-tool changes to that plan file (never rewrite it), address every thread, then call ExitPlanMode again. The reviewer sees a diff.
+- **Web pages** (`specreview snapshot <url>`, the only command that uses the network) are snapshots too. For a page you build (`--allow-private`), change the sources that produce it as the threads ask, then run the `NEXT:` command, `specreview snapshot <url> --allow-private --replies -`, with the replies JSON on stdin: it records the next version and posts the replies in one step. A public page has nothing for you to edit: answer each thread with `specreview reply`.
 - **Other snapshots** have no file to edit, so `apply`, `edit` and `revert` are refused. Write your complete revised text to a temporary file outside the project (`specreview show <doc>` prints the current version), address every thread in it, then record it with `specreview revise <doc> --source <file> --replies -` (replies JSON on stdin, as in section 5). If the `next:` line includes `--workspace <dir>`, keep that flag on every command for the doc.
 
 ## Cheat-sheet
@@ -128,6 +129,7 @@ These docs are **snapshots**, not files: a Claude Code plan (the plan gate), you
 | `specreview diff <doc> --stat` / `specreview log <doc>` / `specreview status` | What changed / timeline / overview |
 | `specreview final <doc> --decisions` | Check the final version and export the decision log |
 | `specreview last` / `specreview open - [--name N]` | Review your last message / piped Markdown (snapshot docs) |
+| `specreview snapshot <url> [--allow-private]` | Review a web page (snapshot doc); again records the next version |
 | `specreview revise <doc> --source <file> --replies -` | Record a new version of a snapshot doc |
 
 Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, conflict, not unique) · 4 not found · 5 closed · 6 superseded.

@@ -22,6 +22,7 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 - [Plan-mode gate](#plan-mode-gate)
 - [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text)
 - [Folders](#folders)
+- [Snapshot a web page](#snapshot-a-web-page)
 - [Command reference](#command-reference)
 - [Storage layout and git](#storage-layout-and-git)
 - [Configuration](#configuration)
@@ -392,6 +393,24 @@ When you run these from your home directory (which can never be a workspace), th
 
 `specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
 
+## Snapshot a web page
+
+`specreview snapshot <url>` fetches a web page once, now, and opens it for review like any other doc: threads, **Review changes** and **History** work as usual. It is the only command that uses the network, and only when you run it; the review UI never fetches the page.
+
+```bash
+specreview snapshot https://docs.example.com/spec
+specreview snapshot http://localhost:3000/design --allow-private   # a page you are building
+```
+
+- **Nothing on the page runs.** The HTML is cleaned with an allowlist (no scripts, styles, forms, frames, embeds or event handlers; only `http`, `https` and `mailto` links), the page's `<main>` or `<article>` is kept when it has one, and the result is converted to Markdown. `--as-html` keeps the cleaned HTML instead. Remote images and styles are blocked in the review UI; `--allow-remote-assets` loads them.
+- **Public pages only, unless you say otherwise.** Hosts on this machine or your network (`localhost`, `10.x`, `192.168.x`, link-local and the like) are refused (exit 3) without `--allow-private`. Every redirect is checked the same way. Pages are limited to 10 MB and 30 seconds.
+- **Run it again to record the next version.** The same URL always maps to the same doc, so a second run records v2 when the page changed and nothing when it is identical. An agent that changed the sources of a page it builds records the new version and its replies in one step with `specreview snapshot <url> --allow-private --replies -` (the `revise` replies JSON on stdin).
+- **Pages rendered by JavaScript** come out nearly empty (SpecReview says so). `--reader jina` lets r.jina.ai render them: it sends the URL, without its query string, to that service, and it is refused for private hosts.
+- **Markdown pages** (`.md` URLs, `raw.githubusercontent.com`, and `github.com/.../blob/...md`, which is fetched from its raw URL) stay Markdown, minus any raw HTML. `--reader direct` fetches the URL exactly as given.
+- **Turning the network off:** with `SPECREVIEW_OFFLINE=1`, or `{"network": {"allow": false}}` in `~/.specreview/config.json`, the command is refused (exit 3).
+
+The MCP tool `specreview_snapshot` does the same for public pages only.
+
 ## Command reference
 
 `<doc>` is a doc id (`token-service`) or a file path. Line numbers are always lines of the current file on disk.
@@ -402,6 +421,7 @@ When you run these from your home directory (which can never be a workspace), th
 | `specreview open <dir>` | Open every spec file below a folder (at most 200); print the home URL listing them |
 | `specreview open - [--name N] [--title T]` | Review piped Markdown; the same `--name` records a new version |
 | `specreview last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
+| `specreview snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page (the only command that uses the network); run it again to record the next version. See [Snapshot a web page](#snapshot-a-web-page) |
 | `specreview wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted; print the packet |
 | `specreview feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `specreview apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
@@ -428,7 +448,7 @@ When you run these from your home directory (which can never be a workspace), th
 | `specreview uninstall [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Remove what `install` added (prints only, unless `--apply`) |
 | `specreview install claude [--user\|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install one integration (prints only, unless `--apply`) |
 
-Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port).
+Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port), `SPECREVIEW_OFFLINE=1` (refuse `snapshot <url>`).
 
 Exit codes: `0` ok or delivered · `1` error · `2` wait timed out · `3` refused (guard, dirty working copy, conflict, not unique) · `4` not found · `5` session closed · `6` superseded by a newer `wait`.
 
@@ -456,7 +476,7 @@ Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `
 
 ```text
 ~/.specreview/
-  daemon.json (0600)  workspaces.json  daemon.log
+  daemon.json (0600)  workspaces.json  daemon.log  config.json (optional: your own settings, see Configuration)
   ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/
 ```
 
@@ -495,9 +515,20 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 | `guards.unexplainedDeletion` | `refuse`, `warn` or `off` |
 | `guards.writeHook`, `guards.writeHookRatio` | Claude Code Write hook: `deny`, `warn` (ask the user) or `off`; the share of changed lines that triggers it |
 | `anchoring.*` | Fuzzy re-anchoring thresholds |
-| `render.network` | `allow` lets documents load their own remote resources; `block` adds a CSP that restricts them to local files |
+| `render.network` | `allow` lets documents load their own remote resources; `block` adds a CSP that restricts them to local files. A web page recorded by `specreview snapshot <url>` carries its own setting (`block` unless `--allow-remote-assets`), which wins over this one |
 | `git.autoCommit` | Commit each recorded version |
 | `assets.maxBytes` | Assets larger than this are not snapshotted |
+
+Two settings belong to you rather than to a project, so they live in `~/.specreview/config.json` (`$SPECREVIEW_HOME/config.json`) and a repository cannot change them:
+
+```json
+{"network": {"allow": false}, "snapshot": {"reader": "direct"}}
+```
+
+| Key | Meaning |
+|---|---|
+| `network.allow` | `false` refuses `specreview snapshot <url>`, the only command that uses the network (like `SPECREVIEW_OFFLINE=1`) |
+| `snapshot.reader` | The default `--reader` of `snapshot`: `auto` (the default) or `direct`. `jina` is only ever used when you pass it |
 
 ## Security model
 
@@ -506,7 +537,8 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 - **Path safety.** Only files inside the workspace are served; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and key files (`*.pem`, `*.key`, `*.p12`, `id_rsa*`) are refused.
 - **Observe-only overlay.** Messages from the document can at most open a comment box; nothing is submitted, resolved or written without a click in the UI. Comment bodies are sanitised before rendering.
 - **Screen snips are interactive.** `B` and `specreview snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.
-- **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`.
+- **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`. The one exception is `specreview snapshot <url>`, which fetches the page you name when you run it (public hosts only unless `--allow-private`, every redirect re-checked) and is refused when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false`.
+- **Snapshots run nothing.** A fetched page is cleaned with an allowlist before it is stored. Snapshot docs (web pages, plans, messages, piped text) are served with a strict policy (`script-src 'self'`, no form submission, no `<base>`, no plugins) in a sandbox without forms or downloads, and a web page's remote images and styles stay blocked unless it was recorded with `--allow-remote-assets`.
 - **Hooks and install are conservative.** Hooks never block a prompt on error and always exit 0. `install` prints what it would change and writes nothing without `--apply`.
 
 The access token appears in the browser's address bar; it is not sent as a referrer and the document iframe cannot read it. Rotate it with `specreview stop --rotate`.
