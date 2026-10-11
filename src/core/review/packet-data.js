@@ -78,7 +78,8 @@ import { docRefFor, isSnapshot, originType, planFileOf } from '../store/snapshot
  * @property {string | null} [root] absolute workspace root
  * @property {string | null} [file] absolute path of the working copy (a plan snapshot: its plan file; other
  *   snapshots: null)
- * @property {string} [pathFromCwd] the working copy as reached from the agent's cwd (relative, or absolute)
+ * @property {string | null} [pathFromCwd] the working copy as reached from the agent's cwd (relative, or absolute);
+ *   a snapshot has no working copy: its plan file (plan snapshots), else null
  * @property {string} title
  * @property {number} head
  * @property {'clean' | 'dirty' | 'missing'} working
@@ -203,7 +204,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     ref,
     root,
     file,
-    pathFromCwd: snapshot ? planFile ?? doc.path : pathFromCwd(doc.path, root, cwd),
+    pathFromCwd: snapshot ? planFile : pathFromCwd(doc.path, root, cwd),
     title: doc.title,
     head: snap.head.v,
     working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',

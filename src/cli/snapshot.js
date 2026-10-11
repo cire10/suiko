@@ -11,6 +11,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { RefusedError } from '../core/store/errors.js';
+import { ensureHome } from '../core/store/home.js';
 import { findWorkspace, initStoreDir } from '../core/store/workspace.js';
 import { docRefFor, isScratchRoot, originInfo, scratchBase } from '../core/store/snapshot.js';
 import { sha256 } from '../core/util/hash.js';
@@ -40,7 +41,10 @@ export async function snapshotWorkspace(rt, dir) {
   } catch (err) {
     if (!(err instanceof RefusedError) || rt.workspace) throw err;
     const root = scratchRootFor(dir);
-    await fsp.mkdir(root, { recursive: true });
+    // the home first, so it gets its 0700 mode even when a snapshot is the first thing ever run; plans and messages
+    // in the scratch stores stay private
+    ensureHome();
+    await fsp.mkdir(root, { recursive: true, mode: 0o700 });
     ws = await findWorkspace(root, { create: false, explicitRoot: root });
   }
   const storeCreated = !ws.exists;
@@ -62,7 +66,7 @@ export function scratchRootFor(dir) {
  * @param {import('./runtime.js').Runtime} rt
  * @param {SnapshotWorkspace} ws
  * @param {{ source: string | Buffer, format?: 'markdown' | 'html', title?: string | null, slug?: string | null,
- *   origin: { type: string, key?: string | null } & Record<string, unknown>, summary?: string }} input
+ *   origin: { type: string, key?: string | null } & Record<string, unknown>, summary?: string, autoAddress?: boolean }} input
  */
 export async function recordSnapshotDoc(rt, ws, input) {
   const { ctx, engine } = await openContext(rt, { create: true, root: ws.root });
@@ -72,22 +76,51 @@ export async function recordSnapshotDoc(rt, ws, input) {
     engine,
     doc: res.doc,
     created: Boolean(res.created),
+    reopened: Boolean(res.reopened),
     version: res.version,
     report: res.report ?? null,
     ref: docRefFor(res.doc.id, ws.root),
     wsId: wsIdOfContext(ctx) || ws.wsId,
+    externalHosts: hostsOf(res.externals),
   };
 }
 
 /**
+ * The hosts of absolute http(s) URLs, sorted (render.externals -> 'cdn.example.com').
+ * @param {unknown} urls
+ * @returns {string[]}
+ */
+export function hostsOf(urls) {
+  const hosts = new Set();
+  for (const u of Array.isArray(urls) ? urls : []) {
+    try {
+      hosts.add(new URL(String(u)).host);
+    } catch {
+      // not a URL: ignore
+    }
+  }
+  return [...hosts].sort();
+}
+
+/**
+ * The warning about hosts a doc loads live ([] when none).
+ * @param {string[]} hosts
+ * @returns {string[]}
+ */
+export function externalsLines(hosts) {
+  return hosts.length ? [`external hosts loaded live by the doc: ${hosts.join(', ')} (set render.network to "block" in .specreview/config.json to block them)`] : [];
+}
+
+/**
  * The first output line about a recorded snapshot.
- * @param {{ doc: any, created: boolean, version: any, report: any }} t
+ * @param {{ doc: any, created: boolean, reopened?: boolean, version: any, report: any }} t
  * @returns {string}
  */
 export function snapshotLine(t) {
   const { doc, version } = t;
   const what = originInfo(String(doc.origin?.type ?? '')).label;
   if (t.created) return `specreview: tracking ${what} as "${doc.id}" (${doc.format}, ${version?.lines ?? '?'} lines) · recorded v${version?.v ?? doc.head}`;
+  if (t.reopened) return `specreview: ${what} "${doc.id}" is already tracked (head v${doc.head}); reopened it`;
   const r = t.report;
   if (r && r.version && !r.dryRun) return `specreview: recorded v${r.version} of "${doc.id}" (${what}; +${r.stats.added} -${r.stats.removed} lines)`;
   return `specreview: "${doc.id}" (${what}) is unchanged (identical to v${doc.head})`;

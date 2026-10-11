@@ -12,6 +12,7 @@
 // shadow a real file; findDocByOrigin(key) is the identity used to record re-snapshots as vN+1 of the same doc.
 // Versions are recorded from bytes (ops/snapshot.js openSnapshot / recordSnapshot), never from the workspace.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import { homeDir } from './home.js';
@@ -24,17 +25,22 @@ export const SNAPSHOT_KIND = 'snapshot';
  * @property {string} dir top directory of the synthetic path ('plans/<slug>.md')
  * @property {string} label what the snapshot is, for messages ('Claude Code plan')
  * @property {string} noun short name ('plan')
+ * @property {boolean} rerecord whether taking the snapshot again under the same key records the new text as vN+1
+ *   (a plan file and a named pipe change; a message under its id never does, so re-taking it only reopens the doc
+ *   and never reverts the agent's revisions)
+ * @property {boolean} gated reviews are delivered only by the command that took the snapshot (the plan gate) or
+ *   an explicit `wait <doc>`: never by `wait --all` or a doc-less default
  */
 
 /** @type {Record<string, OriginInfo>} */
 const ORIGIN_TYPES = {
-  plan: { dir: 'plans', label: 'Claude Code plan', noun: 'plan' },
-  message: { dir: 'messages', label: 'agent message', noun: 'message' },
-  stdin: { dir: 'text', label: 'piped text', noun: 'text' },
+  plan: { dir: 'plans', label: 'Claude Code plan', noun: 'plan', rerecord: true, gated: true },
+  message: { dir: 'messages', label: 'agent message', noun: 'message', rerecord: false, gated: false },
+  stdin: { dir: 'text', label: 'piped text', noun: 'text', rerecord: true, gated: false },
 };
 
 /** Origin types without a row (future kinds) still work with these defaults. */
-const DEFAULT_INFO = { dir: 'snapshots', label: 'snapshot', noun: 'snapshot' };
+const DEFAULT_INFO = { dir: 'snapshots', label: 'snapshot', noun: 'snapshot', rerecord: true, gated: false };
 
 const ORIGIN_TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const MAX_KEY = 1024;
@@ -70,6 +76,16 @@ export function originType(doc) {
  */
 export function originInfo(type) {
   return Object.hasOwn(ORIGIN_TYPES, type) ? ORIGIN_TYPES[type] : { ...DEFAULT_INFO, label: type ? `${type} snapshot` : DEFAULT_INFO.label };
+}
+
+/**
+ * Whether a doc's reviews belong to the command that took it (a plan: the plan gate). `wait --all` and doc-less
+ * defaults skip such docs, so they can never take the verdict the gate is blocking on.
+ * @param {unknown} doc
+ * @returns {boolean}
+ */
+export function isGated(doc) {
+  return isSnapshot(doc) && originInfo(originType(doc)).gated;
 }
 
 /**
@@ -119,9 +135,22 @@ export function scratchBase() {
  */
 export function isScratchRoot(root) {
   if (!root) return false;
-  const base = path.resolve(scratchBase());
-  const r = path.resolve(root);
+  // real paths on both sides: workspace roots are realpath'd, SPECREVIEW_HOME (or $HOME) may be a symlink
+  const base = realpathOr(scratchBase());
+  const r = realpathOr(root);
   return r !== base && isWithin(base, r);
+}
+
+/**
+ * @param {string} p
+ * @returns {string} the real path, else the resolved path (it does not exist yet)
+ */
+function realpathOr(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 /**

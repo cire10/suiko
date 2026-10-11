@@ -3,8 +3,9 @@
 // `specreview open - [--title T] [--name N]` (design 3.2 / 9.2, amendments 5).
 //
 // A directory expands to its .md/.markdown/.html/.htm files, recursively (sorted; dot-directories, node_modules,
-// paths isDeniedPath refuses and symlinks leading out of the directory are skipped; at most 200 files): one line per
-// doc, then the review UI's home URL, which lists them.
+// paths isDeniedPath refuses, and symlinks whose target is outside the directory or in such a path are skipped; at
+// most 200 files): one line per doc, then the review UI's home URL, which lists them. The directory's workspace is
+// found once: a file below it without a store of its own goes to that workspace (one folder, one store).
 // `-` reads Markdown from stdin (at most 5 MB) into a snapshot doc (store/snapshot.js, origin type "stdin"): a new
 // doc each time, or with --name N the doc of that name (piping the same name again records a new version).
 //
@@ -28,10 +29,12 @@ import { formatOfPath, isDeniedPath, isWithin } from '../../core/util/paths.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
 import { shellArg } from '../format.js';
-import { readAll } from '../io.js';
+import { readAllBytes } from '../io.js';
+import { decodeText } from '../../core/util/stable-read.js';
 import { callOp, openContext, realpathOr, wsIdOfContext } from '../runtime.js';
 import {
-  MAX_SNAPSHOT_BYTES, defaultTitle, recordSnapshotDoc, scratchNote, showUrl, shownPrefix, snapshotLine, snapshotWorkspace,
+  MAX_SNAPSHOT_BYTES, defaultTitle, externalsLines, hostsOf, recordSnapshotDoc, scratchNote, showUrl, shownPrefix, snapshotLine,
+  snapshotWorkspace,
 } from '../snapshot.js';
 
 export const spec = {
@@ -108,7 +111,16 @@ export async function execute(rt, input) {
   if (input.title !== undefined && expanded.files.length > 1) throw new UsageError('open: --title applies to a single file');
   /** @type {Array<Awaited<ReturnType<typeof trackOne>>>} */
   const tracked = [];
-  for (const p of expanded.files) tracked.push(await trackOne(rt, p, expanded.files.length === 1 ? input.title : undefined));
+  /** @type {Map<string, string | null>} directory argument -> its workspace root (null: refused, decided per file) */
+  const dirRoots = new Map();
+  for (const f of expanded.files) {
+    let root = null;
+    if (f.dir && !rt.workspace) {
+      if (!dirRoots.has(f.dir)) dirRoots.set(f.dir, await dirWorkspace(f.dir));
+      root = dirRoots.get(f.dir) ?? null;
+    }
+    tracked.push(await trackOne(rt, f.path, expanded.files.length === 1 ? input.title : undefined, root));
+  }
   if (expanded.dirs) return folderResult(rt, tracked, expanded, browser);
 
   /** @type {import('../../shared/types.js').DaemonInfo | null} */
@@ -173,52 +185,62 @@ export async function execute(rt, input) {
  */
 
 /**
- * Expands directory arguments to their spec files (see the header); files are kept as given.
+ * Expands directory arguments to their spec files (see the header); files are kept as given. Each file appears once
+ * (by real path), also when arguments overlap; `dir` is the absolute directory argument a file was found in.
  * @param {string} cwd
  * @param {string[]} args
- * @returns {{ files: string[], dirs: number, skipped: Skipped }}
+ * @returns {{ files: Array<{ path: string, dir: string | null }>, dirs: number, skipped: Skipped }}
  */
 export function expandPaths(cwd, args) {
-  /** @type {string[]} */
+  /** @type {Array<{ path: string, dir: string | null }>} */
   const files = [];
   /** @type {Skipped} */
   const skipped = { dot: 0, nodeModules: 0, denied: 0, symlinks: 0, overCap: 0 };
   /** @type {Set<string>} */
   const seen = new Set();
   let dirs = 0;
-  let found = 0;
-  const add = (/** @type {string} */ abs) => {
-    const real = realpathOr(abs);
-    if (seen.has(real)) return;
-    seen.add(real);
-    found += 1;
-    if (files.length >= MAX_DIR_FILES) skipped.overCap += 1;
-    else files.push(abs);
-  };
+  let collected = 0;
+  /** spec files found under the current directory argument, duplicates included */
+  let hits = 0;
   for (const arg of args) {
     const abs = path.resolve(cwd, arg);
     let st;
     try {
       st = fs.statSync(abs);
     } catch {
-      files.push(arg); // trackOne reports it (not found)
+      files.push({ path: arg, dir: null }); // trackOne reports it (not found)
       continue;
     }
     if (!st.isDirectory()) {
-      files.push(arg);
+      const real = realpathOr(abs);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      files.push({ path: arg, dir: null });
       continue;
     }
     dirs += 1;
-    const before = found;
-    walkDir(realpathOr(abs), abs, '', add, skipped);
-    if (found === before) throw new UsageError(`open: no .md, .markdown, .html or .htm files in ${arg}`, { details: { path: abs } });
+    hits = 0;
+    walkDir(realpathOr(abs), abs, '', (file) => {
+      hits += 1;
+      const real = realpathOr(file);
+      if (seen.has(real)) return;
+      seen.add(real);
+      if (collected >= MAX_DIR_FILES) {
+        skipped.overCap += 1;
+        return;
+      }
+      collected += 1;
+      files.push({ path: file, dir: abs });
+    }, skipped);
+    if (!hits) throw new UsageError(`open: no .md, .markdown, .html or .htm files in ${arg}`, { details: { path: abs } });
   }
   return { files, dirs, skipped };
 }
 
 /**
- * Collects the spec files below `dir` (sorted, depth first). Symlinked files count only when they resolve inside
- * the expanded directory; symlinked directories are never followed.
+ * Collects the spec files below `dir` (sorted, depth first). A symlinked file counts only when its target is a spec
+ * file inside the expanded directory and not in a path the walk skips (dot segment, node_modules, denied); symlinked
+ * directories are never followed.
  * @param {string} realRoot realpath of the expanded directory
  * @param {string} dir directory being listed
  * @param {string} rel its path relative to the expanded directory (POSIX, '' for the root)
@@ -253,14 +275,7 @@ function walkDir(realRoot, dir, rel, add, skipped) {
       continue;
     }
     if (e.isSymbolicLink()) {
-      /** @type {string | null} */
-      let real = null;
-      try {
-        real = fs.realpathSync(abs);
-      } catch {
-        // dangling
-      }
-      if (!real || !isWithin(realRoot, real) || !fs.statSync(real).isFile()) {
+      if (!symlinkTargetOk(realRoot, abs)) {
         skipped.symlinks += 1;
         continue;
       }
@@ -268,6 +283,42 @@ function walkDir(realRoot, dir, rel, add, skipped) {
       continue;
     }
     add(abs);
+  }
+}
+
+/**
+ * Whether a symlinked file may be opened as part of the directory: its target is a regular spec file inside the
+ * directory, and the target's own path (relative to the directory) passes the same rules as walked files.
+ * @param {string} realRoot
+ * @param {string} link
+ * @returns {boolean}
+ */
+function symlinkTargetOk(realRoot, link) {
+  let real;
+  try {
+    real = fs.realpathSync(link);
+    if (!fs.statSync(real).isFile()) return false;
+  } catch {
+    return false; // dangling
+  }
+  if (!isWithin(realRoot, real) || !formatOfPath(real)) return false;
+  const rel = path.relative(realRoot, real).split(path.sep).join('/');
+  if (rel.split('/').some((seg) => seg.startsWith('.') || seg === 'node_modules')) return false;
+  return !isDeniedPath(rel);
+}
+
+/**
+ * The workspace root of a directory argument: the root discovery finds for the directory itself (an enclosing
+ * store or git root, else the directory). null when discovery is refused ($HOME, /): each file then decides (and
+ * reports the refusal) as before.
+ * @param {string} dir
+ * @returns {Promise<string | null>}
+ */
+async function dirWorkspace(dir) {
+  try {
+    return (await findWorkspace(dir, { create: false })).root;
+  } catch {
+    return null;
   }
 }
 
@@ -282,7 +333,7 @@ function skippedLine(s) {
   if (s.dot) parts.push(`${s.dot} dot-director${s.dot === 1 ? 'y' : 'ies'}`);
   if (s.nodeModules) parts.push(`${s.nodeModules} node_modules`);
   if (s.denied) parts.push(`${s.denied} denied path${s.denied === 1 ? '' : 's'}`);
-  if (s.symlinks) parts.push(`${s.symlinks} symlink${s.symlinks === 1 ? '' : 's'} leading outside the directory`);
+  if (s.symlinks) parts.push(`${s.symlinks} symlink${s.symlinks === 1 ? '' : 's'} leading outside the directory or into a skipped path`);
   return parts.length ? `skipped: ${parts.join(', ')}` : '';
 }
 
@@ -307,7 +358,9 @@ async function folderResult(rt, tracked, expanded, browser) {
   }
   /** @type {string[]} */
   const stderr = [];
-  const text = tracked.map((t) => describe(t, null, null, 'none', t.doc.id)[0]);
+  /** @type {string[]} */
+  const text = [];
+  for (const t of tracked) text.push(describe(t, null, null, 'none', t.doc.id)[0], ...externalsLines(t.externalHosts));
   const home = info ? `http://127.0.0.1:${info.uiPort}/?k=${encodeURIComponent(info.token)}` : null;
   const shown = home ? await showUrl(rt, home, browser, stderr) : 'none';
   text.push(home ? `review UI (all docs): ${home}` : `review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
@@ -320,7 +373,14 @@ async function folderResult(rt, tracked, expanded, browser) {
     const ws = here === root ? '' : ` --workspace ${shellArg(path.relative(realpathOr(rt.cwd), root) || '.')}`;
     waits.push(`\`specreview wait --all${ws}\``);
   }
-  text.push(`next: ${shownPrefix(shown)}run ${waits.join(' and ')} in the background`);
+  const dirty = tracked.filter((t) => t.workingDirty);
+  if (dirty.length) {
+    // `wait --all` refuses while a working copy has unrecorded edits
+    const refs = await Promise.all(dirty.map((t) => docRef(rt, t)));
+    text.push(`next: record the unrecorded edits first (${refs.map((r) => `\`specreview revise ${r} --replies -\``).join(', ')}, or ask the reviewer to click Record as my revision), then run ${waits.join(' and ')} in the background`);
+  } else {
+    text.push(`next: ${shownPrefix(shown)}run ${waits.join(' and ')} in the background`);
+  }
   for (const root of [...new Set(tracked.filter((t) => t.storeCreated).map((t) => t.root))]) {
     text.push(`created ${path.join(root, '.specreview')}/ (commit it with the specs)`);
   }
@@ -332,6 +392,8 @@ async function folderResult(rt, tracked, expanded, browser) {
     path: t.doc.path,
     version: t.version,
     created: t.created,
+    workingDirty: t.workingDirty,
+    externals: t.externalHosts,
     url: info ? rt.reviewUrl(info, t.wsId, t.doc.id) : null,
     wsId: t.wsId,
     root: t.root,
@@ -353,17 +415,20 @@ async function folderResult(rt, tracked, expanded, browser) {
  */
 async function openStdin(rt, input, browser) {
   if (/** @type {any} */ (rt.stdin).isTTY) throw new UsageError('open -: pipe the text in, e.g. `pbpaste | specreview open -`');
-  let text;
+  /** @type {Buffer} */
+  let bytes;
   try {
-    text = await readAll(rt.stdin, { maxBytes: MAX_SNAPSHOT_BYTES });
+    bytes = await readAllBytes(rt.stdin, { maxBytes: MAX_SNAPSHOT_BYTES });
   } catch (err) {
     if (err instanceof RangeError) throw new UsageError(`open -: the piped text is larger than ${MAX_SNAPSHOT_BYTES / (1024 * 1024)} MB`);
     throw err;
   }
+  // bytes go to the engine as they are (it detects a BOM: UTF-8, UTF-16), as for files
+  const text = decodeText(bytes).text;
   if (!text.trim()) throw new UsageError('open -: nothing was piped on stdin');
   const ws = await snapshotWorkspace(rt, rt.cwd);
   const origin = { type: 'stdin', key: input.name ? `stdin:${input.name}` : null, ...(input.name ? { name: input.name } : {}) };
-  const t = await recordSnapshotDoc(rt, ws, { source: text, origin, title: input.title || defaultTitle(text, input.name || 'Piped text'), slug: input.name ?? null });
+  const t = await recordSnapshotDoc(rt, ws, { source: bytes, origin, title: input.title || defaultTitle(text, input.name || 'Piped text'), slug: input.name ?? null });
 
   /** @type {string[]} */
   const stderr = [];
@@ -379,6 +444,7 @@ async function openStdin(rt, input, browser) {
   const url = info ? rt.reviewUrl(info, t.wsId, t.doc.id) : null;
   const shown = url ? await showUrl(rt, url, browser, stderr) : 'none';
   const lines = [snapshotLine(t), url ? `review UI: ${url}` : `review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`];
+  lines.push(...externalsLines(t.externalHosts));
   lines.push(`next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background`);
   lines.push(...scratchNote(ws));
   if (daemonError) stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the doc is tracked; run \`specreview doctor\`)`);
@@ -386,7 +452,7 @@ async function openStdin(rt, input, browser) {
     exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK,
     text: lines.join('\n'),
     stderr,
-    json: { doc: t.doc.id, version: t.doc.head, created: t.created, url, wsId: t.wsId, root: ws.root, scratch: ws.scratch, ref: t.ref, name: input.name ?? null },
+    json: { doc: t.doc.id, version: t.doc.head, created: t.created, url, wsId: t.wsId, root: ws.root, scratch: ws.scratch, ref: t.ref, name: input.name ?? null, externals: t.externalHosts },
   };
 }
 
@@ -395,8 +461,10 @@ async function openStdin(rt, input, browser) {
  * @param {import('../runtime.js').Runtime} rt
  * @param {string} p
  * @param {string | undefined} title
+ * @param {string | null} [dirRoot] the workspace of the directory argument the file was found in: used when the
+ *   file has no store of its own yet (so a folder never gets a store per subdirectory)
  */
-async function trackOne(rt, p, title) {
+async function trackOne(rt, p, title, dirRoot = null) {
   const abs = path.resolve(rt.cwd, p);
   /** @type {fs.Stats} */
   let st;
@@ -410,7 +478,8 @@ async function trackOne(rt, p, title) {
 
   // Workspace discovery happens here (not only in the engine) so the $HOME refusal and --workspace fallback are
   // applied uniformly, and so the store exists before the engine looks for it.
-  const ws = await findWorkspace(abs, { create: false, explicitRoot: rt.workspace ?? null });
+  let ws = await findWorkspace(abs, { create: false, explicitRoot: rt.workspace ?? null });
+  if (!ws.exists && dirRoot && !rt.workspace && realpathOr(dirRoot) !== ws.root) ws = await findWorkspace(abs, { create: false, explicitRoot: dirRoot });
   const storeCreated = !ws.exists;
   if (storeCreated) await initStoreDir(ws.root);
 
@@ -489,9 +558,7 @@ function describe(t, url, daemonError, browser, ref) {
     out.push(`specreview: ${doc.path} is already tracked as "${doc.id}" (head v${doc.head ?? t.version})${dirty}`);
   }
   out.push(url ? `review UI: ${url}` : `review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
-  if (t.externalHosts.length) {
-    out.push(`external hosts loaded live by the doc: ${t.externalHosts.join(', ')} (set render.network to "block" in .specreview/config.json to block them)`);
-  }
+  out.push(...externalsLines(t.externalHosts));
   if (t.workingDirty) {
     out.push(
       `next: record the unrecorded edits first (\`specreview revise ${ref} --replies -\`, or ask the reviewer to click Record as my revision), then run \`specreview wait ${ref}\` in the background`,
@@ -531,15 +598,7 @@ async function externalHosts(ctx, doc, res) {
       const { getRender } = await import('../../core/render/index.js');
       externals = (await getRender(ctx.store, doc, 'live')).externals;
     }
-    const hosts = new Set();
-    for (const u of externals ?? []) {
-      try {
-        hosts.add(new URL(u).host);
-      } catch {
-        // not a URL: ignore
-      }
-    }
-    return [...hosts].sort();
+    return hostsOf(externals);
   } catch {
     return [];
   }

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { NotFoundError, UsageError } from '../../core/store/errors.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals, parseBreakLocks } from '../args.js';
-import { readAll } from '../io.js';
+import { readAll, readAllBytes } from '../io.js';
 import { ReviseInputSchema, parseJsonInput, validate } from '../schemas.js';
 import { formatWith } from '../engine.js';
 import { FALLBACK_FORMATTERS } from '../format.js';
@@ -97,7 +97,8 @@ async function readSource(rt, arg) {
   const tooBig = () => new UsageError(`revise: --source is larger than ${MAX_SNAPSHOT_BYTES / (1024 * 1024)} MB`);
   if (arg === '-') {
     try {
-      return Buffer.from(await readAll(rt.stdin, { maxBytes: MAX_SNAPSHOT_BYTES }), 'utf8');
+      // bytes: the engine detects the encoding (a UTF-16 BOM), as for a --source file
+      return await readAllBytes(rt.stdin, { maxBytes: MAX_SNAPSHOT_BYTES });
     } catch (err) {
       if (err instanceof RangeError) throw tooBig();
       throw err;

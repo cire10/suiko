@@ -147,7 +147,7 @@ describe('open <dir>', () => {
       // sub/link-in.md resolves to a.md, which is tracked once
       'review UI (all docs): http://127.0.0.1:5873/?k=tok',
     ]);
-    assert.equal(lines[4], 'skipped: 1 dot-directory, 1 node_modules, 1 symlink leading outside the directory');
+    assert.equal(lines[4], 'skipped: 1 dot-directory, 1 node_modules, 1 symlink leading outside the directory or into a skipped path');
     assert.equal(lines[5], 'next: run `specreview wait --all` in the background');
     assert.equal(lines[6], `created ${path.join(ws.root, '.specreview')}/ (commit it with the specs)`);
     assert.equal(lines.length, 7);
@@ -168,12 +168,154 @@ describe('open <dir>', () => {
     assert.equal(e.files.length, 200);
     assert.equal(e.dirs, 1);
     assert.equal(e.skipped.overCap, 5);
-    assert.equal(path.basename(e.files[0]), 'f000.md');
+    assert.equal(path.basename(e.files[0].path), 'f000.md');
 
     fs.mkdirSync(path.join(ws.root, 'empty'));
     const r = await cli(['open', 'empty']);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /no \.md/);
+  });
+});
+
+describe('open <dir>: workspaces, symlinks, overlaps, dirty docs', () => {
+  test('a folder outside any repo gets one store, at the folder, for every file below it', async () => {
+    const proj = path.join(path.dirname(ws.root), 'plain');
+    for (const rel of ['docs/a/x.md', 'docs/b/y.md', 'docs/z.md']) {
+      fs.mkdirSync(path.dirname(path.join(proj, rel)), { recursive: true });
+      fs.writeFileSync(path.join(proj, rel), `# ${rel}\n`);
+    }
+    const r = await cli(['open', 'docs'], { cwd: proj });
+    assert.equal(r.code, 0, r.stderr);
+    const stores = ['docs', 'docs/a', 'docs/b'].filter((d) => fs.existsSync(path.join(proj, d, '.specreview')));
+    assert.deepEqual(stores, ['docs']);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.deepEqual(lines.slice(0, 3), [
+      'specreview: tracking a/x.md as "x" (markdown, 1 lines) · recorded v1',
+      'specreview: tracking b/y.md as "y" (markdown, 1 lines) · recorded v1',
+      'specreview: tracking z.md as "z" (markdown, 1 lines) · recorded v1',
+    ]);
+    assert.ok(lines.includes('next: run `specreview wait --all --workspace docs` in the background'), r.stdout);
+    assert.equal(lines.filter((l) => l.startsWith('created ')).length, 1);
+
+    // a subfolder that already has its own store keeps it
+    const own = path.join(proj, 'own');
+    fs.mkdirSync(path.join(own, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(own, 'sub', 'k.md'), '# K\n');
+    assert.equal((await cli(['open', 'own/sub/k.md'], { cwd: proj })).code, 0);
+    fs.writeFileSync(path.join(own, 'top.md'), '# Top\n');
+    const r2 = await cli(['open', 'own', '--json'], { cwd: proj });
+    assert.equal(r2.code, 0, r2.stderr);
+    const j = JSON.parse(r2.stdout);
+    assert.deepEqual(j.docs.map((/** @type {any} */ d) => [d.doc, path.relative(proj, d.root), d.created]), [['k', 'own/sub', false], ['top', 'own', true]]);
+  });
+
+  test("symlinks count by their target: a target in a dot-dir, node_modules or with a non-spec extension is skipped, never fatal", async () => {
+    const docs = path.join(ws.root, 'linked');
+    fs.mkdirSync(path.join(docs, '.private'), { recursive: true });
+    fs.mkdirSync(path.join(docs, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(docs, 'a.md'), '# A\n');
+    fs.writeFileSync(path.join(docs, 'c.md'), '# C\n');
+    fs.writeFileSync(path.join(docs, '.private', 'secret.md'), '# Secret\n');
+    fs.writeFileSync(path.join(docs, 'node_modules', 'pkg', 'README.md'), '# Pkg\n');
+    fs.writeFileSync(path.join(docs, 'secret.env'), 'TOKEN=x\n');
+    fs.symlinkSync(path.join(docs, '.private', 'secret.md'), path.join(docs, 'link-private.md'));
+    fs.symlinkSync(path.join(docs, 'node_modules', 'pkg', 'README.md'), path.join(docs, 'link-nm.md'));
+    fs.symlinkSync(path.join(docs, 'secret.env'), path.join(docs, 'b.md'));
+    const r = await cli(['open', 'linked', '--json']);
+    assert.equal(r.code, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.deepEqual(j.docs.map((/** @type {any} */ d) => d.path), ['linked/a.md', 'linked/c.md']);
+    assert.equal(j.skipped.symlinks, 3);
+    assert.equal(fs.existsSync(path.join(docs, '.private', '.specreview')), false);
+    assert.equal(fs.existsSync(path.join(docs, 'node_modules', 'pkg', '.specreview')), false);
+  });
+
+  test('overlapping arguments: each file once, and a directory whose files were already collected is not "empty"', () => {
+    fs.mkdirSync(path.join(ws.root, 'ov', 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(ws.root, 'ov', 'a.md'), '# A\n');
+    fs.writeFileSync(path.join(ws.root, 'ov', 'sub', 'b.md'), '# B\n');
+    const names = (/** @type {ReturnType<typeof expandPaths>} */ e) => e.files.map((f) => path.relative(ws.root, path.resolve(ws.root, f.path)));
+    assert.deepEqual(names(expandPaths(ws.root, ['ov', 'ov/sub'])), ['ov/a.md', 'ov/sub/b.md']);
+    assert.deepEqual(names(expandPaths(ws.root, ['ov/sub/b.md', 'ov/sub'])), ['ov/sub/b.md']);
+    assert.deepEqual(names(expandPaths(ws.root, ['ov/a.md', 'ov/a.md'])), ['ov/a.md']);
+  });
+
+  test('a tracked file with unrecorded edits gets the revise instruction before the wait; external hosts are reported per doc', async () => {
+    const dir = path.join(ws.root, 'mixed');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'e.md'), '# E\n\n![x](https://tracker.example.com/pixel.png)\n');
+    fs.writeFileSync(path.join(dir, 'f.md'), '# F\n');
+    const first = await cli(['open', 'mixed']);
+    assert.equal(first.code, 0, first.stderr);
+    assert.match(first.stdout, /^specreview: tracking mixed\/e\.md as "e" .*\nexternal hosts loaded live by the doc: tracker\.example\.com \(set render\.network/m);
+    fs.appendFileSync(path.join(dir, 'e.md'), '\nMore.\n');
+    const r = await cli(['open', 'mixed']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^next: record the unrecorded edits first \(`specreview revise e --replies -`, or ask the reviewer to click Record as my revision\), then run `specreview wait --all` in the background$/m);
+  });
+});
+
+describe('open - and status: encodings, externals, no fake file paths', () => {
+  test('UTF-16 piped text is decoded like a UTF-16 file; external hosts are reported', async () => {
+    const text = '# Hi\n\n![p](https://cdn.example.com/p.png)\n';
+    const out = memorySink();
+    const err = memorySink();
+    const code = await main(['open', '-', '--name', 'u16'], {
+      cwd: ws.root,
+      env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: /** @type {string} */ (process.env.SPECREVIEW_HOME) },
+      stdin: Readable.from([Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])]),
+      stdout: out,
+      stderr: err,
+      ensureDaemon: async () => /** @type {any} */ (DAEMON),
+      openBrowser: async () => {},
+    });
+    assert.equal(code, 0, err.text());
+    assert.match(out.text(), /^specreview: tracking piped text as "u16" \(markdown, 3 lines\)/);
+    assert.match(out.text(), /^external hosts loaded live by the doc: cdn\.example\.com /m);
+    const ctx = await engineCtx(ws.root);
+    assert.equal((await ctx.store.readVersion('u16', 1)).source, text);
+  });
+
+  test('status --json and feedback --json give no pathFromCwd for a snapshot without a file', async () => {
+    assert.equal((await cli(['open', '-', '--name', 'answer'], { input: NOTES })).code, 0);
+    await review('answer', 'Fixed the login loop.');
+    const st = await cli(['status', 'answer', '--json']);
+    assert.equal(st.code, 0, st.stderr);
+    const d = JSON.parse(st.stdout).docs[0];
+    assert.deepEqual([d.kind, d.path, d.file, d.pathFromCwd], ['snapshot', 'text/answer.md', null, null]);
+    const fb = await cli(['feedback', 'answer', '--peek', '--json']);
+    assert.equal(fb.code, 0, fb.stderr);
+    const p = JSON.parse(fb.stdout);
+    assert.deepEqual([p.kind, p.file, p.pathFromCwd], ['snapshot', null, null]);
+  });
+});
+
+describe('scratch workspace', () => {
+  test('a symlinked SPECREVIEW_HOME is still recognised (commands carry --workspace); a new home and its scratch dirs are 0700', async () => {
+    const userHome = path.join(path.dirname(ws.root), 'userhome2');
+    fs.mkdirSync(userHome);
+    const realHome = path.join(path.dirname(ws.root), 'real-sr-home');
+    const link = path.join(path.dirname(ws.root), 'link-sr-home');
+    fs.mkdirSync(realHome, { mode: 0o700 });
+    fs.symlinkSync(realHome, link);
+    const ok = await withEnv({ HOME: userHome, SPECREVIEW_HOME: link }, () => cli(['open', '-', '--name', 'sym', '--json'], { cwd: userHome, input: '# Sym\n' }));
+    assert.equal(ok.code, 0, ok.stderr);
+    const j = JSON.parse(ok.stdout);
+    assert.equal(j.scratch, true);
+    assert.match(j.ref, /^sym --workspace /);
+
+    const fresh = path.join(path.dirname(ws.root), 'fresh-sr-home');
+    const prev = process.umask(0o022);
+    try {
+      const f = await withEnv({ HOME: userHome, SPECREVIEW_HOME: fresh }, () => cli(['open', '-', '--name', 'm'], { cwd: userHome, input: '# M\n' }));
+      assert.equal(f.code, 0, f.stderr);
+    } finally {
+      process.umask(prev);
+    }
+    const mode = (/** @type {string} */ p) => fs.statSync(p).mode & 0o777;
+    const scratch = path.join(fresh, 'scratch');
+    const hash = fs.readdirSync(scratch)[0];
+    assert.deepEqual([mode(fresh), mode(scratch), mode(path.join(scratch, hash))], [0o700, 0o700, 0o700]);
   });
 });
 
@@ -207,11 +349,66 @@ describe('last', () => {
     const ctx = await engineCtx(ws.root);
     const doc = await ctx.store.requireDoc('token-refresh');
     assert.deepEqual([doc.kind, doc.origin.type, doc.origin.key, doc.origin.messageId], ['snapshot', 'message', `claude-msg:${SID}:msg_01`, 'msg_01']);
-    assert.equal((await ctx.store.readVersion(doc.id, 1)).source, '## Token refresh\n\nRotate on every use.\n\nGrace window: 30 s.');
+    // stored with a final newline, as `show` prints it
+    assert.equal((await ctx.store.readVersion(doc.id, 1)).source, '## Token refresh\n\nRotate on every use.\n\nGrace window: 30 s.\n');
 
     const again = await withEnv(env, () => cli(['last', '--session', SID]));
     assert.equal(again.code, 0, again.stderr);
-    assert.equal(again.stdout.split('\n')[0], 'specreview: "token-refresh" (agent message) is unchanged (identical to v1)');
+    assert.equal(again.stdout.split('\n')[0], 'specreview: agent message "token-refresh" is already tracked (head v1); reopened it');
+  });
+
+  test('the documented loop: show > file, edit, revise --source; replies-only rounds stay replies; re-running last never reverts', async () => {
+    const claude = path.join(ws.home, 'claude-config');
+    transcript(path.join(claude, 'projects', '-some-project'), ['## Retry policy\n\nRetry 3 times.\n\nBack off for 30 s.']);
+    const env = { CLAUDE_CONFIG_DIR: claude };
+    assert.equal((await withEnv(env, () => cli(['last', '--session', SID]))).code, 0);
+    await review('retry-policy', 'Retry 3 times.');
+
+    // a question-only round: the text is unchanged (as `show` printed it), so only the reply is posted
+    const shown = await cli(['show', 'retry-policy']);
+    assert.equal(shown.code, 0, shown.stderr);
+    const cur = path.join(ws.root, 'cur.md');
+    fs.writeFileSync(cur, shown.stdout);
+    const answered = await cli(['revise', 'retry-policy', '--source', cur, '--replies', '-'], {
+      input: JSON.stringify({ threads: { t1: { status: 'answered', reply: 'Three is what the API allows.' } } }),
+    });
+    assert.equal(answered.code, 0, answered.stderr);
+    assert.match(answered.stdout, /the text is identical to v1; posted 1 reply \(no new version\)/);
+
+    // an edit of line 3 only: one hunk, linked to the thread (no spurious hunk on the last line)
+    fs.writeFileSync(cur, shown.stdout.replace('Retry 3 times.', 'Retry 5 times.'));
+    await review('retry-policy', 'Retry 3 times.');
+    const edited = await cli(['revise', 'retry-policy', '--source', cur, '--replies', '-'], {
+      input: JSON.stringify({ threads: { t2: { status: 'addressed', reply: 'Five retries.' } } }),
+    });
+    assert.equal(edited.code, 0, edited.stderr);
+    const ctx = await engineCtx(ws.root);
+    const { manifest } = await ctx.store.readVersion('retry-policy', 2);
+    assert.deepEqual(manifest.hunks.map((h) => [h.oldStart, h.threads]), [[3, ['t2']]]);
+
+    // `last` again for the same message: reopened, the revision stays head
+    const again = await withEnv(env, () => cli(['last', '--session', SID]));
+    assert.equal(again.code, 0, again.stderr);
+    assert.match(again.stdout, /already tracked \(head v2\); reopened it/);
+    const doc = await ctx.store.requireDoc('retry-policy');
+    assert.equal(doc.head, 2);
+  });
+
+  test('when Claude runs `last` itself after a preamble, the answer before that turn is reviewed', async () => {
+    const dir = path.join(ws.home, 'claude-self', 'projects', '-p');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${SID}.jsonl`);
+    const lines = [
+      { type: 'user', uuid: 'u1', parentUuid: null, message: { role: 'user', content: 'Explain the cache.' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', message: { id: 'msg_ANSWER', role: 'assistant', content: [{ type: 'text', text: '# Cache\n\nLRU, 512 entries.' }] } },
+      { type: 'user', uuid: 'u2', parentUuid: 'a1', message: { role: 'user', content: 'Open your last answer in SpecReview.' } },
+      { type: 'assistant', uuid: 'a2', parentUuid: 'u2', message: { id: 'msg_NOW', role: 'assistant', content: [{ type: 'text', text: "I'll open my previous answer in SpecReview." }] } },
+      { type: 'assistant', uuid: 'a3', parentUuid: 'a2', message: { id: 'msg_NOW', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'specreview last' } }] } },
+    ];
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const r = await cli(['last', '--transcript', file, '--json']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).messageId, 'msg_ANSWER');
   });
 
   test('from $HOME the doc goes to the scratch workspace and every command names it', async () => {

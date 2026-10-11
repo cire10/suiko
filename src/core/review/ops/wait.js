@@ -10,7 +10,9 @@
 //    events file, plus a poll every pollMs (2 s) as the safety net.
 // 4. Delivery happens under the doc lock: build packet -> await write(text) -> deliveredTo[agent] -> event. A
 //    killed wait (write never resolved) therefore re-delivers next time.
-// The waiter file is always removed on exit. `docIds` null / '*' = every doc of the workspace (`wait --all`).
+// The waiter file is always removed on exit. `docIds` null / '*' = every doc of the workspace (`wait --all`),
+// except gated snapshots (a Claude Code plan, store/snapshot.js isGated): their reviews are delivered only by the
+// plan gate blocking on them, or by a wait that names the doc.
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -18,6 +20,7 @@ import path from 'node:path';
 import { SSE } from '../../../shared/protocol.js';
 import { NotFoundError } from '../../store/errors.js';
 import { ALL_DOCS } from '../../store/store.js';
+import { isGated } from '../../store/snapshot.js';
 import { createLogger } from '../../util/log.js';
 import { deliverPacket } from './feedback.js';
 import { readHead, readWorkingState, resolveDoc } from './common.js';
@@ -53,7 +56,7 @@ export async function waitForFeedback(ctx, opts = {}) {
   const { timeoutMs = 0, allowDirty = false, signal, onStart, write, pid = process.pid, pollMs = 2000, heartbeatMs = 10000, minVersion = 0 } = opts;
   const all = opts.docIds == null || opts.docIds === '*' || (Array.isArray(opts.docIds) && opts.docIds.length === 0);
   const refs = all ? [] : Array.isArray(opts.docIds) ? opts.docIds : [/** @type {string} */ (opts.docIds)];
-  const listDocs = async () => (all ? ctx.store.listDocs() : Promise.all(refs.map((r) => resolveDoc(ctx, r))));
+  const listDocs = async () => (all ? (await ctx.store.listDocs()).filter((d) => !isGated(d)) : Promise.all(refs.map((r) => resolveDoc(ctx, r))));
 
   const initial = await listDocs();
   if (!initial.length) throw new NotFoundError('no tracked docs to wait for (run specreview open <file> first)');

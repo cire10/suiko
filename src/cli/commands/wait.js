@@ -14,6 +14,7 @@
 // gives the engine a moment to finish (so its waiter file is removed) before returning.
 
 import { NotFoundError, UsageError } from '../../core/store/errors.js';
+import { isGated } from '../../core/store/snapshot.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals, formatDuration, parseDuration } from '../args.js';
 import { createDelivery, normalizePackets, packetsJson, packetsText } from '../delivery.js';
@@ -253,7 +254,8 @@ async function resolveTarget(rt, input) {
     return { ctx, engine, docIds: [doc.id], label, noun: doc.id, head: doc.head ?? null };
   }
   const { ctx, engine } = await openContext(rt);
-  const docs = ctx?.store?.listDocs ? await ctx.store.listDocs() : [];
+  // plan snapshots are the plan gate's (store/snapshot.js isGated): neither --all nor the doc-less default takes them
+  const docs = (ctx?.store?.listDocs ? await ctx.store.listDocs() : []).filter((/** @type {any} */ d) => !isGated(d));
   if (!docs.length) throw new NotFoundError('no tracked docs in this workspace; run `specreview open <file>` first');
   if (input.all) return { ctx, engine, docIds: '*', label: '--all', noun: 'any tracked doc', head: null };
   if (docs.length > 1) {
@@ -273,7 +275,7 @@ async function resolveTarget(rt, input) {
 function packetRebuilder(engine, ctx, target) {
   if (typeof engine.ops.buildDocPacket !== 'function' || !ctx?.store) return undefined;
   return async (text) => {
-    const docs = target.docIds === '*' ? await ctx.store.listDocs() : await Promise.all(target.docIds.map((id) => ctx.store.getDoc(id)));
+    const docs = target.docIds === '*' ? (await ctx.store.listDocs()).filter((/** @type {any} */ d) => !isGated(d)) : await Promise.all(target.docIds.map((id) => ctx.store.getDoc(id)));
     for (const doc of docs) {
       if (!doc) continue;
       const built = await engine.ops.buildDocPacket(ctx, doc, {});

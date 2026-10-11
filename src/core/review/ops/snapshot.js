@@ -3,15 +3,20 @@
 //   openSnapshot(ctx, { source, format, title, origin, slug })  -> { doc, version, created, lines, externals }
 //     creates the doc (or finds it by origin key) and records v1; an existing doc is reported as is (a closed
 //     session is reopened), like openDoc.
-//   recordSnapshot(ctx, doc, { source, origin, summary, replies, other, breakLocks, dryRun }) -> ReviseReport
+//   recordSnapshot(ctx, doc, { source, origin, summary, replies, other, breakLocks, dryRun, autoAddress })
+//     -> ReviseReport
 //     records vN+1 from the bytes: the usual attribution, re-anchoring and replies of `revise`, with the snapshot
-//     guard profile (errors are stored as warnings, never refuse) and the origin on the manifest.
-//   takeSnapshot(ctx, input) -> { doc, created, version, report }
-//     openSnapshot, then recordSnapshot when the doc already existed (the plan gate, `last`, `open -`).
+//     guard profile (errors are stored as warnings, never refuse) and the origin on the manifest. autoAddress: open
+//     threads the new version's hunks are linked to get the reply "Changed in vN." (status addressed), for sources
+//     with no reply channel (the plan gate), so a thread already handled is not sent back as still open.
+//   takeSnapshot(ctx, input) -> { doc, created, reopened, version, report, externals }
+//     openSnapshot, then (when the doc already existed and its origin type re-records: store/snapshot.js
+//     ORIGIN_TYPES) recordSnapshot (the plan gate, `last`, `open -`). A message is never re-recorded: re-taking it
+//     only reopens the doc, so the agent's revisions are not reverted to the original text.
 
 import { SSE } from '../../../shared/protocol.js';
 import { UsageError } from '../../store/errors.js';
-import { isSnapshot, normalizeOrigin, snapshotPath } from '../../store/snapshot.js';
+import { isSnapshot, normalizeOrigin, originInfo, snapshotPath } from '../../store/snapshot.js';
 import { renderSource } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { decodeText } from '../../util/stable-read.js';
@@ -77,7 +82,7 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
       await emit(ctx, d.id, SSE.DOC_OPENED, { path: d.path, reopened: true, kind: 'snapshot' });
     }
     const head = await readHead(ctx, d);
-    return { doc: d, version: head.manifest, created: false, workingDirty: false, lines: head.manifest.lines, externals: [], assets: [], git: null };
+    return { doc: d, version: head.manifest, created: false, workingDirty: false, lines: head.manifest.lines, externals: render.externals, assets: [], git: null };
   });
 }
 
@@ -88,26 +93,30 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
  * @param {string | Doc} ref
  * @param {{ source: string | Buffer, origin?: Record<string, unknown> | null, summary?: string,
  *   replies?: Record<string, { status: string, reply: string, at?: string }>, other?: Array<{ at: string, why: string }>,
- *   breakLocks?: Record<string, string>, dryRun?: boolean }} input
+ *   breakLocks?: Record<string, string>, dryRun?: boolean, autoAddress?: boolean }} input
  */
-export async function recordSnapshot(ctx, ref, { source, origin = null, summary = '', replies = {}, other = [], breakLocks = {}, dryRun = false }) {
+export async function recordSnapshot(ctx, ref, { source, origin = null, summary = '', replies = {}, other = [], breakLocks = {}, dryRun = false, autoAddress = false }) {
   const buf = toBuffer(source);
   const doc = typeof ref === 'string' ? await ctx.store.requireDoc(ref) : ref;
   if (!isSnapshot(doc)) throw new UsageError(`${doc.id} is not a snapshot doc`, { details: { doc: doc.id } });
-  return revise(ctx, doc.id, { summary, threads: replies, other, breakLocks, dryRun }, { source: buf, origin: origin ? normalizeOrigin(origin) : null });
+  return revise(ctx, doc.id, { summary, threads: replies, other, breakLocks, dryRun }, { source: buf, origin: origin ? normalizeOrigin(origin) : null, autoAddress });
 }
 
 /**
- * openSnapshot, then recordSnapshot when the doc existed already (same origin key).
+ * openSnapshot, then recordSnapshot when the doc existed already (same origin key) and its origin type re-records.
  * @param {Ctx} ctx
- * @param {SnapshotInput & { summary?: string }} input
- * @returns {Promise<{ doc: Doc, created: boolean, version: VersionManifest, report: any }>}
+ * @param {SnapshotInput & { summary?: string, autoAddress?: boolean }} input
+ * @returns {Promise<{ doc: Doc, created: boolean, reopened: boolean, version: VersionManifest, report: any, externals: string[] }>}
  */
 export async function takeSnapshot(ctx, input) {
   const opened = await openSnapshot(ctx, input);
-  if (opened.created) return { doc: opened.doc, created: true, version: opened.version, report: null };
-  const report = await recordSnapshot(ctx, opened.doc.id, { source: input.source, origin: input.origin, summary: input.summary ?? '' });
+  const externals = opened.externals ?? [];
+  if (opened.created) return { doc: opened.doc, created: true, reopened: false, version: opened.version, report: null, externals };
+  if (!originInfo(String(opened.doc.origin?.type ?? '')).rerecord) {
+    return { doc: opened.doc, created: false, reopened: true, version: opened.version, report: null, externals };
+  }
+  const report = await recordSnapshot(ctx, opened.doc.id, { source: input.source, origin: input.origin, summary: input.summary ?? '', autoAddress: Boolean(input.autoAddress) });
   const doc = await ctx.store.requireDoc(opened.doc.id);
   const { manifest } = await ctx.store.readVersion(doc.id, doc.head);
-  return { doc, created: false, version: manifest, report };
+  return { doc, created: false, reopened: false, version: manifest, report, externals };
 }

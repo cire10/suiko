@@ -5,7 +5,8 @@
 // Finds the session's transcript (cli/transcript.js: --transcript, else the session id from --session or
 // $CLAUDE_CODE_SESSION_ID, else the newest transcript of the cwd's project directory), extracts the last assistant
 // message, records it as a snapshot doc (origin type "message", key `claude-msg:<session>:<message id>`, so running
-// it again for the same message reopens the same doc), makes sure the daemon runs, opens the review UI and returns
+// it again for the same message reopens the same doc without recording anything: the agent's revisions stay; the
+// text is stored with a final newline, as `show` prints it), makes sure the daemon runs, opens the review UI and returns
 // at once with the review URL and the exact background `wait` command. The agent then revises its answer and records
 // it with `specreview revise <doc> --source <file> --replies -`.
 // Only Claude Code transcripts are read (the Codex rollout format is not documented well enough to parse safely).
@@ -16,7 +17,7 @@ import { expectPositionals } from '../args.js';
 import { resolveBrowser } from './open.js';
 import { findTranscript, lastAssistantMessage } from '../transcript.js';
 import {
-  MAX_SNAPSHOT_BYTES, defaultTitle, recordSnapshotDoc, scratchNote, showUrl, shownPrefix, snapshotLine, snapshotWorkspace,
+  MAX_SNAPSHOT_BYTES, defaultTitle, externalsLines, recordSnapshotDoc, scratchNote, showUrl, shownPrefix, snapshotLine, snapshotWorkspace,
 } from '../snapshot.js';
 
 export const spec = {
@@ -32,7 +33,8 @@ export const spec = {
   details: [
     'The transcript: --transcript <file>, else the session by id (--session, else $CLAUDE_CODE_SESSION_ID) under',
     '  ${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<id>.jsonl, else the newest transcript of the current directory.',
-    'Running it again for the same message reopens the same doc. Claude Code only: Codex transcripts are not supported.',
+    'Running it again for the same message reopens the same doc (your revisions stay). Claude Code only: Codex',
+    '  transcripts are not supported.',
     'Then run the printed `specreview wait` in the background; revise with `specreview revise <doc> --source <file> --replies -`.',
     '--browser system (default) | pane | none, as for open; $SPECREVIEW_BROWSER changes the default.',
   ],
@@ -71,7 +73,10 @@ export async function execute(rt, input) {
 
   const ws = await snapshotWorkspace(rt, rt.cwd);
   const origin = { type: 'message', key: `claude-msg:${session}:${msg.id}`, session, messageId: msg.id, transcript: found.path };
-  const t = await recordSnapshotDoc(rt, ws, { source: msg.text, origin, title: input.title || defaultTitle(msg.text, 'Agent message') });
+  // a final newline, as files and `show` output have: a revision written from `show` output then differs only where
+  // the agent changed the text
+  const source = `${msg.text.replace(/\s+$/, '')}\n`;
+  const t = await recordSnapshotDoc(rt, ws, { source, origin, title: input.title || defaultTitle(msg.text, 'Agent message') });
 
   const info = await rt.ensureDaemon();
   const url = rt.reviewUrl(info, t.wsId, t.doc.id);
@@ -79,6 +84,7 @@ export async function execute(rt, input) {
   const text = [
     snapshotLine(t),
     `review UI: ${url}`,
+    ...externalsLines(t.externalHosts),
     `next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background (Bash run_in_background: true) and end your turn. ` +
       `When the review arrives, write your complete revised answer to a file and record it with \`specreview revise ${t.ref} --source <file> --replies -\` (replies JSON on stdin), then wait again.`,
     ...scratchNote(ws),
@@ -99,6 +105,7 @@ export async function execute(rt, input) {
       transcript: found.path,
       session,
       messageId: msg.id,
+      externals: t.externalHosts,
     },
   };
 }

@@ -99,7 +99,16 @@ function hookInput(toolInput = { plan: PLAN_V1, planFilePath: planFile }, extra 
  * @param {string[]} [args]
  */
 function gate(input, args = []) {
-  const child = spawn(process.execPath, [BIN, 'plan-gate', ...args], {
+  return spawnCli(['plan-gate', ...args], input);
+}
+
+/**
+ * Spawns the CLI with `input` on stdin (Claude Code's environment: CLAUDECODE=1, so the agent is `claude`).
+ * @param {string[]} argv
+ * @param {unknown} input
+ */
+function spawnCli(argv, input) {
+  const child = spawn(process.execPath, [BIN, ...argv], {
     cwd: ws.root,
     env: {
       PATH: process.env.PATH,
@@ -107,6 +116,7 @@ function gate(input, args = []) {
       SPECREVIEW_HOME: process.env.SPECREVIEW_HOME,
       SPECREVIEW_BROWSER: 'none',
       SPECREVIEW_PORT: String(port),
+      CLAUDECODE: '1',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -222,6 +232,10 @@ describe('plan-gate', () => {
     assert.deepEqual(manifest.hunks.map((h) => h.threads), [['t1']], 'the change is attributed to t1');
     const t1 = await ctx.store.getThread(doc.id, 't1');
     assert.deepEqual(t1?.changes.map((c) => c.version), [2]);
+    // Claude has no reply channel at the gate: the thread its edit is linked to is marked addressed (awaiting the
+    // reviewer), so a later deny does not send it back as still open
+    assert.equal(t1?.status, 'addressed');
+    assert.equal(t1?.comments.at(-1)?.body, 'Changed in v2.');
     assert.equal((await ops.changes(ctx, doc.id, { from: 1, to: 2 })).hunks.length, 1);
 
     await submit(doc.id, 'approved', null, 'Ship it.');
@@ -316,6 +330,142 @@ describe('plan-gate', () => {
   });
 });
 
+/**
+ * Runs the gate in-process (main()) with stubs; `deps` overrides the defaults (a fake daemon, a browser spy).
+ * @param {unknown} input
+ * @param {string[]} [args]
+ * @param {Record<string, any>} [deps]
+ */
+async function gateInProcess(input, args = [], deps = {}) {
+  const out = memorySink();
+  const err = memorySink();
+  /** @type {string[]} */
+  const opened = [];
+  const code = await main(['plan-gate', ...args], {
+    cwd: ws.root,
+    env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, ...(deps.env ?? {}) },
+    stdin: Readable.from([Buffer.from(JSON.stringify(input))]),
+    stdout: out,
+    stderr: err,
+    ensureDaemon: async () => /** @type {any} */ ({ pid: 1, uiPort: 5999, contentPort: 6000, token: 'tok', secret: 's', version: '0.1.0', startedAt: '' }),
+    openBrowser: async (/** @type {string} */ url) => void opened.push(url),
+    pollMs: 50,
+    ...deps,
+  });
+  return { code, stdout: out.text(), stderr: err.text(), opened };
+}
+
+describe('plan-gate: the plan review belongs to the gate', () => {
+  test('a background `wait --all` (same agent) never takes the plan review; a doc-less wait ignores the plan doc', async () => {
+    const spec = path.join(ws.root, 'docs', 'race-spec.md');
+    fs.mkdirSync(path.dirname(spec), { recursive: true });
+    fs.writeFileSync(spec, '# Race spec\n\nSome text.\n');
+    await ops.openDoc(ctx, { path: spec });
+
+    const g = gate(hookInput({ plan: '# Race plan\n\nStep one.\n' }, { session_id: 'race-all' }));
+    const doc = await gateWaiting('claude-plan:race-all:inline', 1, g.stderr);
+    const all = spawnCli(['wait', '--all'], '');
+    await until(async () => (await ctx.store.listWaiters('_all')).length > 0, 20000, 'wait --all to register');
+    await submit(doc.id, 'approved', null);
+    const r = await g.done;
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.decision.behavior, 'allow');
+    all.child.kill('SIGTERM');
+    const w = await all.done;
+    assert.doesNotMatch(w.stdout, /SPECREVIEW FEEDBACK/);
+
+    // `specreview wait` without a doc: the spec is the only doc that counts
+    const out = memorySink();
+    const err = memorySink();
+    const code = await main(['wait', '--timeout', '200ms'], {
+      cwd: ws.root,
+      env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' },
+      stdout: out,
+      stderr: err,
+      pollMs: 50,
+    });
+    assert.equal(code, 2, err.text());
+    assert.match(out.text(), /no review yet for race-spec/);
+  });
+
+  test('a gate whose version is no longer head steps aside: it never supersedes the newer gate or allows with its stale plan', async () => {
+    const file = path.join(path.dirname(planFile), 'stale.md');
+    fs.writeFileSync(file, '# Plan\n\nOld step.\n');
+    const key = `claude-plan:stale-session:${file}`;
+    const input = hookInput({ plan: '', planFilePath: file }, { session_id: 'stale-session' });
+    /** @type {any} */
+    let y = null;
+    // gate X recorded v1 and is slow to start the daemon; meanwhile Claude's next ExitPlanMode (gate Y) records v2
+    const x = gateInProcess(input, ['--timeout', '20s'], {
+      ensureDaemon: async () => {
+        fs.writeFileSync(file, '# Plan\n\nNew step.\n');
+        y = gate(input);
+        await gateWaiting(key, 2, y.stderr);
+        return { pid: 1, uiPort: 5999, contentPort: 6000, token: 'tok', secret: 's', version: '0.1.0', startedAt: '' };
+      },
+    });
+    const rx = await x;
+    assert.equal(rx.code, 0, rx.stderr);
+    assert.equal(rx.stdout, '');
+    assert.deepEqual(rx.opened, [], 'no browser for a stale gate');
+    const doc = await ctx.store.findDocByOrigin(key);
+    assert.equal(doc?.head, 2);
+    await submit(doc.id, 'approved', null);
+    const ry = await y.done;
+    assert.equal(ry.code, 0, ry.stderr);
+    assert.deepEqual(JSON.parse(ry.stdout).hookSpecificOutput.decision.updatedInput, { plan: '# Plan\n\nNew step.\n', planFilePath: file });
+  });
+
+  test('a signal while recording or starting the daemon: no browser is opened, nothing printed', async () => {
+    const controller = new AbortController();
+    const r = await gateInProcess(hookInput({ plan: '# Aborted\n\nText.\n' }, { session_id: 'abort-session' }), [], {
+      env: { SPECREVIEW_BROWSER: 'system' },
+      signal: controller.signal,
+      ensureDaemon: async () => {
+        controller.abort('SIGTERM'); // the user answered in the terminal while the daemon was starting
+        return { pid: 1, uiPort: 5999, contentPort: 6000, token: 'tok', secret: 's', version: '0.1.0', startedAt: '' };
+      },
+    });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, '');
+    assert.deepEqual(r.opened, []);
+  });
+
+  test('SPECREVIEW_BROWSER=pane opens the system browser (a hook has no pane); none keeps it closed', async () => {
+    const pane = await gateInProcess(hookInput({ plan: '# Pane\n\nText.\n' }, { session_id: 'pane-session' }), ['--timeout', '300ms'], { env: { SPECREVIEW_BROWSER: 'pane' } });
+    assert.equal(pane.code, 0, pane.stderr);
+    assert.equal(pane.stdout, '');
+    assert.equal(pane.opened.length, 1);
+    assert.match(pane.opened[0], /^http:\/\/127\.0\.0\.1:5999\/d\/[0-9a-f]+\/pane\?k=tok$/);
+    const flag = await gateInProcess(hookInput({ plan: '# Pane\n\nText.\n' }, { session_id: 'pane-session' }), ['--timeout', '300ms', '--browser', 'pane']);
+    assert.equal(flag.opened.length, 1);
+    const none = await gateInProcess(hookInput({ plan: '# Pane\n\nText.\n' }, { session_id: 'pane-session' }), ['--timeout', '300ms'], { env: { SPECREVIEW_BROWSER: 'none' } });
+    assert.deepEqual(none.opened, []);
+  });
+
+  test('the workspace comes from $CLAUDE_PROJECT_DIR, not the cwd the session cd-ed into', async () => {
+    const elsewhere = path.join(path.dirname(ws.root), 'elsewhere');
+    fs.mkdirSync(path.join(elsewhere, '.git'), { recursive: true });
+    const input = hookInput({ plan: '# Project plan\n\nText.\n' }, { session_id: 'cd-session', cwd: elsewhere });
+    const r = await gateInProcess(input, ['--timeout', '300ms', '--browser', 'none'], { env: { CLAUDE_PROJECT_DIR: ws.root } });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(await ctx.store.findDocByOrigin('claude-plan:cd-session:inline'), 'recorded in the project workspace');
+    assert.equal(fs.existsSync(path.join(elsewhere, '.specreview')), false);
+  });
+
+  test('the plugin loads the gate from hooks/plan-gate.json; hooks/hooks.json (also what `install claude --with-hooks` copies) has no blocking gate', () => {
+    const plugin = path.resolve(path.dirname(BIN), '..', 'integrations', 'claude-code');
+    const manifest = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
+    assert.equal(manifest.hooks, './hooks/plan-gate.json');
+    const gateHooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks', 'plan-gate.json'), 'utf8'));
+    assert.deepEqual(gateHooks.hooks, {
+      PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: 'specreview plan-gate', timeout: 345600 }] }],
+    });
+    const hooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks', 'hooks.json'), 'utf8'));
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PreToolUse', 'UserPromptSubmit']);
+  });
+});
+
 describe('planText', () => {
   test('the plan file wins when it is an absolute .md regular file; else the inline plan', () => {
     const dir = path.dirname(planFile);
@@ -336,5 +486,21 @@ describe('planText', () => {
     assert.deepEqual(planText({ plan: 'inline', planFilePath: empty }), { text: 'inline', file: null });
     assert.equal(planText({}), null);
     assert.equal(planText({ plan: 42 }), null);
+  });
+
+  test('a symlink counts only when its target is a .md file; the path is normalised', () => {
+    const dir = path.dirname(planFile);
+    const secret = path.join(dir, 'secret.env');
+    fs.writeFileSync(secret, 'SECRET=hunter2\n');
+    const toSecret = path.join(dir, 'leak.md');
+    fs.symlinkSync(secret, toSecret);
+    assert.deepEqual(planText({ plan: 'inline', planFilePath: toSecret }), { text: 'inline', file: null });
+    const real = path.join(dir, 'real.md');
+    fs.writeFileSync(real, '# Real\n');
+    const toReal = path.join(dir, 'alias.md');
+    fs.symlinkSync(real, toReal);
+    assert.deepEqual(planText({ plan: 'inline', planFilePath: toReal }), { text: '# Real\n', file: toReal });
+    const dotted = `${dir}/../${path.basename(dir)}/real.md`;
+    assert.deepEqual(planText({ plan: 'inline', planFilePath: dotted }), { text: '# Real\n', file: real });
   });
 });

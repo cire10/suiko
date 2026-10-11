@@ -79,6 +79,31 @@ describe('extractLastMessage', () => {
     assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_1', text: 'The answer.' });
   });
 
+  test('a turn still running a tool call (Claude ran `specreview last` itself after a preamble) is skipped', () => {
+    const t = jsonl([
+      user('Explain the cache.'),
+      asst('msg_ANSWER', text('# Cache\n\nLRU, 512 entries.')),
+      user('Open your last answer in SpecReview.'),
+      asst('msg_NOW', text("I'll open my previous answer in SpecReview.")),
+      asst('msg_NOW', toolUse('tu_now')),
+    ]);
+    assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_ANSWER', text: '# Cache\n\nLRU, 512 entries.' });
+    // earlier messages of that turn are skipped too; a finished tool call is not "running"
+    const t2 = jsonl([
+      user('Q'),
+      asst('m_old', text('Old answer.')),
+      user('Fix it, then open your answer.'),
+      asst('m1', text('Fixing.')),
+      asst('m1', toolUse('tu1')),
+      toolResult('tu1'),
+      asst('m2', text('Fixed: here is the summary.')),
+      asst('m2', toolUse('tu2')),
+    ]);
+    assert.deepEqual(pick(extractLastMessage(t2)), { id: 'm_old', text: 'Old answer.' });
+    const t3 = jsonl([user('Q'), asst('m1', text('Looking.')), asst('m1', toolUse('x')), toolResult('x'), asst('m2', text('Done.'))]);
+    assert.deepEqual(pick(extractLastMessage(t3)), { id: 'm2', text: 'Done.' });
+  });
+
   test('stops at the prompt that started the message: an earlier message is never merged in', () => {
     const t = jsonl([user('Q1'), asst('msg_1', text('A1')), user('Q2'), asst('msg_1x', text('A2'))]);
     assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_1x', text: 'A2' });

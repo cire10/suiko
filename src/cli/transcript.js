@@ -14,7 +14,9 @@
 // onto the newest assistant line with a non-empty text block, and collect the text blocks of the lines sharing its
 // message.id (one API message spans several lines, one content block each), stopping at another message or a real
 // prompt. When the current turn has no text yet (the slash command running now is the first thing in it), the walk
-// simply continues into the earlier turns.
+// simply continues into the earlier turns. When the newest assistant message is still waiting for one of its tool
+// calls (Claude itself is running `specreview last` now, maybe after a sentence like "I'll open my answer"), that
+// whole turn is skipped: the message to review is the answer before it.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -197,14 +199,17 @@ function walk(entries) {
   const texts = [];
   /** @type {any} */
   let newestLine = null;
+  let skipTurn = inFlight(entries);
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (SKIPPED_TYPES.has(e.type) || e.isSidechain === true) continue;
     if (e.type === 'user') {
       if (e.isMeta === true || !isRealPrompt(e)) continue;
       if (locked) break; // the prompt that started the locked message's turn
+      skipTurn = false; // the in-flight turn ends here
       continue; // the current turn has no text yet: keep going into earlier turns
     }
+    if (skipTurn) continue;
     if (e.type !== 'assistant') continue;
     const msg = e.message && typeof e.message === 'object' ? e.message : null;
     if (!msg) continue;
@@ -227,6 +232,38 @@ function walk(entries) {
     session: typeof newestLine?.sessionId === 'string' ? newestLine.sessionId : null,
     timestamp: typeof newestLine?.timestamp === 'string' ? newestLine.timestamp : null,
   };
+}
+
+/**
+ * Whether the newest assistant message (all its lines: one per content block) has a tool call with no tool_result
+ * yet, i.e. the current turn is still running a tool (see the header).
+ * @param {any[]} entries oldest first
+ * @returns {boolean}
+ */
+function inFlight(entries) {
+  /** @type {Set<string>} */
+  const answered = new Set();
+  for (const e of entries) {
+    if (e.type !== 'user' || !Array.isArray(e.message?.content)) continue;
+    for (const b of e.message.content) if (b && b.type === 'tool_result' && typeof b.tool_use_id === 'string') answered.add(b.tool_use_id);
+  }
+  /** @type {string | null} */
+  let id = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (SKIPPED_TYPES.has(e.type) || e.isSidechain === true) continue;
+    if (e.type === 'user') {
+      if (e.isMeta === true || !isRealPrompt(e)) continue;
+      break;
+    }
+    if (e.type !== 'assistant' || !e.message || typeof e.message !== 'object') continue;
+    const mid = typeof e.message.id === 'string' && e.message.id ? e.message.id : typeof e.uuid === 'string' ? e.uuid : null;
+    if (id !== null && mid !== id) break;
+    id = mid;
+    const content = Array.isArray(e.message.content) ? e.message.content : [];
+    if (content.some((/** @type {any} */ b) => b && b.type === 'tool_use' && typeof b.id === 'string' && !answered.has(b.id))) return true;
+  }
+  return false;
 }
 
 /**

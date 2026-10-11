@@ -2,10 +2,11 @@
   "name": "specreview",
   "displayName": "SpecReview",
   "version": "0.1.0",
-  "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec command, and hooks that block whole-file rewrites of specs under review and surface submitted reviews. Requires the specreview CLI on PATH (npm install && npm link).",
+  "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec and /specreview-last commands, hooks that block whole-file rewrites of specs under review and surface submitted reviews, and the plan-mode gate (ExitPlanMode is reviewed in SpecReview). Requires the specreview CLI on PATH (npm install && npm link).",
   "author": {
     "name": "Eric Tang"
   },
   "license": "MIT",
-  "keywords": ["review", "spec", "design-doc", "markdown", "html", "feedback", "versioning"]
+  "keywords": ["review", "spec", "design-doc", "markdown", "html", "feedback", "versioning"],
+  "hooks": "./hooks/plan-gate.json"
 }

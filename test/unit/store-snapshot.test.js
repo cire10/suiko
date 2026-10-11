@@ -219,6 +219,44 @@ describe('snapshot ops', () => {
     assert.deepEqual([c.created, c.doc.head, c.report.nothing], [false, 2, true]);
   });
 
+  test('a message is never re-recorded: taking it again only reopens the doc, so revisions are not reverted', async () => {
+    const ctx = await engineCtx(ws.root);
+    const origin = { type: 'message', key: 'claude-msg:s:msg_1' };
+    const a = await ops.takeSnapshot(ctx, { source: 'Original answer.\n', origin, title: 'Answer' });
+    await ops.recordSnapshot(ctx, a.doc.id, { source: 'Revised answer.\n' });
+    const b = await ops.takeSnapshot(ctx, { source: 'Original answer.\n', origin });
+    assert.deepEqual([b.created, b.reopened, b.doc.head, b.report], [false, true, 2, null]);
+    assert.equal((await ctx.store.readVersion(a.doc.id, 2)).source, 'Revised answer.\n');
+  });
+
+  test('a final-newline-only difference is no change (replies only), and never an extra hunk on the last line', async () => {
+    const ctx = await engineCtx(ws.root);
+    const { doc } = await ops.openSnapshot(ctx, { source: '# A\n\nOne.\n\nTwo.', origin: { type: 'stdin', key: 'stdin:nl' } });
+    await reviewOn(ctx, doc.id, 'One.');
+    const same = await ops.recordSnapshot(ctx, doc.id, { source: '# A\n\nOne.\n\nTwo.\n', replies: { t1: { status: 'answered', reply: 'Kept.' } } });
+    assert.equal(same.repliesOnly, true);
+    assert.equal((await ctx.store.requireDoc(doc.id)).head, 1);
+    await reviewOn(ctx, doc.id, 'One.');
+    const edit = await ops.recordSnapshot(ctx, doc.id, { source: '# A\n\nOne more.\n\nTwo.\n', replies: { t2: { status: 'addressed', reply: 'Done.' } } });
+    assert.equal(edit.version, 2);
+    assert.deepEqual(edit.hunks.map((/** @type {any} */ h) => h.threads), [['t2']]);
+    assert.equal((await ctx.store.readVersion(doc.id, 2)).source, '# A\n\nOne more.\n\nTwo.', 'the final-newline state follows head');
+  });
+
+  test('autoAddress: open threads the new version is linked to get "Changed in vN." (addressed); others stay open', async () => {
+    const ctx = await engineCtx(ws.root);
+    const { doc } = await ops.openSnapshot(ctx, { source: PLAN, origin: { type: 'plan', key: 'claude-plan:s:inline' } });
+    await reviewOn(ctx, doc.id, 'Keep a 30 s grace window.');
+    await reviewOn(ctx, doc.id, 'Ship behind a flag.');
+    const r = await ops.recordSnapshot(ctx, doc.id, { source: PLAN.replace('30 s', '60 s'), autoAddress: true });
+    assert.deepEqual(r.replies, [{ thread: 't1', status: 'addressed' }]);
+    const t1 = await ctx.store.getThread(doc.id, 't1');
+    const t2 = await ctx.store.getThread(doc.id, 't2');
+    assert.deepEqual([t1?.status, t1?.comments.at(-1)?.body, t2?.status], ['addressed', 'Changed in v2.', 'open']);
+    const packet = (await ops.buildDocPacket(ctx, await ctx.store.requireDoc(doc.id), {})).packet;
+    assert.deepEqual(packet.threads.map((t) => t.id), ['t2'], 'only the unhandled thread needs action');
+  });
+
   test('file-only ops are refused with what to do instead; revise needs --source exactly for snapshots', async () => {
     const ctx = await engineCtx(ws.root);
     const { doc } = await ops.openSnapshot(ctx, { source: PLAN, origin: { type: 'stdin', key: 'stdin:r' } });
@@ -280,6 +318,22 @@ describe('snapshot packets', () => {
     assert.match(msg, /Then call ExitPlanMode again\. The reviewer will see a diff of your changes \(v1 -> v2\)/);
   });
 
+  test('isScratchRoot compares real paths (a symlinked SPECREVIEW_HOME)', () => {
+    const real = path.join(path.dirname(ws.root), 'real-home');
+    const link = path.join(path.dirname(ws.root), 'link-home');
+    fs.mkdirSync(path.join(real, 'scratch', 'abcd1234'), { recursive: true });
+    fs.symlinkSync(real, link);
+    const saved = process.env.SPECREVIEW_HOME;
+    process.env.SPECREVIEW_HOME = link;
+    try {
+      assert.equal(isScratchRoot(path.join(real, 'scratch', 'abcd1234')), true);
+      assert.equal(isScratchRoot(path.join(link, 'scratch', 'abcd1234')), true);
+      assert.equal(isScratchRoot(path.join(real, 'scratch')), false);
+    } finally {
+      process.env.SPECREVIEW_HOME = saved;
+    }
+  });
+
   test('docRefFor names scratch workspaces with --workspace', () => {
     const scratch = path.join(scratchBase(), 'abcd1234');
     assert.equal(isScratchRoot(scratch), true);
@@ -287,6 +341,23 @@ describe('snapshot packets', () => {
     assert.equal(isScratchRoot(ws.root), false);
     assert.equal(docRefFor('notes', ws.root), 'notes');
     assert.equal(docRefFor('notes', scratch), `notes --workspace ${scratch}`);
+  });
+});
+
+describe('wait --all and plan snapshots', () => {
+  test('a wait on every doc never delivers a plan review (the gate owns it); naming the plan doc does', async () => {
+    const ctx = await engineCtx(ws.root);
+    const plan = await ops.openSnapshot(ctx, { source: PLAN, origin: { type: 'plan', key: 'claude-plan:s:inline' } });
+    const notes = await ops.openSnapshot(ctx, { source: '# Notes\n\nText.\n', origin: { type: 'stdin', key: 'stdin:n' } });
+    await reviewOn(ctx, plan.doc.id, 'Ship behind a flag.', { verdict: 'approved' });
+    const all = await ops.waitForFeedback(ctx, { docIds: null, timeoutMs: 300, pollMs: 20, write: () => {} });
+    assert.equal(all.status, 'timeout');
+    assert.equal((await ctx.store.getReview(plan.doc.id, 'rv1'))?.deliveredTo?.claude, undefined);
+    await reviewOn(ctx, notes.doc.id, 'Text.');
+    const later = await ops.waitForFeedback(ctx, { docIds: null, timeoutMs: 3000, pollMs: 20, write: () => {} });
+    assert.deepEqual([later.status, later.docId], ['delivered', notes.doc.id]);
+    const named = await ops.waitForFeedback(ctx, { docIds: [plan.doc.id], timeoutMs: 3000, pollMs: 20, write: () => {} });
+    assert.equal(named.status, 'delivered');
   });
 });
 
