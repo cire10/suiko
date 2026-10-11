@@ -1041,7 +1041,8 @@ async function initSuggestion() {
   const comp = get().composer;
   const a = comp?.anchor;
   if (!c || !comp || !a || !a.src) return;
-  const mode = suggestionMode(a);
+  // a code review's line anchor: whole lines of the file's new side ('lines', from D/files/source)
+  const mode = a.file ? 'lines' : suggestionMode(a);
   // Suggested text restored from a backup applies when it replaces the same old text in the same mode.
   /** @param {string} old */
   const restored = (old) => {
@@ -1053,6 +1054,24 @@ async function initSuggestion() {
       suggestion: { mode, old: a.src.text, new: restored(a.src.text), startLine: a.src.startLine, endLine: a.src.endLine, start: a.src.start, end: a.src.end },
       pendingSuggestion: null,
     });
+    return;
+  }
+  if (a.file) {
+    if (a.kind === 'doc' || a.file.side !== 'new') {
+      updateComposer({ suggestion: null, error: 'Suggestions replace lines of the new side: select lines on the right-hand side, or write a comment.' });
+      return;
+    }
+    const { startLine, endLine } = a.src;
+    updateComposer({ suggestion: { mode, old: '', new: '', startLine, endLine, start: 0, end: 0, loading: true } });
+    try {
+      const r = await c.fileSource(a.file.path, comp.version, 'new');
+      if (get().composer?.key !== comp.key) return;
+      const old = String(r?.text ?? '').split('\n').slice(startLine - 1, endLine).join('\n');
+      updateComposer({ suggestion: { mode, old, new: restored(old), startLine, endLine, start: 0, end: 0 }, pendingSuggestion: null });
+    } catch (err) {
+      if (get().composer?.key !== comp.key) return;
+      updateComposer({ suggestion: null, error: `Cannot load the source lines: ${errorText(err)}` });
+    }
     return;
   }
   updateComposer({
@@ -1626,9 +1645,12 @@ export async function moveThread(id, capture) {
   const c = client;
   const s = get();
   if (!c || !s.ds) return;
-  const cap = capture || s.guest.selection;
+  // a kind view without the doc frame (a code review) gives its own selection (the selected lines)
+  const frame = kindCaps(s.ds).frame;
+  const cap = capture || (frame ? s.guest.selection : kindSelection?.() || null);
   if (!cap) {
-    toast('Select the new text in the document first (or pick an element with E), then click Move here.', { tone: 'warn' });
+    toast(frame ? 'Select the new text in the document first (or pick an element with E), then click Move here.'
+      : 'Select the new lines first (click a line number, shift-click to extend), then click Move here.', { tone: 'warn' });
     return;
   }
   await threadAction(id, async () => {
