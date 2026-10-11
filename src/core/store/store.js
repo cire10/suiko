@@ -32,7 +32,7 @@ import { countLines, decodeText, encodeText, roundTrips, stableRead } from '../u
 import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
-import { CODE_KIND, codeEditRefusal, codePath, isCode, isVirtual, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
+import { CODE_KIND, codeEditRefusal, codePath, docKind, isCode, isVirtual, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
 
 const log = createLogger('store');
 
@@ -448,10 +448,16 @@ export class Store {
       throw new UsageError(`unsupported doc kind: ${JSON.stringify(kind)}`);
     } else if (format !== 'markdown' && format !== 'html') {
       throw new UsageError(`unsupported snapshot format: ${format}`);
+    } else if (o.type === 'diff') {
+      throw new UsageError("origin type 'diff' is reserved for code reviews");
     }
     return this.withWorkspaceLock(async () => {
       if (o.key) {
         const existing = await this.findDocByOrigin(o.key);
+        // a key names one doc of one kind: a snapshot never lands in a code review (or the reverse)
+        if (existing && docKind(existing) !== kind) {
+          throw new ConflictError(`origin key ${JSON.stringify(o.key)} belongs to ${existing.id}, a ${docKind(existing)} doc`, { details: { doc: existing.id } });
+        }
         if (existing) return { doc: existing, created: false };
       }
       const base = slugify(String(slug || title || o.type).replace(/[\\/.]+/g, ' ')).slice(0, 60).replace(/-+$/, '') || o.type;

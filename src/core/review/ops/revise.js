@@ -22,8 +22,10 @@ import { anchorAt, isActionable } from '../threadstate.js';
 import { resolveInPlace } from './submit.js';
 import { addAgentReply } from './threads.js';
 import { commitRecord, prepareRecord, reportHunks } from './record.js';
-import { agentActor, changedWorkingAssets, emit, humanActor, readHead, requireThread, requireWorking, withDoc } from './common.js';
-import { docRefFor, isSnapshot, reviseHint, snapshotNoun } from '../../store/snapshot.js';
+import { agentActor, changedWorkingAssets, emit, humanActor, readHead, requireThread, requireWorking, respondsToOf, withDoc } from './common.js';
+import { docRefFor, isCode, isSnapshot, reviseHint, snapshotNoun } from '../../store/snapshot.js';
+import { recordCodeRound, reviseCode } from '../../code/round.js';
+import { applyCodeSuggestions } from '../../code/apply.js';
 import { decodeText, encodeText } from '../../util/stable-read.js';
 import { sha256 } from '../../util/hash.js';
 
@@ -90,6 +92,11 @@ export async function revise(ctx, ref, input, snapshot = null) {
     ctx,
     ref,
     async (doc) => {
+      // a code doc records a round of its repo files (code engine); --source is for snapshot docs only
+      if (isCode(doc)) {
+        if (snapshot) throw new UsageError(`${doc.id} is a code review: edit the files, then run revise without --source`, { details: { doc: doc.id, kind: 'code' } });
+        return reviseCode(ctx, doc, p);
+      }
       const snap = isSnapshot(doc);
       if (snap && !snapshot) {
         throw new UsageError(`${doc.id} is ${snapshotNoun(doc)}: there is no working file to record. To revise it, ${reviseHint(doc, docRefFor(doc.id, ctx.root))}.`, {
@@ -280,18 +287,6 @@ function warnOnly(g) {
 }
 
 /**
- * The review a revision answers: the newest review delivered to the agent, else the newest review.
- * @param {Review[]} reviews
- * @param {string} agent
- * @returns {string | null}
- */
-function respondsToOf(reviews, agent) {
-  const sorted = [...reviews].sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0));
-  const delivered = sorted.filter((r) => r.deliveredTo?.[agent]);
-  return (delivered[delivered.length - 1] ?? sorted[sorted.length - 1])?.id ?? null;
-}
-
-/**
  * @param {string | null} respondsTo
  * @param {string[]} threads
  */
@@ -309,6 +304,12 @@ function defaultSummary(respondsTo, threads) {
  */
 export async function recordReviewerVersion(ctx, ref, { summary, by } = {}) {
   return withDoc(ctx, ref, async (doc) => {
+    if (isCode(doc)) {
+      // "Re-snapshot": a round of the working tree recorded by the reviewer
+      const res = await recordCodeRound(ctx, doc, { author: humanActor(ctx, by), capturedBy: 'ui-record' });
+      if ('nothing' in res) throw new RefusedError(`the working tree matches v${res.v}; nothing to record`);
+      return res.manifest;
+    }
     const head = await readHead(ctx, doc);
     const working = await requireWorking(ctx, doc, head);
     if (!working.dirty && !(await changedWorkingAssets(ctx, doc, head)).length) {
@@ -339,6 +340,7 @@ export async function applySuggestionAsReviewer(ctx, ref, tid, { by } = {}) {
     const t = await requireThread(ctx, doc.id, tid);
     const s = t.suggestion;
     if (!s) throw new UsageError(`${tid} is not a suggestion`);
+    if (isCode(doc)) return applyCodeSuggestionAsReviewer(ctx, doc, t, humanActor(ctx, by));
     if (isSnapshot(doc)) throw new RefusedError(`${doc.id} is a snapshot, not a file: its suggestions are applied by the agent when it revises (send the review)`);
     if (s.status === 'applied') throw new RefusedError(`${tid} was already applied in v${s.appliedIn}`);
     const head = await readHead(ctx, doc);
@@ -381,4 +383,32 @@ export async function applySuggestionAsReviewer(ctx, ref, tid, { by } = {}) {
     });
     return res.manifest;
   });
+}
+
+/**
+ * "Apply now" on a code doc: the code engine writes the suggestion into the repo file, then a 'ui-apply' round
+ * records it, and the thread is resolved.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {import('../../../shared/types.js').Thread} t
+ * @param {import('../../../shared/types.js').Actor} actor
+ * @returns {Promise<VersionManifest>}
+ */
+async function applyCodeSuggestionAsReviewer(ctx, doc, t, actor) {
+  if (t.suggestion?.status === 'applied') throw new RefusedError(`${t.id} was already applied in v${t.suggestion.appliedIn}`);
+  const r = await applyCodeSuggestions(ctx, doc, [t.id], { dryRun: false, actor });
+  const conflict = r.conflicts.find((c) => c.id === t.id);
+  if (conflict) throw new RefusedError(`conflict ${t.id}: ${conflict.reason}`);
+  const res = await recordCodeRound(ctx, doc, { author: actor, capturedBy: 'ui-apply' });
+  if ('nothing' in res) throw new RefusedError(`applying ${t.id} changed nothing; nothing to record`);
+  const after = await ctx.store.getThread(doc.id, t.id);
+  if (after && after.status !== 'resolved') {
+    const fresh = (await ctx.store.getDoc(doc.id)) ?? doc;
+    resolveInPlace(ctx, fresh, after, { at: ctx.now(), head: res.manifest.v });
+    /** @type {any} */ (after).resolvedBy = actor.name;
+    if (after.decision) await ctx.store.saveDoc(fresh);
+    await ctx.store.saveThread(doc.id, after);
+    await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: after.status });
+  }
+  return res.manifest;
 }

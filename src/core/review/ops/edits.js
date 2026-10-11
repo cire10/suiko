@@ -17,7 +17,9 @@ import { effectivePendingLines } from '../attribution.js';
 import { eolOf, lineWindow, locateSuggestion, matchEol, replaceExact, spliceText, suggestionTarget } from '../apply.js';
 import { anchorAt } from '../threadstate.js';
 import { preciseMapper } from '../workmap.js';
-import { emit, readHead, refuseSnapshot, requireThread, requireWorking, withDoc } from './common.js';
+import { agentActor, emit, readHead, refuseCode, refuseSnapshot, requireThread, requireWorking, withDoc } from './common.js';
+import { applyCodeSuggestions } from '../../code/apply.js';
+import { isCode } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -69,6 +71,8 @@ export async function applySuggestions(ctx, ref, tids, { dryRun = false } = {}) 
     ctx,
     ref,
     (doc) =>
+      // a code doc's suggestions are written to the repo files by the code engine
+      isCode(doc) ? applyCodeSuggestions(ctx, doc, [...new Set(tids)], { dryRun, actor: agentActor(ctx) }) :
       withCasRetry(async () => {
         refuseSnapshot(ctx, doc, 'apply suggestions to');
         const head = await readHead(ctx, doc);
@@ -196,6 +200,7 @@ export async function taggedEdits(ctx, ref, edits, { expectSha256 } = {}) {
     ctx,
     ref,
     async (doc) => {
+      refuseCode(ctx, doc);
       refuseSnapshot(ctx, doc, 'edit');
       for (const e of normalized) for (const t of e.threads) await requireThread(ctx, doc.id, t);
       return withCasRetry(async () => {
@@ -256,6 +261,7 @@ export async function revert(ctx, ref, target) {
     ref,
     (doc) =>
       withCasRetry(async () => {
+        refuseCode(ctx, doc);
         refuseSnapshot(ctx, doc, 'revert');
         const head = await readHead(ctx, doc);
         const working = await requireWorking(ctx, doc, head);

@@ -21,9 +21,9 @@
 import { SSE, VERDICTS } from '../../../shared/protocol.js';
 import { ConflictError, NotFoundError, UsageError } from '../../store/errors.js';
 import { compareIds } from '../../store/store.js';
-import { envOf, forwardAnchor } from '../anchoring.js';
 import { anchorAt } from '../threadstate.js';
-import { humanActor, oneOf, versionLoader, withDoc } from './common.js';
+import { kindOf } from '../kinds.js';
+import { humanActor, oneOf, withDoc } from './common.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -68,7 +68,9 @@ export async function submitReview(ctx, ref, input = {}) {
     const prevAt = reviews.reduce((m, r) => (r.submittedAt > m ? r.submittedAt : m), '');
     const reviewId = ctx.store.nextId(doc, 'review');
     const head = doc.head;
-    const load = versionLoader(ctx, doc);
+    // drafts made on older versions are carried forward by the doc kind (a code anchor keeps its file and lines)
+    /** @type {ReturnType<import('../kinds.js').KindAdapter['forwarder']> | null} */
+    let forward = null;
 
     // Existing threads touched by this review (committed only).
     /** @type {Map<string, Thread>} */
@@ -81,7 +83,7 @@ export async function submitReview(ctx, ref, input = {}) {
     const created = [];
     for (const d of items) {
       if (d.kind !== 'thread') continue;
-      const anchors = d.anchor.v < head ? await forwardAnchor(d.anchor, head, load, envOf(doc, ctx.config)) : { [String(d.anchor.v)]: d.anchor };
+      const anchors = d.anchor.v < head ? await (forward ??= kindOf(doc).forwarder(ctx, doc))(d.anchor, head) : { [String(d.anchor.v)]: d.anchor };
       const tid = ctx.store.nextId(doc, 'thread');
       const cid = ctx.store.nextId(doc, 'comment');
       created.push({

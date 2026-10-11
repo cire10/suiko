@@ -12,6 +12,11 @@ import { compareIds } from '../../store/store.js';
 import { lineHunks } from '../../diff/index.js';
 import { lineIndex } from '../../text/index.js';
 import { parseLinesArg } from '../../util/lines-arg.js';
+import { parseCodeAt } from '../../util/code-at.js';
+import { isCode } from '../../store/snapshot.js';
+import { kindOf } from '../kinds.js';
+import { askCode, reanchorCode } from '../../code/threads.js';
+import { codeFileSource } from '../../code/files.js';
 import { anchorForCapture, describe, envOf, forwardAnchor, label as anchorLabel, overrideAnchor } from '../anchoring.js';
 import { sectionPath, truncate } from '../labels.js';
 import { anchorAt, hasContent, isActionable, isOutdated, lastIndexes } from '../threadstate.js';
@@ -87,6 +92,7 @@ export async function moveThread(ctx, ref, tid, input) {
   return withDoc(ctx, ref, async (doc) => {
     const t = await requireThread(ctx, doc.id, tid);
     const v = /** @type {number} */ (parseVersionArg(input.version, { fallback: doc.head }));
+    if (isCode(doc)) return moveCodeThread(ctx, doc, t, v, input);
     const load = versionLoader(ctx, doc);
     const { source, render, manifest } = await load(v);
     const env = envOf(doc, ctx.config);
@@ -104,6 +110,29 @@ export async function moveThread(ctx, ref, tid, input) {
     await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, moved: true });
     return t;
   });
+}
+
+/**
+ * "Move here" on a code doc: a line / file capture resolved and carried forward by the code kind's adapter.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Thread} t
+ * @param {number} v
+ * @param {{ capture?: any }} input
+ * @returns {Promise<Thread>}
+ */
+async function moveCodeThread(ctx, doc, t, v, input) {
+  if (!input.capture) throw new UsageError('code reviews: move a thread with a line capture ({kind: "line", file, side, startLine, endLine})');
+  const kind = kindOf(doc);
+  const { anchor } = await kind.capture(ctx, doc, input.capture, v);
+  const forwarded = v < doc.head ? await kind.forwarder(ctx, doc)(anchor, doc.head) : { [String(v)]: anchor };
+  const headAnchor = forwarded[String(doc.head)];
+  t.anchors = { ...t.anchors, [String(doc.head)]: { ...headAnchor, state: 'exact', mappedBy: 'override' } };
+  t.override = { version: doc.head, lines: [headAnchor.src.startLine, headAnchor.src.endLine], ...(headAnchor.file ? { file: headAnchor.file.path } : {}), by: 'human' };
+  t.updatedAt = ctx.now();
+  await ctx.store.saveThread(doc.id, t);
+  await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, moved: true });
+  return t;
 }
 
 /**
@@ -148,9 +177,11 @@ export function addAgentReply(ctx, doc, t, input, version = doc.head) {
   if (status) c.status = status;
   if (input.at) {
     try {
-      c.atLines = parseLinesArg(input.at);
+      if (isCode(doc)) Object.assign(c, codeAt(t, String(input.at), version));
+      else c.atLines = parseLinesArg(input.at);
     } catch (err) {
-      throw new UsageError(`reply to ${t.id}: invalid "at" ${JSON.stringify(input.at)}: ${/** @type {Error} */ (err).message}`);
+      const hint = !isCode(doc) && /[^,\s]:L?\d/i.test(String(input.at)) ? ' (file paths are for code reviews; give lines of the spec, e.g. "L42-46")' : '';
+      throw new UsageError(`reply to ${t.id}: invalid "at" ${JSON.stringify(input.at)}: ${/** @type {Error} */ (err).message}${hint}`);
     }
   }
   if (input.decision) c.decision = String(input.decision);
@@ -161,10 +192,27 @@ export function addAgentReply(ctx, doc, t, input, version = doc.head) {
 }
 
 /**
+ * The `at` of an agent reply on a code doc (util/code-at.js forms): `atCode` (every item, paths as written), plus
+ * `atFile` / `atLines` of the first file (the shape spec replies have). A bare 'L12' takes the file of the thread's
+ * anchor, and is refused when the thread anchors no file.
+ * @param {Thread} t
+ * @param {string} at
+ * @param {number} version
+ * @returns {{ atCode: import('../../util/code-at.js').CodeAtItem[], atFile: string, atLines: Array<[number, number]> }}
+ */
+function codeAt(t, at, version) {
+  const defaultFile = anchorAt(t, version)?.file?.path ?? null;
+  const items = parseCodeAt(at, { defaultFile });
+  const atFile = items[0].file;
+  return { atCode: items, atFile, atLines: items.filter((i) => i.file === atFile).map((i) => /** @type {[number, number]} */ ([i.startLine, i.endLine])) };
+}
+
+/**
  * Agent question to the reviewer: an `agent-question` thread (status needs_input) anchored on head.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
- * @param {{ quote?: string | null, lines?: string | [number, number] | null, body: string }} input
+ * @param {{ quote?: string | null, lines?: string | [number, number] | null, body: string, file?: string | null }} input
+ *   file: code docs (the question is on lines of that file; without it, on the whole review)
  * @returns {Promise<{ thread: Thread, version: number, lines: [number, number] | null }>}
  */
 export async function ask(ctx, ref, input) {
@@ -174,6 +222,11 @@ export async function ask(ctx, ref, input) {
     ctx,
     ref,
     async (doc) => {
+      if (isCode(doc)) {
+        if (input.quote) throw new UsageError('ask: code reviews take --file and --lines, not --quote');
+        return askCode(ctx, doc, { file: input.file ? String(input.file) : null, lines: toRange(input.lines), body });
+      }
+      if (input.file) throw new UsageError(`ask: --file is for code reviews; ${doc.id} is a spec (use --lines or --quote)`);
       const head = await readHead(ctx, doc);
       const working = await readWorkingState(ctx, doc, head);
       const lines = toRange(input.lines);
@@ -224,7 +277,8 @@ export async function ask(ctx, ref, input) {
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {string} tid
- * @param {{ lines?: string | [number, number] | null, quote?: string | null }} input
+ * @param {{ lines?: string | [number, number] | null, quote?: string | null, file?: string | null }} input
+ *   file: code docs (lines of that file)
  * @returns {Promise<{ thread: Thread, anchor: Anchor | null, staged: boolean }>}
  */
 export async function reanchorThread(ctx, ref, tid, input) {
@@ -235,6 +289,12 @@ export async function reanchorThread(ctx, ref, tid, input) {
     ctx,
     ref,
     async (doc) => {
+      if (isCode(doc)) {
+        if (quote) throw new UsageError('reanchor: code reviews take --file and --lines, not --quote');
+        await requireThread(ctx, doc.id, tid);
+        return reanchorCode(ctx, doc, tid, { file: input.file ? String(input.file) : null, lines });
+      }
+      if (input?.file) throw new UsageError(`reanchor: --file is for code reviews; ${doc.id} is a spec`);
       const t = await requireThread(ctx, doc.id, tid);
       const head = await readHead(ctx, doc);
       const working = await readWorkingState(ctx, doc, head);
@@ -270,6 +330,7 @@ export async function reanchorThread(ctx, ref, tid, input) {
 export async function threads(ctx, ref, { status } = {}) {
   const doc = await resolveDoc(ctx, ref);
   const snap = await loadSnapshot(ctx, doc);
+  const code = isCode(doc);
   const li = lineIndex(snap.working.text);
   const filter = status ?? 'unresolved';
   const rows = snap.threads
@@ -291,13 +352,21 @@ export async function threads(ctx, ref, { status } = {}) {
     .map((t) => {
       const a = anchorAt(t, doc.head);
       let lines = null;
-      if (a && a.kind !== 'doc' && a.state !== 'orphaned') {
+      /** @type {Record<string, unknown>} */
+      let where = {};
+      if (code) {
+        // code docs: lines of the anchored repo file (never of the diff text)
+        const view = kindOf(doc).describeThread(snap, t, { cwd: ctx.cwd, root: ctx.root });
+        lines = view?.lines ?? null;
+        where = { file: view?.file ?? null, side: view?.side ?? null };
+      } else if (a && a.kind !== 'doc' && a.state !== 'orphaned') {
         const m = snap.mapper.mapRange(a.src.start, a.src.end);
         const l0 = li.lineOf(m.start);
         lines = [l0, Math.max(l0, m.end > m.start ? li.lineOf(m.end - 1) : l0)];
       }
       const first = t.comments[0];
       return {
+        ...where,
         id: t.id,
         type: t.type,
         severity: t.severity,
@@ -322,13 +391,20 @@ export async function threads(ctx, ref, { status } = {}) {
  * [--lines A-B]`: exact source of an old version (no line numbers, so it can be copied).
  * @param {Ctx} ctx
  * @param {string | Doc} ref
- * @param {{ thread?: string | null, version?: number | string | null, lines?: string | [number, number] | null }} [opts]
+ * @param {{ thread?: string | null, version?: number | string | null, lines?: string | [number, number] | null,
+ *   file?: string | null, side?: 'new' | 'old' | null }} [opts] file / side: code docs (a repo file of a round:
+ *   code/files.js codeFileSource, `{ kind: 'code-source', path, side, v, text, lines }`)
  */
-export async function show(ctx, ref, { thread, version, lines } = {}) {
+export async function show(ctx, ref, { thread, version, lines, file, side } = {}) {
   return withDoc(
     ctx,
     ref,
     async (doc) => {
+      if (!thread && file) {
+        if (!isCode(doc)) throw new UsageError(`show: --file is for code reviews; ${doc.id} is a spec`);
+        const v = /** @type {number} */ (parseVersionArg(version, { fallback: doc.head }));
+        return { kind: 'code-source', doc: doc.id, ...(await codeFileSource(ctx, doc, { path: String(file), v, side: side === 'old' ? 'old' : 'new' })) };
+      }
       if (!thread) {
         const v = /** @type {number} */ (parseVersionArg(version, { fallback: doc.head }));
         const { source } = await ctx.store.readVersion(doc.id, v);
@@ -353,6 +429,7 @@ export async function show(ctx, ref, { thread, version, lines } = {}) {
  * @param {Thread} t
  */
 async function showThread(ctx, doc, t) {
+  if (isCode(doc)) return showCodeThread(ctx, doc, t);
   const a = anchorAt(t, doc.head);
   const head = await readHead(ctx, doc);
   const working = await readWorkingState(ctx, doc, head);
@@ -411,6 +488,54 @@ async function showThread(ctx, doc, t) {
     attachmentKind: d?.cropKind ?? 'image',
     timeline,
     changes,
+  };
+}
+
+/**
+ * `show <doc> <tid>` on a code doc: the thread with its timeline, presented by the code kind (file, side, lines of
+ * the repo file, src> / was> lines). Linked changes are the code engine's (mini-diffs); none are listed here.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Thread} t
+ */
+async function showCodeThread(ctx, doc, t) {
+  const a = anchorAt(t, doc.head);
+  const snap = await loadSnapshot(ctx, doc);
+  const d = kindOf(doc).describeThread(snap, t, { cwd: ctx.cwd, root: ctx.root, attachmentPath: (rel) => ctx.store.attachmentPath(doc.id, rel) });
+  const timeline = t.comments.filter(hasContent).map((c) => ({
+    version: c.version,
+    by: c.by?.name ?? '',
+    kind: c.by?.kind ?? 'human',
+    review: c.review ?? null,
+    status: c.status ?? null,
+    hunk: c.by?.kind === 'agent' ? (t.changes ?? []).filter((ch) => ch.version === c.version).map((ch) => ch.hunk).join(' ') || null : null,
+    body: c.body ?? '',
+    at: c.at,
+  }));
+  const { lastAgent, lastHuman } = lastIndexes(t);
+  let statusLabel = t.status.toUpperCase();
+  if (t.status === 'open' && lastAgent >= 0 && lastHuman > lastAgent) statusLabel = 'REOPENED';
+  return {
+    kind: 'thread',
+    doc: doc.id,
+    thread: t,
+    statusLabel,
+    anchor: a ? { state: a.state, v: a.v, lines: a.file ? [a.src.startLine, a.src.endLine] : null, kind: a.kind, section: [], file: a.file ?? null } : null,
+    workingLines: d?.lines ?? null,
+    label: d?.file ? `${d.file}${d.side === 'old' ? ' (old side)' : ''}` : '',
+    on: null,
+    src: d?.src ?? null,
+    srcUnique: d?.srcUnique ?? true,
+    srcEditable: true,
+    file: d?.file ?? null,
+    fileFromCwd: d?.fileFromCwd ?? null,
+    side: d?.side ?? null,
+    was: d?.was ?? null,
+    fileState: d?.fileState ?? null,
+    attachments: (t.attachments ?? []).map((rel) => ctx.store.attachmentPath(doc.id, rel)),
+    attachmentKind: 'image',
+    timeline,
+    changes: [],
   };
 }
 

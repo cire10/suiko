@@ -4,15 +4,17 @@
 //                                                  workingMatches, decisionsPath, decisionsAbs }
 // Requires a final version (an approved review with "Mark final") and a working copy identical to it
 // (RefusedError, exit 3, otherwise). With `decisions`, writes `<name>.decisions.md` next to the spec (or into
-// outDir, resolved against ctx.cwd). An agent op: acknowledges delivered reviews.
+// outDir, resolved against ctx.cwd). A code doc compares its repo files (kindOf(doc).workingState) and writes
+// `decisions.md` into its own git-ignored doc dir (a file in the cwd would join the next round). An agent op:
+// acknowledges delivered reviews.
 
 import path from 'node:path';
 import { RefusedError } from '../../store/errors.js';
 import { writeFileAtomic } from '../../store/atomic.js';
 import { toPosix } from '../../util/paths.js';
 import { renderDecisionsMarkdown } from '../export.js';
-import { withDoc } from './common.js';
-import { isSnapshot } from '../../store/snapshot.js';
+import { readWorkingState, withDoc } from './common.js';
+import { isCode, isSnapshot } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -33,10 +35,12 @@ export async function finalize(ctx, ref, { decisions = false, outDir = null } = 
         throw new RefusedError(`${doc.id} has no final version yet (the reviewer approves with "Mark v${doc.head} final")`, { details: { doc: doc.id } });
       }
       const final = doc.final;
-      const { manifest } = await ctx.store.readVersion(doc.id, final.version);
-      const working = await ctx.store.readWorking(doc);
+      const { manifest, source } = await ctx.store.readVersion(doc.id, final.version);
+      const code = isCode(doc);
+      const working = code ? await readWorkingState(ctx, doc, { v: final.version, manifest, source }) : await ctx.store.readWorking(doc);
       if (working.sha256 !== manifest.sha256) {
-        throw new RefusedError(`the working copy of ${doc.path} differs from the final v${final.version}; record or revert the changes first`, {
+        const what = code ? 'the reviewed files in your working tree differ' : `the working copy of ${doc.path} differs`;
+        throw new RefusedError(`${what} from the final v${final.version}; record or revert the changes first`, {
           details: { doc: doc.id, final: final.version },
         });
       }
@@ -47,9 +51,12 @@ export async function finalize(ctx, ref, { decisions = false, outDir = null } = 
       let decisionsAbs = null;
       if (decisions) {
         const base = path.posix.basename(doc.path).replace(/\.[^.]+$/, '');
-        // A snapshot doc has no file to sit next to: its decisions go to the cwd.
-        const dir = outDir ? path.resolve(ctx.cwd, outDir) : isSnapshot(doc) ? ctx.cwd : path.dirname(ctx.store.workingPath(doc));
-        decisionsAbs = path.join(dir, `${base}.decisions.md`);
+        // A snapshot doc has no file to sit next to: its decisions go to the cwd. A code doc's go to its doc dir.
+        if (code && !outDir) decisionsAbs = path.join(ctx.store.docDir(doc.id), 'decisions.md');
+        else {
+          const dir = outDir ? path.resolve(ctx.cwd, outDir) : isSnapshot(doc) ? ctx.cwd : path.dirname(ctx.store.workingPath(doc));
+          decisionsAbs = path.join(dir, `${base}.decisions.md`);
+        }
         await writeFileAtomic(decisionsAbs, renderDecisionsMarkdown({ doc, threads, reviews, versions: versions.length }));
         const rel = path.relative(ctx.root, decisionsAbs);
         decisionsPath = rel.startsWith('..') || path.isAbsolute(rel) ? decisionsAbs : toPosix(rel);

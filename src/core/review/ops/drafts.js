@@ -15,9 +15,12 @@
 import { SEVERITIES, SSE, THREAD_TYPES } from '../../../shared/protocol.js';
 import { NotFoundError, UsageError } from '../../store/errors.js';
 import { lineIndex } from '../../text/index.js';
-import { anchorForCapture, envOf, label as anchorLabel, quoteText } from '../anchoring.js';
-import { linesLabel, sectionPath, truncate } from '../labels.js';
+import { isCode } from '../../store/snapshot.js';
+import { kindOf } from '../kinds.js';
+import { codeSuggestionFor } from '../../code/capture.js';
 import { emit, oneOf, parseVersionArg, requireThread, resolveDoc, withDoc } from './common.js';
+
+export { preview } from '../kinds.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -31,7 +34,9 @@ import { emit, oneOf, parseVersionArg, requireThread, resolveDoc, withDoc } from
 const REVIEWER_TYPES = THREAD_TYPES.filter((t) => t !== 'agent-question');
 
 /**
- * Resolves a guest capture against a recorded version (default: head).
+ * Resolves a guest capture against a recorded version (default: head), through the doc kind's adapter (kinds.js):
+ * spec captures (text, element, cell, section, source, snip, doc) for spec and snapshot docs; line / file / doc
+ * captures for code docs.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {{ version?: number | string, capture: Capture, widen?: boolean }} input widen: "Widen to block"
@@ -41,31 +46,7 @@ export async function resolveCapture(ctx, ref, { version, capture, widen = false
   const doc = await resolveDoc(ctx, ref);
   const v = /** @type {number} */ (parseVersionArg(version, { fallback: doc.head }));
   if (!capture || typeof capture !== 'object') throw new UsageError('a capture is required');
-  const { source, manifest } = await ctx.store.readVersion(doc.id, v);
-  const render = await ctx.render(doc, v);
-  const anchor = anchorForCapture({ version: v, capture, source, render, env: envOf(doc, ctx.config), assets: manifest.assets ?? null, widen });
-  return { anchor, preview: preview(anchor, source, doc.title) };
-}
-
-/**
- * The composer preview: "Agent will see: L42-43 §3.2 'rotated on every use'".
- * @param {Anchor} anchor
- * @param {string} source
- * @param {string} title
- */
-export function preview(anchor, source, title) {
-  const lines = anchor.kind === 'doc' ? null : /** @type {[number, number]} */ ([anchor.src.startLine, anchor.src.endLine]);
-  let src = '';
-  if (lines) {
-    const li = lineIndex(source);
-    const all = source.slice(li.startOf(lines[0]), li.endOf(lines[1])).split('\n');
-    src = all.length > 3 ? [...all.slice(0, 3), `...(${all.length - 3} more lines)`].join('\n') : all.join('\n');
-  }
-  const label = anchorLabel(anchor);
-  const sec = sectionPath(anchor.section, title);
-  const what = anchor.quote?.exact && anchor.kind !== 'section' ? `"${truncate(quoteText(anchor).replace(/\s+/g, ' ').trim(), 60)}"` : label;
-  const text = anchor.kind === 'doc' ? 'Agent will see: GENERAL' : `Agent will see: ${[lines ? linesLabel(lines) : '', sec ? `§${sec}` : '', what].filter(Boolean).join(' ')}`;
-  return { label, lines, section: anchor.section ?? [], src, text };
+  return kindOf(doc).capture(ctx, doc, capture, v, { widen });
 }
 
 /**
@@ -203,6 +184,8 @@ async function normalizeDraft(ctx, doc, item, prev) {
  * @returns {Promise<Suggestion>}
  */
 export async function suggestionFor(ctx, doc, anchor, input) {
+  // code docs: whole lines of the anchored repo file (new side), built by the code engine
+  if (isCode(doc)) return { ...(await codeSuggestionFor(ctx, doc, anchor, anchor.v)), new: String(input.new), status: 'pending', appliedIn: null };
   const mode = input.mode === 'source' ? 'source' : 'text';
   const { source } = await ctx.store.readVersion(doc.id, anchor.v);
   let start = anchor.src.start;

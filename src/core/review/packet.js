@@ -63,6 +63,12 @@ const PLAN_PROTOCOL = [
   '  Questions: answer in your reply; change the plan only if the answer belongs in it.',
 ];
 
+/** The protocol reminder of a code review: repo files, paths relative to the repo root. */
+const CODE_PROTOCOL = [
+  'PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.',
+  '  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.',
+];
+
 /** @param {string | null | undefined} v */
 export function verdictLabel(v) {
   return String(v ?? '').replace(/_/g, ' ').toUpperCase();
@@ -107,6 +113,7 @@ export function hhmm(iso) {
 export function formatPacket(packet, opts = {}) {
   const maxChars = opts.maxChars ?? LIMITS.packetChars;
   const p = packet;
+  if (p.kind === 'code') return formatCodePacket(p, maxChars);
   /** @type {string[]} */
   const head = [packetHeader(p)];
   const snapshot = p.kind === 'snapshot';
@@ -142,6 +149,43 @@ export function formatPacket(packet, opts = {}) {
   else if (p.firstPacket && !approvedDone && items.length) footer.push(...(!snapshot ? PROTOCOL : p.origin === 'plan' ? PLAN_PROTOCOL : SNAPSHOT_PROTOCOL));
   footer.push(`NEXT: ${nextText(p)}`);
 
+  return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
+}
+
+/**
+ * The packet of a code review (design 4.10): the code label in the header, the basis lines (Repo root first), items
+ * in the code grammar (`path:L42-44`, `(new file)`, `(old side)` with was> lines, `FILE MISSING`), no LOCKED line,
+ * the code PROTOCOL.
+ * @param {Packet} p
+ * @param {number} maxChars
+ * @returns {string}
+ */
+function formatCodePacket(p, maxChars) {
+  /** @type {string[]} */
+  const head = [packetHeader(p)];
+  const items = p.threads;
+  if (items.length) head.push(...(p.basis ?? []));
+  for (const r of p.reviews) {
+    if (!r.body?.trim()) continue;
+    const tag = p.reviews.length > 1 ? ` (${r.id})` : '';
+    head.push(`Reviewer summary${tag}: ${indentBody(r.body, '  ')}`);
+  }
+  head.push(countsLine(p));
+  if (p.reviews.length === 0 && p.drafts) {
+    head.push(`0 submitted reviews pending; ${plural(p.drafts.length, 'DRAFT comment')} not yet submitted (ask the reviewer to click Submit review)`);
+  }
+
+  /** @type {string[]} */
+  const footer = [];
+  const approvedDone = p.verdict === 'approved' && p.counts.actionable === 0;
+  if (!approvedDone) footer.push(`DECISIONS to keep true: ${p.decisions.length ? p.decisions.map((d) => `${d.id} (${d.thread}) ${oneLine(d.text, 160)}`).join(' · ') : '(none yet)'}`);
+  if (p.drafts && p.drafts.length) {
+    footer.push('DRAFTS (not submitted - do not act on them):');
+    for (const d of p.drafts) footer.push(`  ${draftLine(/** @type {any} */ (d))}`);
+  }
+  if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not change the reviewed files (they must stay identical to the final version).`);
+  else if (p.firstPacket && !approvedDone && items.length) footer.push(...CODE_PROTOCOL);
+  footer.push(`NEXT: ${nextText(p)}`);
   return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
 }
 
@@ -230,7 +274,8 @@ export function formatPlanFeedback(packet, opts = {}) {
 
 /** @param {Packet} p */
 function packetHeader(p) {
-  const name = p.firstPacket ? `${p.doc} (${p.kind === 'snapshot' ? originInfo(p.origin ?? '').label : p.path})` : p.doc;
+  const name =
+    p.kind === 'code' ? `${p.doc} (code review${p.code?.label ? `: ${p.code.label}` : ''})` : p.firstPacket ? `${p.doc} (${p.kind === 'snapshot' ? originInfo(p.origin ?? '').label : p.path})` : p.doc;
   /** @type {string[]} */
   const parts = ['SPECREVIEW FEEDBACK', name];
   if (!p.reviews.length) {
@@ -334,6 +379,11 @@ export function itemHeader(t) {
   if (why) parts.push(why);
   if (t.severity && t.severity !== 'normal') parts.push(t.severity);
   parts.push(t.type);
+  if (isCodeItem(t)) {
+    parts.push(codeLocation(t));
+    if (t.apply) parts.push(`apply verbatim: ${t.apply}`);
+    return `[${t.id}] ${parts.join(' · ')}`;
+  }
   if (t.target === 'doc') parts.push('GENERAL');
   else if (t.lines) parts.push(`${linesLabel(t.lines)}${t.note && t.anchorState === 'changed' ? ` ${t.note}` : ''}`);
   else if (t.note) parts.push(t.note);
@@ -344,14 +394,51 @@ export function itemHeader(t) {
 }
 
 /**
+ * Whether a packet item is a code item (code packets always carry `file`, null for a whole-review thread).
+ * @param {PacketThread} t
+ */
+function isCodeItem(t) {
+  return t.file !== undefined;
+}
+
+/**
+ * Where a code item is: 'src/a.js:L42-44', 'src/a.js:L1 (new file)', 'src/a.js (old side) base L12-14, now between
+ * L11-12', 'src/a.js (whole file)', 'GENERAL' (the whole review). Paths are repo-root-relative.
+ * @param {PacketThread} t
+ * @returns {string}
+ */
+function codeLocation(t) {
+  if (!t.file) return t.note && t.anchorState === 'orphaned' ? `GENERAL ${t.note}` : 'GENERAL';
+  if (t.anchorState === 'orphaned') return `${t.file} ${t.note ?? '(orphaned)'}`;
+  const changed = t.note && t.anchorState === 'changed' ? ` ${t.note}` : '';
+  if (t.side === 'old') {
+    const base = t.lines ? ` base ${linesLabel(t.lines)}` : '';
+    const now = t.nowBetween ? `, now between ${linesLabel(t.nowBetween)}` : '';
+    return `${t.file} (old side)${base}${now}${changed}`;
+  }
+  if (!t.lines) return `${t.file} (whole file)`;
+  return `${t.file}:${linesLabel(t.lines)}${t.fileStatus === 'A' ? ' (new file)' : ''}${changed}`;
+}
+
+/** What a code item says about its file when it cannot quote it from the working tree. */
+const FILE_STATE_LINE = /** @type {Record<string, string>} */ ({
+  missing: 'FILE MISSING in your working tree (restore it, or reply declined/answered explaining the deletion)',
+  'not-checked-out': '(the file is not in your working tree: check out the reviewed revision to edit it)',
+  binary: '(binary file: nothing to quote)',
+  'too-large': '(file too large to quote: Read it)',
+});
+
+/**
  * @param {PacketThread} t
  * @param {string} docId
  * @returns {string}
  */
 export function formatPacketThread(t, docId) {
   const out = [itemHeader(t)];
+  const code = isCodeItem(t);
   const sug = /** @type {any} */ (t.suggestion);
   const showSuggestion = sug && sug.status !== 'applied';
+  if (code && t.fileState && FILE_STATE_LINE[t.fileState]) out.push(`  ${FILE_STATE_LINE[t.fileState]}`);
   if (t.on && !showSuggestion && TEXT_TARGETS.has(t.target)) out.push(`  on: "${t.on}"`);
   if (showSuggestion) {
     for (const l of String(sug.old ?? '').split('\n')) out.push(`  - ${l}`);
@@ -359,9 +446,11 @@ export function formatPacketThread(t, docId) {
     if (sug.status === 'staged') out.push('  (staged: already applied to the working copy, not recorded yet)');
     if (sug.status === 'conflict') out.push('  (conflict: the expected text was not found; treat it as a normal comment)');
   }
+  if (code) for (const l of t.was ?? []) out.push(`  was> ${l}`);
   if (t.src != null && (!showSuggestion || sug.status === 'conflict')) {
     for (const l of t.src.split('\n')) out.push(`  src> ${l}`);
     if (!t.srcEditable) out.push('  (data: URIs elided above; Read the file for the exact text)');
+    else if (code && !t.srcUnique && t.lines) out.push(`  (not unique in the file: Read around L${t.lines[0]} before editing)`);
     else if (!t.srcUnique && t.lines) out.push(`  (src> is shortened or not unique; Read around ${linesLabel(t.lines)} before editing)`);
   }
   const kind = t.attachmentKind ?? (t.label.includes('region') ? 'region' : 'image');
@@ -385,7 +474,7 @@ export function formatPacketThread(t, docId) {
 /** @param {any} d */
 function draftLine(d) {
   if (d.kind === 'thread') {
-    const where = d.lines ? linesLabel(d.lines) : d.label;
+    const where = d.file !== undefined ? (d.file ? `${d.file}${d.side === 'old' ? ' (old side)' : ''}${d.lines ? `:${linesLabel(d.lines)}` : ''}` : 'GENERAL') : d.lines ? linesLabel(d.lines) : d.label;
     const on = d.on ? ` "${truncate(d.on, 60)}"` : '';
     return `[${d.id}] ${d.type} · ${where}${on}: ${oneLine(d.body, 200)}`;
   }
@@ -519,7 +608,7 @@ export function formatStatus(s) {
   for (const d of s.docs) {
     const head = d.head ? `head v${d.head}${d.headAuthor ? ` (${d.headAuthor}${d.headAt ? `, ${hhmm(d.headAt)}` : ''})` : ''}` : 'no versions';
     const final = d.final ? `  FINAL = v${d.final.version}` : '';
-    const where = d.kind === 'snapshot' ? `(${originInfo(d.origin ?? '').label})` : d.path;
+    const where = d.kind === 'code' ? '(code review)' : d.kind === 'snapshot' ? `(${originInfo(d.origin ?? '').label})` : d.path;
     out.push(`${d.doc}  ${where}  ${head}  ${d.state}${final}`);
     if (d.kind !== 'snapshot' && d.pathFromCwd && d.pathFromCwd !== d.path) out.push(`  file: ${d.pathFromCwd} (from your working directory)`);
     const c = d.counts;
@@ -528,7 +617,7 @@ export function formatStatus(s) {
     const und = d.undelivered.length ? d.undelivered.join(', ') : 'none';
     out.push(`  reviewer: ${last} · drafts ${d.drafts} · undelivered reviews: ${und}`);
     const listening = d.listening.length ? d.listening.map((/** @type {any} */ w) => `${w.agent} (pid ${w.pid})`).join(', ') : 'nobody';
-    out.push(`  listening: ${listening}${d.kind === 'snapshot' ? '' : `   working copy: ${d.working}`}`);
+    out.push(`  listening: ${listening}${d.kind === 'code' ? `   working tree: ${d.working}` : d.kind === 'snapshot' ? '' : `   working copy: ${d.working}`}`);
   }
   return `${out.join('\n')}\n`;
 }
@@ -622,7 +711,8 @@ export function formatThreads(list) {
   if (!list.threads.length) return `no threads (${list.filter})\n`;
   return `${list.threads
     .map((/** @type {any} */ t) => {
-      const lines = t.lines ? linesLabel(t.lines) : t.target === 'doc' ? 'GENERAL' : '-';
+      const lines =
+        t.file !== undefined ? (t.file ? `${t.file}${t.side === 'old' ? ' (old side)' : ''}${t.lines ? `:${linesLabel(t.lines)}` : ''}` : 'GENERAL') : t.lines ? linesLabel(t.lines) : t.target === 'doc' ? 'GENERAL' : '-';
       const state = t.anchorState && t.anchorState !== 'exact' ? ` (${t.anchorState})` : '';
       return `${t.id}  ${t.status}${t.actionable ? '*' : ''}  ${t.type}${t.severity !== 'normal' ? ` ${t.severity}` : ''}  ${lines}${state}  ${t.sectionLabel ? `§${t.sectionLabel}  ` : ''}${oneLine(t.summary, 80)}`;
     })
@@ -637,7 +727,7 @@ export function formatThreads(list) {
  */
 export function formatApply(r) {
   const out = [];
-  for (const a of r.applied) out.push(`${r.dryRun ? 'would apply' : 'applied'} ${a.id} at ${linesLabel(a.lines)} (${a.how}) · ${r.dryRun ? 'dry run' : 'staged (not recorded yet)'}`);
+  for (const a of r.applied) out.push(`${r.dryRun ? 'would apply' : 'applied'} ${a.id} at ${a.file ? `${a.file}:` : ''}${linesLabel(a.lines)} (${a.how}) · ${r.dryRun ? 'dry run' : 'staged (not recorded yet)'}`);
   for (const s of r.skipped ?? []) out.push(`skipped ${s.id}: ${s.reason}`);
   for (const c of r.conflicts) out.push(`conflict ${c.id}: ${c.reason}`);
   if (r.applied.length && !r.dryRun) out.push('re-read the file before any further Edit (apply rewrote it)');
@@ -697,5 +787,7 @@ export function formatReply(r) {
  * @returns {string}
  */
 export function formatAsk(r) {
-  return `asked ${r.thread.id} at ${r.lines ? linesLabel(r.lines) : 'v' + r.version} · the reviewer will answer in a later packet (ANSWER)\n`;
+  const file = r.thread?.anchors?.[String(r.version)]?.file?.path;
+  const at = r.lines ? `${file ? `${file}:` : ''}${linesLabel(r.lines)}` : file ? `${file} (whole file)` : `v${r.version}`;
+  return `asked ${r.thread.id} at ${at} · the reviewer will answer in a later packet (ANSWER)\n`;
 }

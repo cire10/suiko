@@ -83,6 +83,26 @@ export function isVirtual(doc) {
 }
 
 /**
+ * The doc kind as APIs report it: 'file' | 'snapshot' | 'code' (doc.json `kind`, absent = 'file').
+ * @param {unknown} doc
+ * @returns {'file' | 'snapshot' | 'code'}
+ */
+export function docKind(doc) {
+  return isCode(doc) ? CODE_KIND : isSnapshot(doc) ? SNAPSHOT_KIND : 'file';
+}
+
+/**
+ * The origin type of a virtual doc as APIs report it ('plan', 'message', 'stdin', 'diff'...), else null.
+ * @param {unknown} doc
+ * @returns {string | null}
+ */
+export function docOriginType(doc) {
+  if (!isVirtual(doc)) return null;
+  const t = /** @type {any} */ (doc).origin?.type;
+  return typeof t === 'string' && t ? t : null;
+}
+
+/**
  * Synthetic workspace-relative path of a code doc: 'code/<slug>.diff' (the extension names the version files).
  * @param {string} slug a doc id
  * @returns {string}

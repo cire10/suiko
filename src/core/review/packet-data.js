@@ -14,16 +14,22 @@
 //   when known, and `pathFromCwd` is how the agent's cwd reaches the file (relative when under the cwd, else
 //   absolute): in a non-git project whose `.specreview/` sits next to the spec in a subfolder, the bare doc.path
 //   does not resolve from the directory the agent runs in.
+// - Code docs (kind 'code'): each thread is presented by the code kind (kinds.js describeThread -> code/packet.js
+//   describeCodeThread: repo file, side, working-tree lines, src> / was> lines, file state); the header label, the
+//   basis lines and NEXT come from code/packet.js; items are ordered by file, bottom-up within a file (the order the
+//   agent edits in); there are no locks. packet.js formats them with the code item grammar (design 4.10).
 
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { CONTEXT_CHARS } from '../../shared/protocol.js';
 import { compareIds } from '../store/store.js';
 import { lineIndex } from '../text/index.js';
-import { attachmentKind, describe, envOf, label as anchorLabel, quoteText } from './anchoring.js';
+import { attachmentKind, envOf, label as anchorLabel, quoteText } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
 import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
-import { docRefFor, isSnapshot, originType, planFileOf } from '../store/snapshot.js';
+import { docOriginType, docRefFor, isCode, isSnapshot, originType, planFileOf } from '../store/snapshot.js';
+import { kindOf } from './kinds.js';
+import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js';
 
 /**
  * @typedef {import('../../shared/types.js').Thread} Thread
@@ -67,13 +73,26 @@ import { docRefFor, isSnapshot, originType, planFileOf } from '../store/snapshot
  * @property {string[]} attachments absolute paths
  * @property {'region' | 'snip' | 'image'} attachmentKind what the attachments show (region crop, snipped area, other image)
  * @property {string | null} apply command applying the suggestion
+ * Code docs only (kind 'code'; filled from the code kind's describeThread):
+ * @property {string | null} [file] repo-root-relative path of the anchored file (null: a whole-review thread)
+ * @property {string | null} [fileFromCwd] that file as reached from the agent's cwd
+ * @property {'new' | 'old' | null} [side] the file side of the anchor
+ * @property {string[] | null} [was] old side: the base lines (printed as 'was>' lines)
+ * @property {'ok' | 'missing' | 'not-checked-out' | 'binary' | 'too-large' | null} [fileState]
+ * @property {[number, number] | null} [nowBetween] old side: the working-tree lines the base position falls between
+ * @property {string | null} [fileStatus] CodeFile.status of the file at head ('A' prints "(new file)")
  *
  * @typedef {object} Packet
  * @property {number} schema
  * @property {string} doc
  * @property {string} path workspace-relative POSIX path (synthetic for a snapshot doc)
- * @property {'file' | 'snapshot'} [kind] a snapshot doc has no working file (store/snapshot.js)
- * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin'...)
+ * @property {'file' | 'snapshot' | 'code'} [kind] a snapshot doc has no working file (store/snapshot.js); a code doc
+ *   reviews repo files
+ * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin'...; 'diff' for code)
+ * @property {{ label: string, baseSha: string | null, newSha: string | null, worktree: boolean, root: string | null }} [code]
+ *   code docs: the header label, the old- and new-side commits (newSha null for a working-tree side), whether line
+ *   numbers are of the working tree, the repo root
+ * @property {string[]} [basis] code docs: the basis lines under the header (code/packet.js codeLineBasis)
  * @property {string} [ref] the doc as follow-up commands name it (adds `--workspace` for a scratch workspace)
  * @property {string | null} [root] absolute workspace root
  * @property {string | null} [file] absolute path of the working copy (a plan snapshot: its plan file; other
@@ -144,12 +163,13 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
 
   /** @type {PacketThread[]} */
   const items = [];
+  const code = isCode(doc);
   for (const t of snap.threads) {
     const why = whyOf(t, { deliveredBefore, reopenedIn });
     if (!why && !(allOpen && t.status !== 'resolved')) continue;
-    items.push(packetThread(t, why ?? 'awaiting', { snap, workingText, attachmentPath, env }));
+    items.push(packetThread(t, why ?? 'awaiting', { snap, workingText, attachmentPath, env, cwd, root }));
   }
-  items.sort(byFileOrder);
+  items.sort(code ? byCodeOrder : byFileOrder);
 
   const locks = snap.locks
     .filter((l) => l.active)
@@ -188,6 +208,46 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
   // nothing to apply once the reviewer approved the final version: a suggestion that came with it gets a reply
   if (replyOnly) for (const i of items) i.apply = null;
   const firstPacket = !snap.reviews.some((r) => r.deliveredTo?.[agent] && !delivering.has(r.id));
+
+  if (code) {
+    const ref = docRefFor(doc.id, root);
+    const m = /** @type {any} */ (snap).code?.manifest ?? null;
+    return {
+      schema: 1,
+      doc: doc.id,
+      path: doc.path,
+      kind: 'code',
+      origin: docOriginType(doc),
+      ref,
+      root,
+      file: null,
+      pathFromCwd: null,
+      code: {
+        label: codePacketLabel(snap),
+        baseSha: m?.baseSha ?? null,
+        newSha: m?.newSha ?? null,
+        worktree: m ? m.newSide !== 'commit' : true,
+        root: /** @type {any} */ (snap).code?.root ?? m?.root ?? root,
+      },
+      basis: codeLineBasis(snap, items),
+      title: doc.title,
+      head: snap.head.v,
+      working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
+      reviews: deliver.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
+      verdict: latest?.verdict ?? null,
+      final: doc.final ?? null,
+      threads: items,
+      locks: [],
+      decisions,
+      drafts: drafts ? drafts.map((d) => draftSummary(d, snap, li, mapRange, attachmentPath)) : null,
+      counts,
+      resolvedThisRound,
+      firstPacket,
+      replyOnly,
+      agent,
+      next: codeNextStep(doc, ref, approval, counts.actionable),
+    };
+  }
 
   const snapshot = isSnapshot(doc);
   const planFile = planFileOf(doc);
@@ -254,18 +314,21 @@ export function pathFromCwd(docPath, root, cwd) {
  * @param {Thread} t
  * @param {Why | 'awaiting'} why
  * @param {{ snap: Snapshot, workingText: string, attachmentPath: (rel: string) => string,
- *   env: import('./anchoring.js').AnchorEnv }} ctx
+ *   env: import('./anchoring.js').AnchorEnv, cwd?: string | null, root?: string | null }} ctx
  * @returns {PacketThread}
  */
-function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
+function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = null, root = null }) {
   const anchor = anchorAt(t, snap.head.v);
-  const d = anchor
-    ? describe(anchor, { headSource: snap.head.source, workingSource: workingText, hunks: snap.mapper.hunks, env, attachments: t.attachments ?? [], absAttachmentPath: attachmentPath })
-    : null;
+  const code = isCode(snap.doc);
+  /** @type {any} */
+  const d = anchor ? kindOf(snap.doc).describeThread(snap, t, { workingText, attachmentPath, env, cwd, root }) : null;
   /** @type {string | null} */
   let note = null;
   if (anchor?.state === 'changed') note = '(outdated: text changed)';
-  if (anchor?.state === 'orphaned') {
+  if (anchor?.state === 'orphaned' && code) {
+    const file = anchor.file?.path ?? d?.file ?? null;
+    note = `(orphaned: reanchor with specreview reanchor ${snap.doc.id} ${t.id}${file ? ` --file ${file}` : ''} --lines A-B)`;
+  } else if (anchor?.state === 'orphaned') {
     const lk = d?.lastKnown;
     const where = lk
       ? [lk.section.length ? `§${sectionPath(lk.section, snap.doc.title)}` : '', `v${lk.v}`, linesLabel(lk.lines)].filter(Boolean).join(' ')
@@ -275,7 +338,7 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
   const conv = conversation(t);
   const suggestion = t.suggestion ? { ...t.suggestion } : null;
   const pendingSuggestion = suggestion && (suggestion.status === 'pending' || suggestion.status === 'conflict');
-  const section = anchor?.state === 'orphaned' ? d?.lastKnown?.section ?? anchor.section ?? [] : anchor?.section ?? [];
+  const section = code ? [] : anchor?.state === 'orphaned' ? d?.lastKnown?.section ?? anchor.section ?? [] : anchor?.section ?? [];
   return {
     id: t.id,
     why,
@@ -286,10 +349,10 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
     section,
     sectionLabel: sectionPath(section, snap.doc.title),
     target: anchor?.kind ?? 'doc',
-    label: d?.label ?? 'GENERAL',
+    label: d?.label ?? (code && d?.file ? d.file : 'GENERAL'),
     on: d?.on ?? null,
     src: d?.src ?? null,
-    srcUnique: d?.srcUnique ?? false,
+    srcUnique: d?.srcUnique ?? code,
     srcWindow: d?.srcWindow ?? false,
     srcEditable: d?.srcEditable ?? true,
     anchorState: anchor?.state ?? 'exact',
@@ -308,6 +371,17 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
     attachments: d?.crops ?? (t.attachments ?? []).map((a) => attachmentPath(a)),
     attachmentKind: d?.cropKind ?? attachmentKind(anchor),
     apply: pendingSuggestion ? `specreview apply ${snap.doc.id} ${t.id}` : null,
+    ...(code
+      ? {
+          file: d?.file ?? null,
+          fileFromCwd: d?.fileFromCwd ?? null,
+          side: d?.side ?? null,
+          was: d?.was ?? null,
+          fileState: d?.fileState ?? null,
+          nowBetween: d?.nowBetween ?? null,
+          fileStatus: d?.fileStatus ?? null,
+        }
+      : {}),
   };
 }
 
@@ -321,7 +395,11 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env }) {
 function draftSummary(d, snap, li, mapRange, attachmentPath) {
   if (d.kind === 'thread') {
     const a = d.anchor;
-    const lines = a && a.kind !== 'doc' ? (a.v === snap.head.v ? lineRange(li, mapRange(a.src.start, a.src.end)) : [a.src.startLine, a.src.endLine]) : null;
+    // code drafts: lines of their file side at the draft's version (never mapped through the diff text)
+    const code = isCode(snap.doc);
+    const lines = code
+      ? a?.file && a.kind !== 'doc' ? [a.src.startLine, a.src.endLine] : null
+      : a && a.kind !== 'doc' ? (a.v === snap.head.v ? lineRange(li, mapRange(a.src.start, a.src.end)) : [a.src.startLine, a.src.endLine]) : null;
     return {
       id: d.id,
       kind: 'thread',
@@ -329,8 +407,9 @@ function draftSummary(d, snap, li, mapRange, attachmentPath) {
       severity: d.severity ?? 'normal',
       version: a?.v ?? null,
       lines,
-      label: anchorLabel(a),
-      on: a?.quote?.exact ? truncate(quoteText(a).replace(/\s+/g, ' ').trim(), 120) : null,
+      ...(code ? { file: a?.file?.path ?? null, side: a?.file?.side ?? null } : {}),
+      label: code ? (a?.file ? `${a.file.path}${a.file.side === 'old' ? ' (old side)' : ''}` : 'GENERAL') : anchorLabel(a),
+      on: !code && a?.quote?.exact ? truncate(quoteText(a).replace(/\s+/g, ' ').trim(), 120) : null,
       body: d.body ?? '',
       suggestion: d.suggestion ?? null,
       attachments: (d.attachments ?? []).map((rel) => attachmentPath(rel)),
@@ -374,6 +453,26 @@ function byFileOrder(a, b) {
   const la = a.lines ? a.lines[0] : Infinity;
   const lb = b.lines ? b.lines[0] : Infinity;
   if (la !== lb) return la - lb;
+  const ba = a.severity === 'blocking' ? 0 : 1;
+  const bb = b.severity === 'blocking' ? 0 : 1;
+  return ba - bb || compareIds(a.id, b.id);
+}
+
+/**
+ * Code items: by file (whole-review threads last), bottom-up within a file (edits from the bottom keep the cited
+ * line numbers of the items above valid), blocking first on ties, then id.
+ * @param {PacketThread} a
+ * @param {PacketThread} b
+ */
+function byCodeOrder(a, b) {
+  const fa = a.file ?? null;
+  const fb = b.file ?? null;
+  if (fa !== fb) return fa === null ? 1 : fb === null ? -1 : fa < fb ? -1 : 1;
+  // an old-side item sorts where its base position now falls in the working file
+  const at = (/** @type {PacketThread} */ t) => (t.side === 'old' ? t.nowBetween ?? t.lines : t.lines);
+  const la = at(a)?.[0] ?? -Infinity;
+  const lb = at(b)?.[0] ?? -Infinity;
+  if (la !== lb) return lb - la;
   const ba = a.severity === 'blocking' ? 0 : 1;
   const bb = b.severity === 'blocking' ? 0 : 1;
   return ba - bb || compareIds(a.id, b.id);
