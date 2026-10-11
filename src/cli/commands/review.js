@@ -4,9 +4,11 @@
 //  [--json]` (design 4.2): opens a code review of the agent's changes (doc kind 'code') and returns at once with the
 // review URL and the background `wait` command.
 //
-// STUB (WP0b): the final spec and argument parsing, so the registry, `--help`, the MCP tool specreview_review and the
-// docs check see the real command. `execute` throws UsageError('code review is not available in this build') (exit
-// 1) until WP3 replaces it (src/core/code/review.js openCodeReview(ctx, { input, title }) takes the parsed `input`).
+// Workspace: --workspace, else the repository top level of the cwd (`git rev-parse --show-toplevel`); `.specreview/`
+// is created there when missing (review is an explicit verb, as `open` is). The engine (src/core/code/review.js
+// openCodeReview) creates the code doc and records round 1, or records a new round of the existing doc of the same
+// spec when the files changed (a no-op otherwise; a closed doc is reopened). Then the daemon is started and the URL
+// shown as `open` does.
 //
 //   review                              since-base: merge-base(<default base>, HEAD) .. working tree (+ untracked);
 //                                       on the default branch, detached or without a base: uncommitted
@@ -18,8 +20,17 @@
 // Exit: 0 open; 1 not a git repository, git too old, git failure; 3 refused (too many files, unmerged index entries
 // with --staged, too many large untracked files); 4 base / range end / commit not found, or nothing to review.
 
-import { UsageError } from '../../core/store/errors.js';
+import path from 'node:path';
+import { UsageError, exitCodeOf } from '../../core/store/errors.js';
+import { findWorkspace, initStoreDir } from '../../core/store/workspace.js';
+import { openRepo } from '../../core/code/git.js';
+import { specLabel } from '../../core/code/spec.js';
+import { codeStats, skippedText } from '../../core/code/diff-text.js';
+import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
+import { shellArg } from '../format.js';
+import { callOp, openContext, realpathOr, wsIdOfContext } from '../runtime.js';
+import { showUrl, shownPrefix } from '../snapshot.js';
 import { resolveBrowser } from './open.js';
 
 /** The modes a review can name (protocol.js CODE_MODES without 'pr', which is WP3b's `--pr`). */
@@ -153,6 +164,86 @@ function intArg(v, flag, min) {
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 export async function execute(rt, input) {
-  void [rt, input];
-  throw new UsageError('code review is not available in this build', { details: { kind: 'code' } });
+  const browser = input.browser ?? resolveBrowser(undefined, rt.env);
+  // the workspace of a code review is the repository top level (repo-relative paths are workspace paths)
+  const root = rt.workspace ?? (await openRepo(rt.cwd, { allowSubdir: true })).root;
+  const ws = await findWorkspace(root, { create: false, explicitRoot: root });
+  const storeCreated = !ws.exists;
+  if (storeCreated) await initStoreDir(ws.root);
+  const { ctx, engine } = await openContext(rt, { create: true, root: ws.root });
+  const res = await callOp(engine, 'openCodeReview', ctx, { input: input.input ?? {}, title: input.title });
+  const doc = res.doc;
+  const code = res.code;
+  const wsId = wsIdOfContext(ctx) || ws.wsId;
+  const ref = await reviewRef(rt, doc.id, ws.root);
+
+  /** @type {import('../../shared/types.js').DaemonInfo | null} */
+  let info = null;
+  /** @type {unknown} */
+  let daemonError = null;
+  try {
+    info = await rt.ensureDaemon();
+  } catch (err) {
+    daemonError = err;
+  }
+  /** @type {string[]} */
+  const stderr = [];
+  const url = info ? rt.reviewUrl(info, wsId, doc.id) : null;
+  const shown = url ? await showUrl(rt, url, browser, stderr) : 'none';
+
+  const v = res.version?.v ?? doc.head;
+  const st = codeStats(code.files);
+  const label = specLabel(doc.code, code);
+  const what = res.created ? `v${v}` : res.recorded ? `recorded round v${v}` : `unchanged since v${v}`;
+  const lines = [`specreview: code review ${doc.id} ${what} · ${label}`];
+  const skipped = code.skipped.length ? ` · skipped: ${skippedText(code.skipped)}` : '';
+  lines.push(`  ${st.files} file${st.files === 1 ? '' : 's'} · +${st.added} -${st.removed}${skipped}`);
+  lines.push(url ? `  review UI: ${url}` : `  review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
+  lines.push(`next: ${shownPrefix(shown)}run \`specreview wait ${ref}\` in the background`);
+  if (storeCreated) lines.push(`created ${path.join(ws.root, '.specreview')}/ (the SpecReview store; reviews never include it)`);
+  if (daemonError) {
+    stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the review is recorded; run \`specreview doctor\`)`);
+  }
+  const spec = /** @type {any} */ (doc.code ?? {});
+  const json = {
+    doc: doc.id,
+    kind: 'code',
+    created: Boolean(res.created),
+    version: v,
+    recorded: Boolean(res.recorded),
+    mode: spec.mode,
+    base: spec.base ?? null,
+    baseSha: code.baseSha,
+    headSha: code.headSha ?? null,
+    newSha: code.newSha ?? null,
+    worktree: code.newSide === 'worktree',
+    root: ws.root,
+    files: code.files.map((f) => ({ path: f.path, ...(f.oldPath ? { oldPath: f.oldPath } : {}), status: f.status, added: f.added ?? 0, removed: f.removed ?? 0 })),
+    skipped: code.skipped.map((x) => ({ path: x.path, reason: x.reason })),
+    stats: st,
+    url,
+    wsId,
+    ref,
+    ...(daemonError ? { error: { message: /** @type {Error} */ (daemonError).message } } : {}),
+  };
+  return { exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK, text: lines.join('\n'), stderr, json };
+}
+
+/**
+ * How follow-up commands run from the cwd name the review: its id when workspace discovery from the cwd finds the
+ * review's workspace, else the id with `--workspace <root>` (relative to the cwd).
+ * @param {import('../runtime.js').Runtime} rt
+ * @param {string} docId
+ * @param {string} root
+ * @returns {Promise<string>}
+ */
+async function reviewRef(rt, docId, root) {
+  const real = realpathOr(root);
+  try {
+    const here = await findWorkspace(rt.cwd, { create: false });
+    if (here.exists && realpathOr(here.root) === real) return docId;
+  } catch {
+    // no workspace from the cwd ($HOME, /): name the root
+  }
+  return `${docId} --workspace ${shellArg(path.relative(realpathOr(rt.cwd), real) || '.')}`;
 }

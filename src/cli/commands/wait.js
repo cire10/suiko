@@ -162,14 +162,14 @@ export async function execute(rt, input) {
     for (const fn of cleanups) fn();
   }
 
-  return finish(rt, engine, { outcome, delivery, abortedBy, label, noun, head, timeoutMs, input });
+  return finish(rt, engine, { outcome, delivery, abortedBy, label, noun, head, timeoutMs, input, ctx });
 }
 
 /**
  * @param {import('../runtime.js').Runtime} rt
  * @param {import('../engine.js').Engine} engine
  * @param {{ outcome: any, delivery: import('../delivery.js').Delivery, abortedBy: string | null, label: string,
- *   noun: string, head: number | null, timeoutMs: number, input: WaitInput }} s
+ *   noun: string, head: number | null, timeoutMs: number, input: WaitInput, ctx?: any }} s
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 async function finish(rt, engine, s) {
@@ -224,6 +224,15 @@ async function finish(rt, engine, s) {
     const doc = outcome.docId ?? outcome.doc ?? (s.input.all ? label : s.noun);
     const head = outcome.head ?? s.head;
     const ref = s.input.all ? doc : label; // as the agent named it (a path when the id would not resolve here)
+    const code = await codeDirtyFiles(engine, s.ctx, doc);
+    if (code) {
+      const files = code.files.length ? ` (${code.files[0]}${code.files.length > 1 ? `, +${code.files.length - 1} more` : ''})` : '';
+      return {
+        exit: EXIT.REFUSED,
+        stderr: [`specreview: ${doc}: files changed since v${code.head ?? head ?? '?'}${files}: run \`specreview revise ${ref}\` to record the round first, or pass --allow-dirty.`],
+        json: { status: 'dirty', doc, head: code.head ?? head ?? null, changedFiles: code.files },
+      };
+    }
     return {
       exit: EXIT.REFUSED,
       stderr: [
@@ -234,6 +243,24 @@ async function finish(rt, engine, s) {
     };
   }
   throw new Error(`waitForFeedback returned an unexpected result: ${JSON.stringify(outcome)}`);
+}
+
+/**
+ * The changed repo files of a dirty code review (design 4.13), or null for any other doc (or when unknown).
+ * @param {import('../engine.js').Engine} engine
+ * @param {any} ctx
+ * @param {string} docId
+ * @returns {Promise<{ files: string[], head: number | null } | null>}
+ */
+async function codeDirtyFiles(engine, ctx, docId) {
+  if (!ctx || typeof engine.ops.docState !== 'function') return null;
+  try {
+    const st = await engine.ops.docState(ctx, docId);
+    if (st?.doc?.kind !== 'code') return null;
+    return { files: Array.isArray(st.working?.changedFiles) ? st.working.changedFiles : [], head: st.doc.head ?? null };
+  } catch {
+    return null;
+  }
 }
 
 /**

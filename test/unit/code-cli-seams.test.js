@@ -1,6 +1,6 @@
 // @ts-check
 // The CLI / MCP seams of code reviews (design 2.11, 4.2, WP0b): `specreview review` parses its final spec into the
-// ReviewInput that openCodeReview takes and (until WP3) exits 1 with "code review is not available in this build";
+// ReviewInput that openCodeReview takes (exit 1 outside a git repository);
 // MCP specreview_review maps onto the same input; `revise` replies and `reply --at` accept the repo-file forms
 // (canonicalised), while a spec doc refuses them before anything is written.
 
@@ -13,7 +13,6 @@ import * as review from '../../src/cli/commands/review.js';
 import { ReviseInputSchema, validate } from '../../src/cli/schemas.js';
 import { TOOLS } from '../../src/mcp/tools.js';
 import * as ops from '../../src/core/review/ops.js';
-import { CODE_NOT_AVAILABLE } from '../../src/core/code/index.js';
 import { engineCtx, makeWorkspace } from '../helpers/engine.js';
 
 /**
@@ -24,7 +23,7 @@ async function parseReview(argv, env = {}) {
   return review.parse(parseCommandArgs('review', argv, review.spec.options), /** @type {any} */ ({ env }));
 }
 
-describe('specreview review (stub with the final spec)', () => {
+describe('specreview review: spec and parsing', () => {
   test('registered in the loop group; --help names every flag of the spec', async () => {
     assert.equal(COMMANDS.review.group, 'loop');
     const mod = await COMMANDS.review.load();
@@ -59,10 +58,17 @@ describe('specreview review (stub with the final spec)', () => {
     }
   });
 
-  test('execute exits 1 until the code engine lands', async () => {
-    const input = await parseReview([]);
-    await assert.rejects(review.execute(/** @type {any} */ ({}), input), (err) => err instanceof UsageError && err.message === CODE_NOT_AVAILABLE);
-    await assert.rejects(ops.openCodeReview(/** @type {any} */ ({}), { input: input.input }), (err) => err instanceof UsageError && err.message === CODE_NOT_AVAILABLE);
+  test('outside a git repository execute and openCodeReview are usage errors (exit 1)', async () => {
+    const ws = await makeWorkspace({ files: [] });
+    try {
+      const input = await parseReview([]);
+      const rt = /** @type {any} */ ({ cwd: ws.root, env: {}, workspace: undefined });
+      await assert.rejects(review.execute(rt, input), (err) => err instanceof UsageError && /not inside a git repository/.test(err.message));
+      const ctx = await engineCtx(ws.root);
+      await assert.rejects(ops.openCodeReview(ctx, { input: input.input }), (err) => err instanceof UsageError && /not inside a git repository/.test(err.message));
+    } finally {
+      await ws.cleanup();
+    }
   });
 });
 

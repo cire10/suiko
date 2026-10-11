@@ -4,8 +4,13 @@
 // --stat (default): per-hunk summary with thread links (engine changes() + formatDiffStat).
 // --unified: a git-compatible unified patch (engine unifiedDiff() when present, else built from the store's
 // version sources with the diff module's unifiedPatch()). --json prints the Changes object (or {from,to,patch}).
+// A code review (design 4.12): the interdiff of two rounds per file. --stat prints one line per changed file (added,
+// dropped, renamed or changed between the rounds, with the threads its hunks are linked to; engine codeFiles);
+// --unified prints a unified patch per file labelled a/<path>@vA and b/<path>@vB. The working tree is not a round:
+// `live` is refused (record it with `specreview revise` first).
 
 import { UsageError } from '../../core/store/errors.js';
+import { isCode } from '../../core/store/snapshot.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals, parseDiffRange } from '../args.js';
 import { formatWith } from '../engine.js';
@@ -40,6 +45,7 @@ export async function execute(rt, input) {
   const resolve = (/** @type {number | 'live' | 'head' | undefined} */ v) => (v === 'head' ? doc.head : v);
   const from = resolve(input.from);
   const to = resolve(input.to);
+  if (isCode(doc)) return codeDiff(engine, ctx, doc, from, to, input.format ?? 'stat');
   if (input.format === 'unified') {
     const range = defaultRange(doc, from, to);
     const patch =
@@ -56,6 +62,46 @@ export async function execute(rt, input) {
   const changes = await callOp(engine, 'changes', ctx, docId, { from, to });
   const shown = { from: changes?.from ?? from, to: changes?.to ?? to, ...changes };
   return { exit: EXIT.OK, text: formatWith(engine, 'formatDiffStat', shown, () => FALLBACK_FORMATTERS.formatDiffStat(shown)), json: { doc: docId, ...shown } };
+}
+
+/**
+ * `diff` of a code review (see the header).
+ * @param {import('../engine.js').Engine} engine
+ * @param {any} ctx
+ * @param {any} doc
+ * @param {number | 'live' | undefined} from
+ * @param {number | 'live' | undefined} to
+ * @param {'stat' | 'unified'} format
+ * @returns {Promise<import('../io.js').CommandResult>}
+ */
+async function codeDiff(engine, ctx, doc, from, to, format) {
+  if (from === 'live' || to === 'live') {
+    throw new UsageError(`diff: the working tree of a code review is not a round; record it first (\`specreview revise ${doc.id} --replies -\`), or run git diff`);
+  }
+  const range = { ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) };
+  if (format === 'unified') {
+    const res = await callOp(engine, 'unifiedDiff', ctx, doc.id, range);
+    const text = String(res?.patch ?? '');
+    return {
+      exit: EXIT.OK,
+      text: text.replace(/\n$/, '') || `no changes between v${res.from} and v${res.to}`,
+      json: { doc: doc.id, from: res.from, to: res.to, patch: text },
+    };
+  }
+  const res = await callOp(engine, 'codeFiles', ctx, doc.id, { from: from ?? null, to: to ?? null });
+  /** @type {Array<{ path: string, oldPath?: string, change: string, added: number, removed: number, threads: string[] }>} */
+  const files = res.files ?? [];
+  const added = files.reduce((n, f) => n + (f.added || 0), 0);
+  const removed = files.reduce((n, f) => n + (f.removed || 0), 0);
+  const lines = [`${doc.id} v${res.from}..v${res.to} · ${files.length} file${files.length === 1 ? '' : 's'} changed · +${added} -${removed}`];
+  const width = Math.min(60, Math.max(0, ...files.map((f) => f.path.length)));
+  for (const f of files) {
+    const what = f.change === 'changed' ? '' : f.change === 'renamed' ? ` (renamed from ${f.oldPath})` : ` (${f.change})`;
+    const threads = f.threads.length ? `  -> ${f.threads.join(', ')}` : '';
+    lines.push(`  ${f.path.padEnd(width)}  +${f.added} -${f.removed}${what}${threads}`);
+  }
+  if (!files.length) lines.push(res.from === res.to ? '  (the same round)' : `  no file changed between v${res.from} and v${res.to}`);
+  return { exit: EXIT.OK, text: lines.join('\n'), json: { doc: doc.id, kind: 'code', from: res.from, to: res.to, files, stats: { files: files.length, added, removed } } };
 }
 
 /**
