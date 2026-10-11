@@ -8,7 +8,7 @@ SpecReview is a local tool. It turns an AI-written spec (`.md` or `.html`) into 
 
 1. **Open.** The agent writes the spec once and runs `specreview open <file>`.
    - The spec renders faithfully in a local web UI: scripts, SVG, images, tables, code, mermaid and math all work.
-   - In the Claude desktop app, the UI opens in the built-in browser pane next to the chat.
+   - The UI opens in the user's default browser; the Claude desktop app's built-in browser pane is an option (`SPECREVIEW_BROWSER=pane`).
 2. **Wait.** The agent runs `specreview wait <doc>` in the background and ends its turn. Waiting costs no tokens.
 3. **Review.** The reviewer can comment on anything: a phrase, a region of an image, a mermaid node, a table cell, code lines, a section, or raw source lines.
    - They can ask questions, suggest exact replacements, and mark parts **Agreed**, which locks them.
@@ -178,7 +178,7 @@ next: open the URL (browser pane), then run `specreview wait token-service` in t
 - If the doc is already tracked, `open` only prints the URL. If the working copy differs from head, it adds `working copy differs from v3 (unrecorded)`.
 
 ### 3.3 Show the UI beside the chat
-If the desktop pane tool exists, Claude calls `mcp__Claude_Browser__preview_start({"url": "<url>"})`. Otherwise it prints the URL, or runs `specreview open … --browser system`.
+`open` opens the URL in the user's default browser (the in-app pane is too cramped next to the chat and sidebar for a review). With `--browser pane` or `SPECREVIEW_BROWSER=pane`, it only prints the URL and Claude calls `mcp__Claude_Browser__preview_start({"url": "<url>"})` when the desktop pane tool exists, or prints the URL otherwise.
 
 ### 3.4 Wait for the review
 Claude runs Bash `specreview wait token-service` with `run_in_background: true`. It tells the user "v1 is open in the pane; comment on anything, then click **Submit review**. I'll pick it up automatically." Then it ends its turn.

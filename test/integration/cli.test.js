@@ -105,7 +105,7 @@ describe('agent name and doc resolution', () => {
       [{ CLAUDECODE: '1' }, ['--as', 'gemini'], 'gemini'],
       [{}, [], 'agent'],
     ])) {
-      const { engine, d } = deps({ env: { ...env, SPECREVIEW_HOME: process.env.SPECREVIEW_HOME } });
+      const { engine, d } = deps({ env: { ...env, SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME } });
       const r = await runCli(['log', 'token-service', ...flag], d);
       assert.equal(r.code, 0, r.stderr);
       assert.equal(engine.calls.find((c) => c.name === 'createContext')?.args[0].agent, expected);
@@ -201,6 +201,35 @@ describe('open', () => {
     assert.equal(r.code, 1);
     assert.match(r.stderr, /unsupported file type/);
     assert.equal((await runCli(['open', 'docs/specs/token-service.md', '--browser', 'lynx'], d)).code, 1);
+  });
+  test('opens the system browser by default; --browser and $SPECREVIEW_BROWSER choose pane or none', async () => {
+    /** @type {string[]} */
+    const opened = [];
+    const { d } = deps({ openBrowser: async (/** @type {string} */ url) => void opened.push(url) });
+    const doc = 'docs/specs/token-service.md';
+    const home = process.env.SPECREVIEW_HOME;
+    const sys = await runCli(['open', doc], { ...d, env: { SPECREVIEW_HOME: home } });
+    assert.equal(sys.code, 0, sys.stderr);
+    assert.equal(opened.length, 1);
+    assert.match(sys.stdout, /next: the URL was opened in the system browser/);
+    const pane = await runCli(['open', doc], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'pane' } });
+    assert.match(pane.stdout, /next: open the URL \(browser pane\)/);
+    const flag = await runCli(['open', doc, '--browser', 'none'], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'system' } });
+    assert.match(flag.stdout, /^next: run `specreview wait/m);
+    assert.equal(opened.length, 1);
+    const bad = await runCli(['open', doc], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'lynx' } });
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /SPECREVIEW_BROWSER must be one of pane, system, none/);
+    const failing = await runCli(['open', doc], {
+      ...d,
+      env: { SPECREVIEW_HOME: home },
+      openBrowser: async () => {
+        throw new Error('no display');
+      },
+    });
+    assert.equal(failing.code, 0);
+    assert.match(failing.stderr, /could not open the system browser: no display/);
+    assert.match(failing.stdout, /next: the system browser could not be opened; give the user the URL/);
   });
   test('server start failure: doc tracked, exit 1, explained', async () => {
     const { d } = deps({

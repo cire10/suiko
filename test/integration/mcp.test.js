@@ -41,7 +41,7 @@ async function connect(overrides = {}, extraDeps = {}) {
     ops: engine.ops,
     createContext: engine.createContext,
     cwd: ws.root,
-    env: { SPECREVIEW_HOME: HOME, CLAUDECODE: '1' },
+    env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, CLAUDECODE: '1' },
     ensureDaemon: async () => /** @type {any} */ ({ pid: 1, uiPort: 5811, contentPort: 5812, token: 'tk', secret: 's', version: '0.1.0', startedAt: '' }),
     ...extraDeps,
   });
@@ -233,7 +233,7 @@ describe('mcp (stdio process)', () => {
   test('`specreview mcp` answers initialize and tools/list; stdout is JSON-RPC only', async () => {
     const child = spawn(process.execPath, [BIN, 'mcp'], {
       cwd: ws.root,
-      env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_HOME: HOME },
+      env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let out = '';

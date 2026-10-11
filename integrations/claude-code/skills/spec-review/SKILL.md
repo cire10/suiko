@@ -23,9 +23,10 @@ specreview open docs/specs/<name>.md
 
 It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. Below, `<doc>` is that id or the file path.
 
-1. **Show the UI** beside the chat:
-   - If the tool `mcp__Claude_Browser__navigate` exists, call it with `{"url": "<url>"}`; it opens the browser pane if needed. `mcp__Claude_Browser__preview_start` with `{"url": "<url>"}` works too. If the tool is listed as deferred, load it first.
-   - If neither exists, or only a `mcp__remote-devices__…` variant does (that browser runs on another machine and cannot reach this one's 127.0.0.1), give the user the URL. `specreview open <file> --browser system` opens their default browser instead.
+1. **Show the UI** as the `next:` line says:
+   - `the URL was opened in the system browser`: it is already open in the user's browser. Do nothing more.
+   - `open the URL (browser pane)` (the user set `SPECREVIEW_BROWSER=pane`): if the tool `mcp__Claude_Browser__navigate` exists, call it with `{"url": "<url>"}`; it opens the browser pane if needed. `mcp__Claude_Browser__preview_start` with `{"url": "<url>"}` works too. If the tool is listed as deferred, load it first. If neither exists, or only a `mcp__remote-devices__…` variant does (that browser runs on another machine and cannot reach this one's 127.0.0.1), give the user the URL.
+   - Anything else (the browser could not be opened, or `none`): give the user the URL.
 2. **Wait in the background:** run Bash `specreview wait <doc>` with `run_in_background: true`, naming the doc exactly as the `next:` line of `open` prints it (it uses the file path when you run from above the workspace root, e.g. a project without git whose `.specreview/` sits next to the spec).
 3. Tell the user: "v1 is open. Comment on anything (select text and press c, or press b and drag a box to snip any area), then click **Submit review**. I'll pick it up automatically." Then **end the turn**. Do not poll, sleep or loop on `status`: you are re-invoked when `wait` exits.
 

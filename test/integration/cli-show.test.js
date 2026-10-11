@@ -47,7 +47,7 @@ async function cli(argv) {
   const err = memorySink();
   const code = await main(argv, {
     cwd: ws.root,
-    env: { SPECREVIEW_HOME: /** @type {string} */ (process.env.SPECREVIEW_HOME), CLAUDECODE: '1' },
+    env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: /** @type {string} */ (process.env.SPECREVIEW_HOME), CLAUDECODE: '1' },
     stdin: Readable.from([]),
     stdout: out,
     stderr: err,
@@ -123,7 +123,7 @@ describe('show <doc> <tid> prints src> and crop like a packet item', { skip: HAS
     const { TOOLS } = await import('../../src/mcp/tools.js');
     const { callTool } = await import('../../src/mcp/server.js');
     const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'specreview_show'));
-    const res = await callTool(tool, { doc: DOC, thread_id: 't2' }, null, { cwd: ws.root, env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
+    const res = await callTool(tool, { doc: DOC, thread_id: 't2' }, null, { cwd: ws.root, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
     assert.equal(res.isError, undefined, res.content[0].text);
     assert.match(res.content[0].text, /^ {2}src> !\[System overview\]/m);
     assert.match(res.content[0].text, /^ {2}crop: \S+a1\.png {2}\(Read it to see the region\)$/m);

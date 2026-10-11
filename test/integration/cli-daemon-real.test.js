@@ -66,7 +66,7 @@ function run(args, env) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [BIN, ...args], {
       cwd: WS,
-      env: { PATH: /** @type {string} */ (process.env.PATH), HOME: os.homedir(), SPECREVIEW_HOME: HOME, ...env },
+      env: { PATH: /** @type {string} */ (process.env.PATH), HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

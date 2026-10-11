@@ -32,7 +32,7 @@ function hook(name, payload, env = {}) {
   const r = spawnSync(process.execPath, [BIN, 'hook', name], {
     input,
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_HOME: HOME, ...env },
+    env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, ...env },
     timeout: 10000,
   });
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -209,7 +209,7 @@ describe('hook prompt', () => {
     const out = memorySink();
     const many = Array.from({ length: 200 }, (_, i) => `rv${i + 2}`);
     for (const id of many) await ws.store.saveReview('token-service', review({ id }));
-    await runHook('prompt', { stdin: Readable.from([JSON.stringify(payload())]), stdout: out, env: { SPECREVIEW_HOME: HOME } });
+    await runHook('prompt', { stdin: Readable.from([JSON.stringify(payload())]), stdout: out, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME } });
     const ctx = JSON.parse(out.text()).hookSpecificOutput.additionalContext;
     assert.ok(ctx.length <= 1000, `length ${ctx.length}`);
     assert.ok(ctx.endsWith('…'));
@@ -374,8 +374,8 @@ describe('robustness and speed', () => {
 
   test('runHook never throws, even with a broken stdout', async () => {
     const broken = /** @type {any} */ ({ write() { throw new Error('EPIPE'); } });
-    await runHook('pre-write', { stdin: Readable.from([JSON.stringify(rewrite())]), stdout: broken, env: { SPECREVIEW_HOME: HOME } });
-    await runHook('prompt', { stdin: Readable.from([JSON.stringify(payloadFor(ws.root))]), stdout: broken, env: { SPECREVIEW_HOME: HOME } });
+    await runHook('pre-write', { stdin: Readable.from([JSON.stringify(rewrite())]), stdout: broken, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME } });
+    await runHook('prompt', { stdin: Readable.from([JSON.stringify(payloadFor(ws.root))]), stdout: broken, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME } });
   });
 
   test('cold start under 150 ms (best of 5), with and without a store', () => {
