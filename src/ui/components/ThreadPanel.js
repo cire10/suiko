@@ -1,13 +1,14 @@
 // @ts-check
 // Right panel in Review / Source / History modes (and the "Threads" tab in Changes mode): filter chips with counts
-// (Open, Needs me, Verify, Drafts, Resolved, Outdated, All), "General comment", and the thread / draft cards in
-// document order (List layout, amendments 1). Focusing a card scrolls the doc to its anchor; clicking a
-// highlight in the doc focuses its card.
+// (Open, Needs me, Verify, Drafts, Resolved, Outdated, All), "General comment" (a code review takes it as a
+// whole-review thread), and the thread / draft cards in document order (List layout, amendments 1; a code review
+// orders them by file). Focusing a card scrolls the doc to its anchor; clicking a highlight in the doc focuses its
+// card.
 
 import { html, useMemo } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { openComposer, setFilter } from '../actions.js';
-import { agentName, filterCounts, FILTERS, panelItems } from '../model.js';
+import { agentName, filterCounts, FILTERS, kindCaps, panelItems } from '../model.js';
 import { useStore } from '../state.js';
 import { DraftCard, ThreadCard } from './ThreadCard.js';
 
@@ -46,11 +47,13 @@ export function ThreadPanel() {
     focusedId: st.focusedId,
     reply: st.reply,
     busyThreads: st.busyThreads,
-    draftTargets: st.targets ? st.targets.drafts : null,
+    // Painted drafts and target states describe the rendered doc frame: a kind without one (a code review) has
+    // neither, so its drafts all count as shown.
+    draftTargets: st.targets && kindCaps(st.ds).frame ? st.targets.drafts : null,
     // Only the non-'ok' target states matter here; positions themselves change on every scroll. They describe the
     // rendered doc, so they mean something only while it is displayed (Review / Changes): in Source and History the
     // iframe is hidden and every target would read as "hidden".
-    states: st.mode === 'review' || st.mode === 'changes' ? targetStates(st.guest.positions) : '',
+    states: kindCaps(st.ds).frame && (st.mode === 'review' || st.mode === 'changes') ? targetStates(st.guest.positions) : '',
   }));
   const items = useMemo(() => panelItems(s.ds, s.filter, s.version), [s.ds, s.filter, s.version]);
   const counts = useMemo(() => filterCounts(s.ds, s.version), [s.ds, s.version]);
@@ -58,6 +61,7 @@ export function ThreadPanel() {
   const agent = agentName(s.ds);
   const total = (s.ds.threads || []).length + (s.ds.drafts?.items || []).length;
   const canComment = s.version !== 'live';
+  const framed = kindCaps(s.ds).frame;
 
   return html`<section class="thread-panel" data-testid=${TESTID.threadPanel} aria-label="Threads">
     <div class="panel-head">
@@ -68,14 +72,15 @@ export function ThreadPanel() {
           ${f.label}<span class="count">${counts[f.key] || 0}</span></button>`)}
       </div>
       ${canComment ? html`<button type="button" class="btn btn-sm" onClick=${() => openComposer({ capture: { kind: 'doc' } })}
-        title="A comment about the whole document">General comment</button>` : null}
+        title=${framed ? 'A comment about the whole document' : 'A comment about the whole review'}>General comment</button>` : null}
     </div>
     <div class="cards" role="list">
       ${items.length === 0
         ? html`<div class="empty" role="listitem">${total === 0 || s.filter === 'open' || s.filter === 'all'
           ? html`<p><strong>${total === 0 ? 'No threads yet.' : 'No open threads.'}</strong></p>
-              <p>Select text and press <kbd>C</kbd>, press <kbd>B</kbd> to snip any area of the document, or <kbd>E</kbd> to
-                pick an image, diagram, table or code block.</p>`
+              ${framed ? html`<p>Select text and press <kbd>C</kbd>, press <kbd>B</kbd> to snip any area of the document, or <kbd>E</kbd> to
+                pick an image, diagram, table or code block.</p>` : html`<p>Click a line number (shift-click for a range) to comment on
+                lines, or comment on a whole file from its header.</p>`}`
           : html`<p>${EMPTY[s.filter] || 'Nothing here.'}</p>`}</div>`
         : items.map((it) => (it.kind === 'thread'
           ? html`<${ThreadCard} key=${it.id} t=${it.item} ds=${s.ds} version=${s.version} agent=${agent}

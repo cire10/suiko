@@ -37,6 +37,69 @@ export function sectionTail(section) {
   return section ? String(section) : '';
 }
 
+// ------------------------------------------------------------------------------------------------ doc kinds and modes
+
+/** The doc's kind: 'file' (a spec on disk; doc.json has no kind), 'snapshot' or 'code'. @param {DocState} ds */
+export function docKindOf(ds) {
+  const k = ds?.doc?.kind;
+  return k === 'code' || k === 'snapshot' ? k : 'file';
+}
+
+/**
+ * What the doc view offers for a kind (design 2.14), read by the components and actions that depend on the rendered
+ * doc frame: frame (the doc iframe and its guest), pick / snip / hide (the guest tools), pageErrors (the status
+ * bar's page error count), applyNow (the reviewer applies a suggestion to the file: not for snapshots, whose agent
+ * applies them when it revises), liveBanners (the working-copy and lost-frame banners), locks ("Mark agreed").
+ * A code review has no frame: its view renders diffs as text nodes (src/ui/components/kinds/CodeReviewView.js).
+ * @param {DocState} ds
+ * @returns {{ frame: boolean, pick: boolean, snip: boolean, hide: boolean, pageErrors: boolean, applyNow: boolean,
+ *   liveBanners: boolean, locks: boolean }}
+ */
+export function kindCaps(ds) {
+  const kind = docKindOf(ds);
+  if (kind === 'code') {
+    return { frame: false, pick: false, snip: false, hide: false, pageErrors: false, applyNow: true, liveBanners: false, locks: false };
+  }
+  // a snapshot's suggestions are applied by its agent when it revises: no "Apply now"
+  const applyNow = ds?.doc?.kind !== 'snapshot';
+  return { frame: true, pick: true, snip: true, hide: true, pageErrors: true, applyNow, liveBanners: true, locks: true };
+}
+
+/**
+ * @typedef {{ key: 'review'|'changes'|'source'|'history', label: string, n: number, description: string }} ModeInfo
+ *   n: its number key (stable per mode key across kinds)
+ */
+
+/** @type {readonly ModeInfo[]} */
+const FILE_MODES = Object.freeze([
+  { key: 'review', label: 'Review', n: 1, description: 'Comment on the rendered document' },
+  { key: 'changes', label: 'Changes', n: 2, description: 'What changed since your last review' },
+  { key: 'source', label: 'Source', n: 3, description: 'The source with line numbers and its diff' },
+  { key: 'history', label: 'History', n: 4, description: 'Versions and reviews, newest first' },
+]);
+
+/** @type {readonly ModeInfo[]} */
+const CODE_MODES = Object.freeze([
+  { key: 'review', label: 'Files', n: 1, description: 'The changed files of the review, as diffs' },
+  { key: 'changes', label: 'Changes', n: 2, description: 'What changed in the files since your last review' },
+  { key: 'history', label: 'History', n: 4, description: 'Rounds and reviews, newest first' },
+]);
+
+/**
+ * The modes (tabs) of a doc, in order. A code review reuses the mode key 'review' for its file diffs (labelled
+ * "Files") and has no Source mode.
+ * @param {DocState} ds
+ * @returns {readonly ModeInfo[]}
+ */
+export function modesFor(ds) {
+  return docKindOf(ds) === 'code' ? CODE_MODES : FILE_MODES;
+}
+
+/** Whether the doc offers a mode. @param {DocState} ds @param {string} mode */
+export function hasMode(ds, mode) {
+  return modesFor(ds).some((m) => m.key === mode);
+}
+
 /** @param {string|null|undefined} iso */
 export function formatClock(iso) {
   if (!iso) return '';
@@ -171,6 +234,12 @@ export function anchorAt(item, v) {
  */
 export function targetLabel(a) {
   if (!a) return '';
+  // code reviews: 'src/a.js:L3-4', 'src/a.js (old side) L3-4', 'src/a.js (whole file)'
+  if (a.file?.path) {
+    const lines = a.kind === 'doc' ? '' : linesLabel(a.src);
+    if (!lines) return `${a.file.path} (whole file)`;
+    return a.file.side === 'old' ? `${a.file.path} (old side) ${lines}` : `${a.file.path}:${lines}`;
+  }
   if (a.kind === 'doc') return 'General comment';
   if (a.kind === 'section') return `§ ${sectionTail(a.section) || 'section'}`;
   if (a.kind === 'source') return linesLabel(a.src) || 'source lines';
@@ -252,6 +321,13 @@ export function docOrderKey(a) {
   if (Number.isFinite(a.src?.start)) return a.src.start;
   if (Number.isFinite(a.src?.startLine)) return a.src.startLine * 1000;
   return Number.MAX_SAFE_INTEGER - 1;
+}
+
+/** Code anchors: compares their file paths ('' for anchors without a file). @param {Anchor|null} a @param {Anchor|null} b */
+function fileOrder(a, b) {
+  const fa = String(a?.file?.path ?? '');
+  const fb = String(b?.file?.path ?? '');
+  return fa === fb ? 0 : fa < fb ? -1 : 1;
 }
 
 /** Numeric part of an id like 't12' (for stable ordering). @param {string} id */
@@ -363,7 +439,9 @@ export function panelItems(ds, filter, version) {
   if (filter === 'open' || filter === 'drafts' || filter === 'all') {
     for (const d of threadDrafts(ds.drafts)) out.push({ kind: 'draft', id: d.id, item: d, anchor: d.anchor || null });
   }
-  out.sort((a, b) => docOrderKey(a.anchor) - docOrderKey(b.anchor)
+  // code reviews: by file first (whole-review threads, which have no file, come first)
+  out.sort((a, b) => fileOrder(a.anchor, b.anchor)
+    || docOrderKey(a.anchor) - docOrderKey(b.anchor)
     || (a.kind === b.kind ? 0 : a.kind === 'thread' ? -1 : 1)
     || idNumber(a.id) - idNumber(b.id));
   return out;
@@ -786,6 +864,8 @@ export function threadsOfVersion(ds, v) {
  * @param {any} [anchor]
  */
 export function anchorChipParts(preview, anchor) {
+  // a code anchor names its file and lines in one label ('src/a.js:L3-4')
+  if (anchor?.file?.path) return { lines: '', section: '', label: clip(preview?.label || targetLabel(anchor), 90) };
   const lines = linesLabel(preview?.lines ?? (anchor?.src ? [anchor.src.startLine, anchor.src.endLine] : null));
   const section = sectionTail(preview?.section ?? anchor?.section);
   const label = preview?.label || targetLabel(anchor);

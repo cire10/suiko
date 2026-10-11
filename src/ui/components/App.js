@@ -1,6 +1,8 @@
 // @ts-check
 // Root component and the doc view layout (design 11.1 / 11.2, amendments 1 List layout):
 //   TopBar / banners / [outline rail | doc frame or Source / History view | side panel] / status bar.
+// A doc kind can replace the banners, the doc frame, the outline rail and the Changes list with its own components
+// (components/kinds/index.js: a code review shows a file tree and diffs instead of a rendered doc).
 // Between 900 and 1199 px (e.g. a desktop app's browser pane) the outline rail is collapsed behind the menu button
 // unless the user opened it (remembered), and the side panel is narrower, so the doc keeps most of the width.
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
@@ -13,13 +15,11 @@
 // The command palette, Settings and the keyboard shortcuts are global dialogs (also on the doc list); Submit review
 // belongs to the doc view. One dialog shows at a time.
 
-import { html, useEffect, useRef, useState } from 'preact-htm';
-import {
-  goToNewHead, navigate, railShown, recordWorkingCopy, reloadFrame, startRecording, stopRecording, switchVersion, setMode,
-  toggleNav, toggleSidebar,
-} from '../actions.js';
-import { agentName } from '../model.js';
+import { html } from 'preact-htm';
+import { navigate, railShown, toggleNav, toggleSidebar } from '../actions.js';
+import { docKindOf } from '../model.js';
 import { store, useStore } from '../state.js';
+import { Banners } from './Banners.js';
 import { ChangesView } from './ChangesView.js';
 import { CommandPalette } from './CommandPalette.js';
 import { Composer } from './Composer.js';
@@ -37,6 +37,7 @@ import { ThreadPanel } from './ThreadPanel.js';
 import { Toasts } from './Toasts.js';
 import { TopBar } from './TopBar.js';
 import { Icon } from './common.js';
+import { KindBanners, KindMain, KindRail, KindSide } from './kinds/index.js';
 
 export function App() {
   const route = useStore((s) => s.route);
@@ -85,6 +86,7 @@ function DocView() {
     nav: st.nav,
     sidebar: st.sidebar,
     dialog: st.dialog,
+    railTitle: docKindOf(st.ds) === 'code' ? 'Files' : 'Outline',
   }));
   if (s.loadError) {
     return html`<div class="page-message" role="alert">
@@ -107,15 +109,15 @@ function DocView() {
   ].filter(Boolean).join(' ');
   return html`<div class=${cls} data-mode=${s.mode}>
     <${TopBar} />
-    <${Banners} />
+    <${BannerSlot} />
     <div class="main">
       <aside class="rail-left" aria-label="Outline and history" id="sr-nav">
-        ${s.narrow ? html`<div class="drawer-head"><strong>Outline</strong>
-          <button type="button" class="icon-btn" aria-label="Close outline" onClick=${toggleNav}><${Icon} name="close" /></button></div>` : null}
-        <${Outline} />
+        ${s.narrow ? html`<div class="drawer-head"><strong>${s.railTitle}</strong>
+          <button type="button" class="icon-btn" aria-label=${`Close ${s.railTitle.toLowerCase()}`} onClick=${toggleNav}><${Icon} name="close" /></button></div>` : null}
+        <${RailSlot} />
       </aside>
       <main class="center" aria-label="Document">
-        <${DocFrame} />
+        <${MainSlot} />
         ${s.mode === 'source' ? html`<${SourceView} />` : null}
         ${s.mode === 'history' ? html`<${HistoryView} />` : null}
       </main>
@@ -130,10 +132,31 @@ function DocView() {
   </div>`;
 }
 
+// The kind seam (components/kinds/index.js): a doc kind's own banner, center view and rail replace the spec-doc ones.
+
+/** The banner stack, or the doc kind's banner (KindBanners). */
+function BannerSlot() {
+  const ds = useStore((s) => s.ds);
+  return KindBanners({ ds }) ?? html`<${Banners} />`;
+}
+
+/** The doc frame, or the doc kind's center view (KindMain: a code review's diffs). */
+function MainSlot() {
+  const ds = useStore((s) => s.ds);
+  return KindMain({ ds }) ?? html`<${DocFrame} />`;
+}
+
+/** The outline, or the doc kind's rail (KindRail: a code review's file tree). */
+function RailSlot() {
+  const ds = useStore((s) => s.ds);
+  return KindRail({ ds }) ?? html`<${Outline} />`;
+}
+
 /** @param {{ narrow: boolean, mode: string }} props */
 function SidePanel({ narrow, mode }) {
   const composerOpen = useStore((s) => !!s.composer);
   const pane = useStore((s) => s.sidePane);
+  const ds = useStore((s) => s.ds);
   const showChanges = mode === 'changes' && pane === 'changes';
   return html`<div class="side">
     ${narrow ? html`<div class="drawer-head"><strong>${showChanges ? 'Changes' : 'Threads'}</strong>
@@ -145,79 +168,6 @@ function SidePanel({ narrow, mode }) {
       <button type="button" role="tab" aria-selected=${pane === 'threads'} class=${pane === 'threads' ? 'active' : ''}
         onClick=${() => store.set({ sidePane: 'threads' })}>Threads</button>
     </div>` : null}
-    ${showChanges ? html`<${ChangesView} />` : html`<${ThreadPanel} />`}
+    ${showChanges ? KindSide({ ds }) ?? html`<${ChangesView} />` : html`<${ThreadPanel} />`}
   </div>`;
-}
-
-function Banners() {
-  const s = useStore((st) => ({ ds: st.ds, version: st.version, newHead: st.newHead, mode: st.mode, lost: st.guest.lost, recording: st.recording }));
-  const [summary, setSummary] = useState('');
-  const recordRef = useRef(/** @type {HTMLInputElement|null} */ (null));
-  // The form opens from its button or from the command palette: its summary field takes the focus.
-  useEffect(() => {
-    if (s.recording) recordRef.current?.focus();
-  }, [s.recording]);
-  const recording = s.recording;
-  const ds = s.ds;
-  if (!ds) return null;
-  const head = Number(ds.doc.head);
-  const agent = agentName(ds);
-  const out = [];
-  if (s.lost && (s.mode === 'review' || s.mode === 'changes')) {
-    const where = s.version === 'live' ? 'the working copy' : `v${s.version}`;
-    out.push(html`<div class="banner banner-warn" role="alert" key="lost" data-frame-lost>
-      <span><strong>The document navigated away</strong> from the reviewed page; comments and highlights are off until you go back.</span>
-      <span class="banner-actions"><button type="button" class="btn btn-sm" onClick=${reloadFrame}>Back to ${where}</button></span>
-    </div>`);
-  }
-  if (ds.working?.missing) {
-    out.push(html`<div class="banner banner-warn" role="status" key="missing">
-      <span><strong>The file is missing on disk</strong> (${ds.doc.path} was moved or deleted). Recorded versions are still available.</span>
-    </div>`);
-  } else if (ds.working?.dirty || s.version === 'live') {
-    const live = s.version === 'live';
-    out.push(html`<div class="banner banner-warn" role="status" key="working">
-      <span>${live
-        ? html`<strong>Previewing the unrecorded working copy</strong> (read-only, reloads as ${agent} edits).`
-        : html`<strong>Unrecorded changes on disk</strong> (${agent} is editing).`}</span>
-      <span class="banner-actions">
-        ${live
-          ? html`<button type="button" class="btn btn-sm" onClick=${() => switchVersion(head)}>Back to v${head}</button>`
-          : html`<button type="button" class="btn btn-sm" onClick=${() => switchVersion('live')}>Preview live</button>`}
-        ${recording
-          ? html`<form class="inline-form" onSubmit=${(/** @type {Event} */ e) => { e.preventDefault(); recordWorkingCopy(summary); stopRecording(); setSummary(''); }}>
-              <input ref=${recordRef} type="text" aria-label="Revision summary" placeholder="Summary of your edit" value=${summary}
-                onInput=${(/** @type {any} */ e) => setSummary(e.currentTarget.value)}
-                onKeyDown=${(/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopRecording(); } }} />
-              <button type="submit" class="btn btn-sm btn-primary">Record</button>
-              <button type="button" class="btn btn-sm" onClick=${stopRecording}>Cancel</button>
-            </form>`
-          : html`<button type="button" class="btn btn-sm" onClick=${startRecording}>Record as my revision</button>`}
-      </span>
-    </div>`);
-  }
-  if (typeof s.version === 'number' && s.version < head) {
-    out.push(html`<div class="banner banner-info" role="status" key="older">
-      <span>You are viewing <strong>v${s.version}</strong> (latest is v${head}). Comments are carried forward to v${head}.</span>
-      <span class="banner-actions"><button type="button" class="btn btn-sm" onClick=${() => switchVersion(head)}>Go to v${head}</button></span>
-    </div>`);
-  } else if (s.newHead && s.newHead !== s.version) {
-    out.push(html`<div class="banner banner-info" role="status" key="newhead">
-      <span><strong>v${s.newHead}</strong> is available.</span>
-      <span class="banner-actions"><button type="button" class="btn btn-sm" onClick=${goToNewHead}>Switch to v${s.newHead}</button></span>
-    </div>`);
-  }
-  if (ds.doc.state === 'approved' && ds.doc.final) {
-    const fv = Number(ds.doc.final.version);
-    out.push(html`<div class="banner banner-ok" role="status" key="final">
-      <span><strong>Approved at v${fv}.</strong>${head > fv ? ' Newer unapproved changes exist.' : ''}</span>
-      <span class="banner-actions">
-        <button type="button" class="btn btn-sm" onClick=${() => { switchVersion(fv); setMode('review'); }}>View final</button>
-        <button type="button" class="btn btn-sm" onClick=${() => setMode('history')}>History</button>
-      </span>
-    </div>`);
-  } else if (ds.doc.state === 'closed') {
-    out.push(html`<div class="banner banner-muted" role="status" key="closed"><span>This review session is closed.</span></div>`);
-  }
-  return out.length ? html`<div class="banners">${out}</div>` : null;
 }

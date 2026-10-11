@@ -30,7 +30,7 @@ import {
   togglePick, toggleSidebar, toggleSnip,
 } from './actions.js';
 import { helpGroups, KEYS } from './commands.js';
-import { appCombo, canSendNow, isComposerDirty, isReplyDirty, keyLabel } from './model.js';
+import { appCombo, canSendNow, isComposerDirty, isReplyDirty, keyLabel, modesFor } from './model.js';
 import { store } from './state.js';
 import { IS_MAC, isEditable } from './util.js';
 
@@ -46,8 +46,6 @@ export const shortcut = (combo, opts) => keyLabel(combo, IS_MAC, opts);
 
 /** The keyboard shortcuts overlay's groups, generated from the command registry. */
 export const KEYMAP = Object.freeze(helpGroups());
-
-const MODES = /** @type {const} */ (['review', 'changes', 'source', 'history']);
 
 /** @typedef {{ key: string, meta?: boolean, ctrl?: boolean, shift?: boolean, alt?: boolean }} KeyInput */
 
@@ -148,9 +146,12 @@ export function handleKey(k, fromGuest) {
     case '1':
     case '2':
     case '3':
-    case '4':
-      setMode(MODES[Number(key) - 1]);
+    case '4': {
+      // the doc's own modes (model.js modesFor): a code review has no Source (3)
+      const m = modesFor(s.ds).find((x) => x.n === Number(key));
+      if (m) setMode(m.key);
       return true;
+    }
     case '[':
       if (s.tool !== 'select') return false;
       stepVersion(-1);

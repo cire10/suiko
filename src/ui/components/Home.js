@@ -47,12 +47,27 @@ export function Home() {
 }
 
 /** What a snapshot doc (no file on disk: store/snapshot.js) shows in place of its path. */
-const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code plan', message: 'agent message', stdin: 'piped text' });
+const ORIGIN_LABEL = /** @type {Record<string, string>} */ ({ plan: 'Claude Code plan', message: 'agent message', stdin: 'piped text', url: 'web page' });
+/** The kind chip of a snapshot doc, by origin. */
+const ORIGIN_CHIP = /** @type {Record<string, string>} */ ({ plan: 'plan', message: 'message', stdin: 'text', url: 'web' });
+
+/**
+ * A doc without a file of its own (docSummary kind 'snapshot' or 'code'): what it shows in place of its path, and its
+ * kind chip ('code', 'plan', 'message', 'text', 'web'). Null for a spec file.
+ * @param {any} d
+ * @returns {{ where: string, chip: string } | null}
+ */
+function virtualDoc(d) {
+  if (d.kind === 'code') return { where: 'code review', chip: 'code' };
+  if (d.kind === 'snapshot') return { where: ORIGIN_LABEL[d.origin] || 'snapshot', chip: ORIGIN_CHIP[d.origin] || 'snapshot' };
+  return null;
+}
 
 /** @param {{ d: any }} props */
 function DocRow({ d }) {
   const href = docPath(d.ws, d.id);
   const [stateLabel, stateTone] = STATE_LABEL[d.state] || [String(d.state || ''), 'muted'];
+  const virtual = virtualDoc(d);
   return html`<li class="doc-row">
     <a href=${href} class="doc-link" onClick=${(/** @type {MouseEvent} */ e) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -60,9 +75,10 @@ function DocRow({ d }) {
       navigate(href);
     }}>
       <span class="doc-title">${d.title || d.id}</span>
-      <span class="doc-path">${d.kind === 'snapshot' ? ORIGIN_LABEL[d.origin] || 'snapshot' : d.path}</span>
+      <span class="doc-path">${virtual ? virtual.where : d.path}</span>
     </a>
     <span class="doc-meta">
+      ${virtual ? html`<${Chip} tone="info" class="kind-chip">${virtual.chip}<//>` : null}
       <${Chip} tone="muted">v${d.head}<//>
       <${Chip} tone=${stateTone}>${stateLabel}<//>
       ${d.final ? html`<${Chip} tone="ok">FINAL v${d.final.version ?? d.final}<//>` : null}

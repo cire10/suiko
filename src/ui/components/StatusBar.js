@@ -1,10 +1,10 @@
 // @ts-check
 // Status bar (design 11.1): version, working-copy state, page errors, external resource failures, orphans and the
-// FINAL badge.
+// FINAL badge. Page errors and external resources are about the rendered doc frame (kindCaps: not for code reviews).
 
 import { html } from 'preact-htm';
 import { showThreads } from '../actions.js';
-import { isOutdated } from '../model.js';
+import { isOutdated, kindCaps } from '../model.js';
 import { useStore } from '../state.js';
 
 export function StatusBar() {
@@ -23,14 +23,17 @@ export function StatusBar() {
   const ext = s.externals?.length || 0;
   const failedLocal = s.pageErrors?.resourcesFailed?.length || 0;
   const final = ds.doc.final;
+  const caps = kindCaps(ds);
   return html`<footer class="statusbar" aria-label="Status">
     <span>${s.version === 'live' ? 'working copy' : `v${s.version}`}</span>
-    <span class=${ds.working?.dirty ? 'warn-text' : ''}>working copy ${ds.working?.missing ? 'missing' : ds.working?.dirty ? 'has unrecorded changes' : 'clean'}</span>
-    ${s.mode === 'review' || s.mode === 'changes'
+    <span class=${ds.working?.dirty ? 'warn-text' : ''}>${caps.liveBanners
+      ? `working copy ${ds.working?.missing ? 'missing' : ds.working?.dirty ? 'has unrecorded changes' : 'clean'}`
+      : `working tree ${ds.working?.dirty ? 'changed since this round' : 'matches this round'}`}</span>
+    ${caps.pageErrors && (s.mode === 'review' || s.mode === 'changes')
       ? html`<span class=${errs ? 'danger-text' : ''} title=${s.pageErrors?.last || ''}>page errors ${errs}</span>`
       : null}
-    <span class=${ext || failedLocal ? 'warn-text' : ''} title=${[...(s.externals || []), ...(s.pageErrors?.resourcesFailed || [])].join('\n')}>
-      ${ext || failedLocal ? `${ext + failedLocal} resource${ext + failedLocal === 1 ? '' : 's'} failed` : 'externals ok'}</span>
+    ${caps.pageErrors ? html`<span class=${ext || failedLocal ? 'warn-text' : ''} title=${[...(s.externals || []), ...(s.pageErrors?.resourcesFailed || [])].join('\n')}>
+      ${ext || failedLocal ? `${ext + failedLocal} resource${ext + failedLocal === 1 ? '' : 's'} failed` : 'externals ok'}</span>` : null}
     <button type="button" class=${`link-btn ${orphans ? 'warn-text' : ''}`} onClick=${() => showThreads('outdated', { review: true })}>Orphans (${orphans})</button>
     <span class="spacer"></span>
     <span>FINAL: ${final ? html`<strong class="ok-text">v${final.version}</strong>` : '-'}</span>

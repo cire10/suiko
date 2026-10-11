@@ -40,14 +40,14 @@
 //     core/review/packet-data.js     snapshot NEXT, plan file and lines (the code branch comes first)
 //     core/review/packet.js          packet / status objects of kind 'snapshot' (code packets have their own branch)
 //     cli/hooks.js                   `hook prompt` skips plan docs
-//     ui/components/kinds/index.js   kindCaps: snapshot docs have no "Apply now"
+//     ui/model.js                    kindCaps: snapshot docs have no "Apply now" (ThreadCard)
 //   became isVirtual (no working file of their own):
 //     core/store/store.js (workingPath, readWorking, writeWorking, findDoc, findDocByOrigin, createDoc duplicates),
 //     core/review/ops/record.js (asset skips, autoCommit docPath), core/review/ops/common.js (changedWorkingAssets),
-//     daemon/content.js, daemon/watch.js, cli/commands/doctor.js, cli/hooks.js (pre-write), ui/components/Home.js
-//     (the kind chip)
+//     daemon/content.js, daemon/watch.js, cli/commands/doctor.js, cli/hooks.js (pre-write: file docs only)
 //   became kind dispatch (isCode / doc.kind):
-//     common.js refuseSnapshot ordering, daemon/api.js and ops/docs.js `kind` fields ('code'), ops/final.js
+//     common.js refuseSnapshot ordering, daemon/api.js and ops/docs.js `kind` fields ('code'), ops/final.js,
+//     ui/components/Home.js (the doc list's label and kind chip: 'code' | a snapshot's origin)
 
 import { NotFoundError } from '../store/errors.js';
 import { isCode } from '../store/snapshot.js';
@@ -249,5 +249,6 @@ export const SNAPSHOT_SITES = Object.freeze({
   'core/review/packet-data.js': 1,
   'core/review/packet.js': 6,
   'cli/hooks.js': 1,
-  'ui/components/kinds/index.js': 1,
+  'ui/components/Home.js': 1,
+  'ui/model.js': 1,
 });

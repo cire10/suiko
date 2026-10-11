@@ -22,7 +22,7 @@ import {
 import { Markdown } from '../markdown.js';
 import {
   actorLabel, anchorAt, anchorQuote, anchorStateInfo, attachmentName, attachmentUrl, clip, draftVersion, isAgent,
-  isVerifiable, linesLabel, relTime, replyDraftsFor, sectionTail, statusInfo, targetLabel,
+  isVerifiable, kindCaps, linesLabel, relTime, replyDraftsFor, sectionTail, statusInfo, targetLabel,
 } from '../model.js';
 import { store } from '../state.js';
 import { contentUrl, scrollIntoViewSoft } from '../util.js';
@@ -160,6 +160,8 @@ export function ThreadCard({ t, ds, version, agent, focused, reply, position, bu
  * @param {{ a: any, lines: string, section?: string }} props
  */
 function CardTarget({ a, lines, section = '' }) {
+  // a code anchor's label names its file, side and lines ('src/a.js:L3-4', 'src/a.js (whole file)')
+  if (a?.file?.path) return html`<div class="card-target"><span class="target-label">${targetLabel(a)}</span></div>`;
   const textual = !!a && (a.kind === 'text' || a.kind === 'code') && !!anchorQuote(a);
   return html`<div class="card-target">
     ${textual ? null : html`<span class="target-label">${targetLabel(a)}</span>`}
@@ -240,7 +242,7 @@ function SuggestionBlock({ t, ds, canAct, busy = false }) {
     ${sug.mode === 'text' && oldLines.length === 1 && newLines.length === 1
       ? html`<${WordDiff} before=${sug.old} after=${sug.new} class="mono" />`
       : html`<pre class="diff-lines">${oldLines.map((l) => html`<span class="del">- ${l}\n</span>`)}${newLines.map((l) => html`<span class="ins">+ ${l}\n</span>`)}</pre>`}
-    ${canAct && ds.doc?.kind !== 'snapshot' && t.status !== 'resolved' && (sug.status === 'pending' || sug.status === 'conflict') ? html`<div class="card-actions">
+    ${canAct && kindCaps(ds).applyNow && t.status !== 'resolved' && (sug.status === 'pending' || sug.status === 'conflict') ? html`<div class="card-actions">
       <button type="button" class="btn btn-sm" disabled=${!clean || busy} onClick=${() => applySuggestion(t.id)}
         title=${clean ? 'Apply the suggestion to the file and record a version' : 'The working copy has unrecorded changes'}>Apply now</button>
     </div>` : null}

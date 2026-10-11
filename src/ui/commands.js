@@ -25,8 +25,8 @@ import {
   toggleSingleKeys, toggleSnip,
 } from './actions.js';
 import {
-  actorLabel, agentName, canSendNow, filterCounts, FILTERS, numericVersion, panelItems, relTime, staleApproveText,
-  statusInfo, threadRowTitle, versionNumbers,
+  actorLabel, agentName, canSendNow, filterCounts, FILTERS, hasMode, kindCaps, modesFor, numericVersion, panelItems, relTime,
+  staleApproveText, statusInfo, threadRowTitle, versionNumbers,
 } from './model.js';
 
 /** @typedef {import('./state.js').UiState} UiState */
@@ -83,12 +83,14 @@ export const CATEGORIES = /** @type {const} */ (['Comment', 'Review', 'Navigate'
 
 const READ_ONLY = 'the working copy preview is read-only';
 const BUSY = 'finish or cancel the open comment first';
+const NO_FRAME = 'not in a code review (click a line number to comment)';
 
 /** @param {UiState} s */
 const busyEditing = (s) => !!(s.composer || s.reply);
 
 /** @param {UiState} s @param {string} [unless] */
 const capturable = (s, unless) => {
+  if (s.ds && !kindCaps(s.ds).frame) return NO_FRAME;
   if (s.version === 'live') return READ_ONLY;
   if (!s.guest.connected) return 'the document is still loading';
   return unless || true;
@@ -100,6 +102,9 @@ const capturable = (s, unless) => {
  */
 function selectionWhen(s, key) {
   if (s.version === 'live') return READ_ONLY;
+  if (s.ds && key === 'a' && !kindCaps(s.ds).locks) return 'code reviews have no locks';
+  // a kind view without the doc frame (a code review) has its own selection (registerKindSelection)
+  if (s.ds && !kindCaps(s.ds).frame) return s.mode === 'history' ? 'switch to Files first' : true;
   if (s.mode === 'history') return 'switch to Review first';
   if (s.mode === 'source') {
     if (key !== 'c') return 'in Source, only Comment works on lines';
@@ -276,21 +281,18 @@ function stepWhen(s, dir) {
   return vs.some((v) => v < cur) ? true : 'this is the first version';
 }
 
-const MODE_COMMANDS = /** @type {const} */ ([
-  ['review', 'Review', '1', 'Comment on the rendered document'],
-  ['changes', 'Changes', '2', 'What changed since your last review'],
-  ['source', 'Source', '3', 'The source with line numbers and its diff'],
-  ['history', 'History', '4', 'Versions and reviews, newest first'],
-]).map(([mode, label, key, description]) => /** @type {Command} */ ({
-  id: `mode-${mode}`,
-  title: `Switch to ${label} mode`,
+// One command per mode of a spec doc (model.js modesFor); a code review offers its own subset (review labelled
+// "Files", no Source), so the descriptions follow the open doc and a missing mode says why.
+const MODE_COMMANDS = modesFor(null).map((m) => /** @type {Command} */ ({
+  id: `mode-${m.key}`,
+  title: `Switch to ${m.label} mode`,
   category: 'Navigate',
-  description,
-  keywords: [label.toLowerCase(), 'mode', 'tab', 'view'],
-  keys: [key],
+  description: (s) => modesFor(s.ds).find((x) => x.key === m.key)?.description ?? m.description,
+  keywords: [m.label.toLowerCase(), 'mode', 'tab', 'view', ...(m.key === 'review' ? ['files'] : [])],
+  keys: [String(m.n)],
   help: { row: 'modes', label: 'Review / Changes / Source / History' },
-  when: (s) => (s.mode === mode ? 'shown now' : true),
-  run: () => setMode(mode),
+  when: (s) => (s.ds && !hasMode(s.ds, m.key) ? 'not in a code review' : s.mode === m.key ? 'shown now' : true),
+  run: () => setMode(m.key),
 }));
 
 const FILTER_COMMANDS = FILTERS.map((f) => /** @type {Command} */ ({
@@ -671,6 +673,7 @@ export const COMMANDS = Object.freeze([
     keywords: ['clean', 'highlights', 'show annotations', 'read'],
     keys: ['h'],
     help: { label: 'Hide all annotations (clean read)' },
+    when: (s) => (s.ds && !kindCaps(s.ds).hide ? 'not in a code review' : true),
     run: () => toggleHidden(),
   },
   {
