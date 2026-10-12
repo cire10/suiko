@@ -42,7 +42,22 @@ JSON
 ### Text that is not a file
 
 - Piped Markdown: `<command> | specreview open - [--name N]` opens it as a snapshot doc; piping the same `--name` again records a new version. A folder: `specreview open <dir>` opens every spec below it.
+- A web page: `specreview snapshot <url>` (add `--allow-private` for a page on localhost you build). To revise it, change the sources that produce the page, then run the `NEXT:` command (`specreview snapshot <url> --allow-private --replies -`, replies JSON on stdin). A public page has nothing to edit: answer each thread with `specreview reply`.
 - A snapshot doc has no file, so `apply`, `edit` and `revert` are refused. Write the complete revised text to a temporary file (`specreview show <doc>` prints the current version) and record it with `specreview revise <doc> --source <file> --replies -`. Keep any `--workspace <dir>` the printed commands include.
+
+### Code reviews
+
+- When the user wants your code changes, or a GitHub PR, reviewed: run `specreview review`.
+  - The default covers everything on this branch since it left the default branch, uncommitted and untracked files included.
+  - Others: `--uncommitted`, `--staged`, `--base <ref>`, `A..B`, `--commit <sha>`, or `--pr <n|url>` (needs `gh`, signed in).
+  - Get the review as in step 3.
+- Items cite `path:L..`, relative to the repo root the packet prints. Read each cited file before editing it.
+  - `src>` lines are unique in their file: they are the exact text to replace.
+  - `was>` lines are deleted code: restore it, or answer why.
+- Apply suggestions with `specreview apply <doc> <tid>` and edit the files, then record the next round with `specreview revise <doc> --replies -`. `at` and `other` take `path:L..`.
+- Never use `edit` or `revert` on a code review.
+- `wait` exits 3 while reviewed files have unrecorded edits: revise first.
+- For a PR that is not checked out here, run `gh pr checkout <n>` before editing.
 
 ### Finish and recover
 

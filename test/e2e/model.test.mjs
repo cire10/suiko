@@ -6,8 +6,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  agentPrompt, anchorAt, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
-  canSendNow, coalesceWordParts, defaultBase, defaultVerdict, diffLines, draftVersion, fuzzyMatch, groupHunks,
+  agentPrompt, anchorAt, anchorChipParts, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
+  canSendNow, coalesceWordParts, docKindOf, hasMode, kindCaps, modesFor, defaultBase, defaultVerdict, diffLines, draftVersion, fuzzyMatch, groupHunks,
   highlightParts, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isSingleKeyCombo,
   isVerifiable, keyLabel, linesLabel, matchRow, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary,
   singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches, threadRowTitle, timeline,
@@ -449,4 +449,40 @@ test('snip anchors: the card names the snipped area and quotes the text inside t
   assert.equal(targetLabel({ ...snip, snip: undefined }), 'snipped area');
   assert.equal(anchorQuote(snip), 'Client app Gateway');
   assert.equal(anchorQuote({ ...snip, snip: { ...snip.snip, text: '' } }), '');
+});
+
+test('doc kinds: docKindOf, kindCaps and modesFor (code reviews: no frame, no locks, "Files" instead of Source)', () => {
+  const file = { doc: { id: 'spec', path: 'docs/spec.md' } };
+  const snapshot = { doc: { id: 'plan', kind: 'snapshot', origin: { type: 'plan' } } };
+  const code = { doc: { id: 'cr-feat', kind: 'code', origin: { type: 'diff' } } };
+  assert.deepEqual([file, snapshot, code, null].map(docKindOf), ['file', 'snapshot', 'code', 'file']);
+  assert.deepEqual(kindCaps(file), { frame: true, pick: true, snip: true, hide: true, pageErrors: true, applyNow: true, liveBanners: true, locks: true });
+  assert.equal(kindCaps(snapshot).applyNow, false, 'a snapshot agent applies suggestions when it revises');
+  assert.equal(kindCaps(snapshot).frame, true);
+  assert.deepEqual(kindCaps(code), { frame: false, pick: false, snip: false, hide: false, pageErrors: false, applyNow: true, liveBanners: false, locks: false });
+  assert.deepEqual(modesFor(file).map((m) => [m.key, m.label, m.n]), [['review', 'Review', 1], ['changes', 'Changes', 2], ['source', 'Source', 3], ['history', 'History', 4]]);
+  assert.deepEqual(modesFor(snapshot), modesFor(file));
+  assert.deepEqual(modesFor(code).map((m) => [m.key, m.label, m.n]), [['review', 'Files', 1], ['changes', 'Changes', 2], ['history', 'History', 4]]);
+  assert.equal(hasMode(code, 'source'), false);
+  assert.equal(hasMode(code, 'review'), true);
+  assert.equal(hasMode(file, 'source'), true);
+});
+
+test('code anchors: card targets name the file, side and lines; panel order is by file', () => {
+  const src = (/** @type {number} */ a, /** @type {number} */ b) => ({ start: a * 10, end: b * 10 + 5, startLine: a, endLine: b, text: 'x' });
+  const line = { v: 1, kind: 'source', state: 'exact', src: src(3, 4), section: ['src/a.js'], file: { path: 'src/a.js', side: 'new' } };
+  const old = { ...line, src: src(7, 7), file: { path: 'src/a.js', side: 'old' } };
+  const whole = { v: 1, kind: 'doc', state: 'exact', section: ['img/logo.png'], file: { path: 'img/logo.png', side: 'new' } };
+  assert.equal(targetLabel(line), 'src/a.js:L3-4');
+  assert.equal(targetLabel(old), 'src/a.js (old side) L7');
+  assert.equal(targetLabel(whole), 'img/logo.png (whole file)');
+  assert.equal(targetLabel({ v: 1, kind: 'doc', state: 'exact' }), 'General comment', 'a whole-review comment');
+  assert.deepEqual(anchorChipParts(null, line), { lines: '', section: '', label: 'src/a.js:L3-4' });
+  const t = (/** @type {string} */ id, /** @type {any} */ a) => ({ id, status: 'open', severity: 'normal', type: 'comment', createdIn: 1, anchors: { 1: a }, comments: [] });
+  const ds = {
+    doc: { id: 'cr', kind: 'code', head: 1 },
+    threads: [t('t1', { ...line, file: { path: 'src/z.js', side: 'new' } }), t('t2', line), t('t3', whole), t('t4', { v: 1, kind: 'doc', state: 'exact' }), t('t5', { ...line, src: src(1, 1) })],
+    drafts: { items: [] },
+  };
+  assert.deepEqual(panelItems(ds, 'all', 1).map((x) => x.id), ['t4', 't3', 't5', 't2', 't1']);
 });

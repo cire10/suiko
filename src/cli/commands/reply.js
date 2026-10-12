@@ -1,6 +1,7 @@
 // @ts-check
 // `specreview reply <doc> <tid> -m <md> [--status answered|declined|needs_input|addressed] [--at L42-46]
 //  [--decision "text"] [--json]` (design 9.2). Posts an agent reply on a thread without recording a version.
+// On a code review `--at` names repo files: `--at src/a.js:L42-46` (a bare `L42-46` means the thread's file).
 // Exit 0; 4 when the doc or thread does not exist.
 
 import { UsageError } from '../../core/store/errors.js';
@@ -12,7 +13,7 @@ import { callOp, docContext } from '../runtime.js';
 
 export const spec = {
   name: 'reply',
-  usage: 'reply <doc> <tid> -m <markdown> [--status answered|declined|needs_input|addressed] [--at L42-46] [--decision "text"] [--json]',
+  usage: 'reply <doc> <tid> -m <markdown> [--status answered|declined|needs_input|addressed] [--at L42-46 | --at src/a.js:L42-46] [--decision "text"] [--json]',
   summary: 'Reply on a thread without recording a version.',
   options: {
     message: { type: 'string', short: 'm' },

@@ -110,7 +110,36 @@ Give one line per thread in chat: what you changed, or what you asked. Then star
 These docs are **snapshots**, not files: a Claude Code plan (the plan gate), your last message (`/specreview-last`) or text piped to `specreview open -`. The packet header names the kind, e.g. `plan-cache (Claude Code plan)`.
 
 - **Plan gate.** With the plan-mode hook installed, ExitPlanMode opens your plan in SpecReview and waits for the review. Approved: carry on. Otherwise ExitPlanMode is denied with feedback that cites the plan file and its line numbers. Make targeted Edit-tool changes to that plan file (never rewrite it), address every thread, then call ExitPlanMode again. The reviewer sees a diff.
+- **Web pages** (`specreview snapshot <url>`, which uses the network) are snapshots too. For a page you build (`--allow-private`), change the sources that produce it as the threads ask, then run the `NEXT:` command, `specreview snapshot <url> --allow-private --replies -`, with the replies JSON on stdin: it records the next version and posts the replies in one step. A public page has nothing for you to edit: answer each thread with `specreview reply`.
 - **Other snapshots** have no file to edit, so `apply`, `edit` and `revert` are refused. Write your complete revised text to a temporary file outside the project (`specreview show <doc>` prints the current version), address every thread in it, then record it with `specreview revise <doc> --source <file> --replies -` (replies JSON on stdin, as in section 5). If the `next:` line includes `--workspace <dir>`, keep that flag on every command for the doc.
+
+## 9. Code review
+
+When the user wants your code changes reviewed, or a GitHub PR, open a **code review** instead of a spec: `specreview review` (the user's `/review-code` runs it). By default it covers everything on this branch since it left the default branch, uncommitted and untracked files included. To review something else:
+- `--uncommitted`;
+- `--staged`;
+- `--base <ref> [--committed]`;
+- `A..B` or `A...B`;
+- `--commit <sha>`;
+- `--pr <n|url>`.
+
+`--path <pathspec>` narrows any of these. Then start the printed `specreview wait <doc>` in the background and end the turn, as in section 2.
+
+A code packet differs from a spec packet:
+- **Paths.** The `Repo root` is printed at the top, and every item cites `path:L42-44` relative to it. Read the file, or the cited range, before you edit it.
+- **`src>` lines** are the file's current lines, grown until they are unique in that file: use them as the exact Edit `old_string`. If the packet says they are not unique, Read around the cited line first.
+- **Old-side items** (comments on deleted lines) print `was>` lines and where they would go now (`now between L39-40`). Restore the code, or reply `answered` or `declined` with the reason.
+- **Suggestions:** `specreview apply <doc> t2` writes them into the real files. Re-Read a file after `apply` before you Edit it again.
+- **`FILE MISSING`:** the file is gone from your working tree. Restore it, or reply explaining the deletion.
+
+Record the round with `specreview revise <doc> --replies -`, with the same JSON as section 5; it records your working tree as the next round.
+- In replies, `"at"` takes `path:L..`, e.g. `"src/auth/refresh.js:L41-49"`.
+- `"other"` items explain changes no thread asked for, with `path` or `path:L..` as their `"at"`.
+- Never run `edit` or `revert` on a code review: they are refused. Change the files with the Edit tool.
+- `wait` exits 3 while the reviewed files have edits you have not recorded: run `revise` first.
+- The packet's `NEXT:` line says what to run.
+
+**PR reviews** (`--pr <n>`): when the PR is not checked out here, line numbers are the PR head's and the packet says so. Run `gh pr checkout <n>` before you edit anything. Running `specreview review --pr <n>` again picks up new commits on the PR.
 
 ## Cheat-sheet
 
@@ -128,7 +157,10 @@ These docs are **snapshots**, not files: a Claude Code plan (the plan gate), you
 | `specreview diff <doc> --stat` / `specreview log <doc>` / `specreview status` | What changed / timeline / overview |
 | `specreview final <doc> --decisions` | Check the final version and export the decision log |
 | `specreview last` / `specreview open - [--name N]` | Review your last message / piped Markdown (snapshot docs) |
+| `specreview snapshot <url> [--allow-private]` | Review a web page (snapshot doc); again records the next version |
 | `specreview revise <doc> --source <file> --replies -` | Record a new version of a snapshot doc |
+| `specreview review [--uncommitted \| --staged \| --base <ref> \| A..B \| --commit <sha> \| --pr <n>]` | Open a code review of your changes, or of a PR; again records the next round |
+| `specreview diff <doc> v1..v2` / `specreview show <doc> --file <path>` | Code reviews: what changed between rounds / one file of a round |
 
 Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, conflict, not unique) · 4 not found · 5 closed · 6 superseded.
 

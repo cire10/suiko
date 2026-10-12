@@ -9,6 +9,7 @@
 /** @type {Record<string, { load: () => Promise<any>, summary: string, group: string }>} */
 export const COMMANDS = {
   open: { load: () => import('./open.js'), summary: 'Track a spec (a file, a folder, or - for stdin), start the server, print the URL', group: 'loop' },
+  review: { load: () => import('./review.js'), summary: 'Open a code review of your changes (since-base, uncommitted, staged, range, commit)', group: 'loop' },
   wait: { load: () => import('./wait.js'), summary: 'Block until the reviewer submits a review; print the feedback packet', group: 'loop' },
   feedback: { load: () => import('./feedback.js'), summary: 'Print the feedback packet now (marks it delivered unless --peek)', group: 'loop' },
   apply: { load: () => import('./apply.js'), summary: 'Apply suggestion threads verbatim to the working copy', group: 'loop' },
@@ -20,6 +21,7 @@ export const COMMANDS = {
   ask: { load: () => import('./ask.js'), summary: 'Ask the reviewer a question anchored on the doc', group: 'loop' },
   snip: { load: () => import('./snip.js'), summary: 'Reviewer: snip the screen (macOS) into a draft comment, or --send it now', group: 'loop' },
   last: { load: () => import('./last.js'), summary: "Review the agent's last message (Claude Code transcript)", group: 'loop' },
+  snapshot: { load: () => import('./snapshot.js'), summary: 'Snapshot a web page for review (uses the network)', group: 'loop' },
   threads: { load: () => import('./threads.js'), summary: 'List threads, one line each', group: 'inspect' },
   show: { load: () => import('./show.js'), summary: 'Show a thread with its timeline, or old source lines', group: 'inspect' },
   diff: { load: () => import('./diff.js'), summary: 'What changed between versions (default: last reviewed..head)', group: 'inspect' },

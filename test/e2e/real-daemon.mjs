@@ -102,3 +102,70 @@ export async function startRealDaemon(opts = {}) {
     },
   };
 }
+
+/**
+ * The REAL daemon serving a code review of a scripted git repository (test/helpers/git-repo.js), with the agent side
+ * driven through the real CLI as child processes (`bin/specreview.js` with the repo's hermetic env): `review`,
+ * `wait`, `apply`, `revise` reach this in-process daemon through its daemon.json in the repo's SPECREVIEW_HOME.
+ *
+ *   const repo = await designRepo();
+ *   const real = await startRealCodeDaemon(repo);
+ *   const opened = await real.cli(['review', '--json']);        // { code, stdout, stderr }
+ *   const wait = real.spawn(['wait', 'cr-feat']);                // a background wait; await wait.done
+ *   await real.close();                                          // also removes the repo
+ *
+ * @param {import('../helpers/git-repo.js').TestRepo} repo
+ * @param {{ agent?: string, codePollMs?: number }} [opts]
+ */
+export async function startRealCodeDaemon(repo, opts = {}) {
+  const { spawn } = await import('node:child_process');
+  const { startDaemon } = await import('../../src/daemon/main.js');
+  const bin = path.resolve(HERE, '..', '..', 'bin', 'specreview.js');
+  const daemon = await startDaemon({ uiPort: 0, contentPort: 0, home: repo.home, logFile: false, idleMs: 0, timing: { codePollMs: opts.codePollMs ?? 250 } });
+  const env = { ...repo.env, SPECREVIEW_HOME: repo.home, SPECREVIEW_AGENT: opts.agent ?? 'claude' };
+  /** @type {Set<import('node:child_process').ChildProcess>} */
+  const children = new Set();
+
+  /**
+   * Starts the CLI; `done` resolves when it exits.
+   * @param {string[]} args @param {{ input?: string, cwd?: string }} [o]
+   */
+  const run = (args, o = {}) => {
+    const child = spawn(process.execPath, [bin, ...args], { cwd: o.cwd ?? repo.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    children.add(child);
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.stdin.end(o.input ?? '');
+    /** @type {Promise<{ code: number | null, stdout: string, stderr: string }>} */
+    const done = new Promise((resolve) => {
+      child.on('close', (code) => {
+        children.delete(child);
+        resolve({ code, stdout, stderr });
+      });
+    });
+    return { child, done, output: () => ({ stdout, stderr }) };
+  };
+
+  return {
+    repo,
+    daemon,
+    token: daemon.token,
+    uiOrigin: daemon.uiOrigin,
+    contentOrigin: daemon.contentOrigin,
+    /** SPA URL of a doc (or the home page). @param {string} [docId] @param {string} [wsId] */
+    url(docId, wsId) {
+      return docId && wsId ? `${daemon.uiOrigin}/d/${encodeURIComponent(wsId)}/${encodeURIComponent(docId)}?k=${daemon.token}` : `${daemon.uiOrigin}/?k=${daemon.token}`;
+    },
+    /** Runs the CLI to completion. @param {string[]} args @param {{ input?: string, cwd?: string }} [o] */
+    cli: (args, o) => run(args, o).done,
+    /** Starts the CLI in the background (a `wait`). @param {string[]} args @param {{ input?: string, cwd?: string }} [o] */
+    spawn: run,
+    async close() {
+      for (const c of children) c.kill('SIGTERM');
+      await daemon.close('test');
+      await repo.cleanup().catch(() => {});
+    },
+  };
+}

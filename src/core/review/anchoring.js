@@ -29,7 +29,7 @@ import { lineHunks, offsetMapper } from '../diff/index.js';
  * @typedef {import('../render/index.js').RenderResult} RenderResult
  * @typedef {import('../diff/hunks.js').Hunk} Hunk
  * @typedef {object} AnchorEnv
- * @property {'markdown' | 'html'} format
+ * @property {'markdown' | 'html' | 'text'} format ('text': code docs, identity)
  * @property {string} docPath
  * @property {any} [config] Config or config.anchoring
  */
@@ -230,5 +230,5 @@ export function sectionExtent(render, source, headingSrid) {
  * @returns {AnchorEnv}
  */
 export function envOf(doc, config) {
-  return { format: doc.format === 'html' ? 'html' : 'markdown', docPath: doc.path, config };
+  return { format: doc.format === 'html' ? 'html' : doc.format === 'text' ? 'text' : 'markdown', docPath: doc.path, config };
 }

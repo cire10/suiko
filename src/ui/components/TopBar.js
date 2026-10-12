@@ -2,6 +2,7 @@
 // Top bar (design 11.1): doc title, version picker, mode tabs (a dropdown below 900 px), Changes base picker, the
 // command palette button (⌘K), comment / pick / snip / screen-snip / hide / theme tools, Settings (gear) and the
 // keyboard shortcuts, presence chip, round status, the review progress chip, Drafts count and Submit review. The
+// modes and tools follow the doc kind (model.js modesFor / kindCaps: a code review has no Source, pick, snip, hide). The
 // capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are discoverable; the screen-snip button
 // disappears once the daemon said it cannot capture the screen (not macOS). The menu button (outline drawer / rail)
 // shows whenever the outline is not simply beside the doc (narrow or medium width, or the Outline rail setting).
@@ -17,17 +18,10 @@ import {
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import {
-  agentName, draftCount, filterCounts, presenceInfo, reviewProgress, roundSummary, versionNumbers,
+  agentName, draftCount, filterCounts, kindCaps, modesFor, presenceInfo, reviewProgress, roundSummary, versionNumbers,
 } from '../model.js';
 import { useStore } from '../state.js';
 import { Chip, Icon } from './common.js';
-
-const MODES = /** @type {const} */ ([
-  { key: 'review', label: 'Review', n: 1 },
-  { key: 'changes', label: 'Changes', n: 2 },
-  { key: 'source', label: 'Source', n: 3 },
-  { key: 'history', label: 'History', n: 4 },
-]);
 
 export function TopBar() {
   const s = useStore((st) => ({
@@ -53,6 +47,10 @@ export function TopBar() {
   const ds = s.ds;
   if (!ds) return null;
   const head = Number(ds.doc.head);
+  // the doc kind's modes and tools (model.js modesFor / kindCaps): a code review has no Source mode, no doc frame
+  // (no text selection, pick, snip or hide) and no live working-copy preview
+  const MODES = modesFor(ds);
+  const caps = kindCaps(ds);
   const versions = versionNumbers(ds);
   const presence = presenceInfo(ds);
   const round = roundSummary(ds);
@@ -81,7 +79,7 @@ export function TopBar() {
       <label class="sr-only" for="sr-version">Version</label>
       <select id="sr-version" class="select" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}>
         ${versions.slice().reverse().map((v) => html`<option value=${String(v)}>v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' FINAL' : ''}</option>`)}
-        ${(ds.working?.dirty && !ds.working?.missing) || s.version === 'live' ? html`<option value="live">Working copy (live)</option>` : null}
+        ${caps.liveBanners && ((ds.working?.dirty && !ds.working?.missing) || s.version === 'live') ? html`<option value="live">Working copy (live)</option>` : null}
       </select>
       <nav class="mode-tabs" role="tablist" aria-label="Mode">
         ${MODES.map((m) => html`<button type="button" role="tab" data-testid=${TESTID.modeTab} data-mode=${m.key}
@@ -105,22 +103,22 @@ export function TopBar() {
       <span class="spacer"></span>
       <${PaletteButton} />
       <span class="tools">
-        <button type="button" class="icon-btn" data-selection-comment disabled=${!s.selection || !canPick}
+        ${caps.frame ? html`<button type="button" class="icon-btn" data-selection-comment disabled=${!s.selection || !canPick}
           aria-label="Comment on the selection" title="Comment on the selected text (c)"
-          onClick=${() => s.selection && openComposer({ capture: s.selection })}><${Icon} name="comment" /></button>
-        <button type="button" class=${`icon-btn has-kbd ${s.tool === 'pick' ? 'active' : ''}`} data-testid=${TESTID.pickTool}
+          onClick=${() => s.selection && openComposer({ capture: s.selection })}><${Icon} name="comment" /></button>` : null}
+        ${caps.pick ? html`<button type="button" class=${`icon-btn has-kbd ${s.tool === 'pick' ? 'active' : ''}`} data-testid=${TESTID.pickTool}
           aria-pressed=${s.tool === 'pick'} disabled=${!canPick} aria-keyshortcuts="e"
           aria-label="Pick an element (image, diagram, table, code)" title=${`Pick an element: image, diagram, table, code (${shortcut(KEYS.pick)})`}
           onClick=${togglePick}>
           <${Icon} name="pick" /><kbd class="kbd-hint" aria-hidden="true">e</kbd>
-        </button>
-        <button type="button" class=${`icon-btn has-kbd ${s.tool === 'snip' ? 'active' : ''}`} data-testid=${TESTID.snipTool}
+        </button>` : null}
+        ${caps.snip ? html`<button type="button" class=${`icon-btn has-kbd ${s.tool === 'snip' ? 'active' : ''}`} data-testid=${TESTID.snipTool}
           aria-pressed=${s.tool === 'snip'} disabled=${s.version === 'live'} aria-keyshortcuts="b"
           aria-label="Snip an area of the document"
           title=${`Snip an area of the document: drag a box over text, images or diagrams, then comment (${shortcut(KEYS.snip)})`}
           onClick=${() => toggleSnip()}>
           <${Icon} name="scissors" /><kbd class="kbd-hint" aria-hidden="true">b</kbd>
-        </button>
+        </button>` : null}
         ${s.screenSupported ? html`<button type="button" class=${`icon-btn has-kbd ${s.screenRunning ? 'active' : ''}`} data-testid=${TESTID.snipScreen}
           aria-busy=${s.screenRunning ? 'true' : undefined} disabled=${s.screenRunning || s.version === 'live'} aria-keyshortcuts="Shift+B"
           aria-label="Snip anywhere on your screen"
@@ -128,10 +126,10 @@ export function TopBar() {
           onClick=${snipScreen}>
           <${Icon} name="screen" /><kbd class="kbd-hint" aria-hidden="true">⇧B</kbd>
         </button>` : null}
-        <button type="button" class=${`icon-btn ${s.hidden ? 'active' : ''}`} aria-pressed=${s.hidden}
+        ${caps.hide ? html`<button type="button" class=${`icon-btn ${s.hidden ? 'active' : ''}`} aria-pressed=${s.hidden}
           aria-label="Hide annotations" title="Hide annotations (h)" onClick=${toggleHidden}>
           <${Icon} name=${s.hidden ? 'eyeOff' : 'eye'} />
-        </button>
+        </button>` : null}
         <button type="button" class="icon-btn" data-theme-toggle aria-label=${`Theme: ${s.theme}. Change theme`}
           title=${`Theme: ${s.theme} (t)`} onClick=${cycleTheme}>
           <${Icon} name=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'system'} />

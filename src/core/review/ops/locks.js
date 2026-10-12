@@ -8,7 +8,8 @@
 //   relock(ctx, doc, lockId, { by })                  -> Lock (active again; agrees on the current head text)
 
 import { SSE } from '../../../shared/protocol.js';
-import { NotFoundError, UsageError } from '../../store/errors.js';
+import { NotFoundError, RefusedError, UsageError } from '../../store/errors.js';
+import { isCode } from '../../store/snapshot.js';
 import { sha256 } from '../../util/hash.js';
 import { anchorForCapture, envOf, forwardAnchor } from '../anchoring.js';
 import { anchorAt } from '../threadstate.js';
@@ -27,9 +28,10 @@ import { emit, humanActor, parseVersionArg, versionLoader, withDoc } from './com
  * @returns {Promise<Lock>}
  */
 export async function addLock(ctx, ref, input) {
-  if (!input?.capture) throw new UsageError('a capture is required to lock a region');
-  if (input.capture.kind === 'doc') throw new UsageError('lock a section or a passage, not the whole doc');
   return withDoc(ctx, ref, async (doc) => {
+    refuseCodeLock(doc);
+    if (!input?.capture) throw new UsageError('a capture is required to lock a region');
+    if (input.capture.kind === 'doc') throw new UsageError('lock a section or a passage, not the whole doc');
     const v = /** @type {number} */ (parseVersionArg(input.version, { fallback: doc.head }));
     const load = versionLoader(ctx, doc);
     const { source, render, manifest } = await load(v);
@@ -90,6 +92,7 @@ export async function removeLock(ctx, ref, lockId, { by } = {}) {
  */
 export async function relock(ctx, ref, lockId, { by } = {}) {
   return withDoc(ctx, ref, async (doc) => {
+    refuseCodeLock(doc);
     const lock = await requireLock(ctx, doc.id, lockId);
     const a = anchorAt(lock, doc.head);
     if (!a || a.state === 'orphaned') throw new UsageError(`lock ${lockId} lost its place; create a new lock instead`);
@@ -114,4 +117,12 @@ async function requireLock(ctx, docId, lockId) {
   const lock = await ctx.store.getLock(docId, lockId);
   if (!lock) throw new NotFoundError(`lock ${lockId} not found in ${docId}`, { details: { doc: docId, lock: lockId } });
   return lock;
+}
+
+/**
+ * Code reviews have no locks (refused before any render or capture).
+ * @param {Doc} doc
+ */
+function refuseCodeLock(doc) {
+  if (isCode(doc)) throw new RefusedError('code reviews have no locks', { details: { doc: doc.id, kind: 'code' } });
 }

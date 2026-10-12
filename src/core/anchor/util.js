@@ -44,13 +44,15 @@ export function anchoringConfig(config) {
 }
 
 /**
- * 'markdown' | 'html' from an explicit format or the render.
+ * 'markdown' | 'html' | 'text' from an explicit format or the render. 'text' (code docs) is identity: its quotes are
+ * never stripped of markup.
  * @param {string|undefined|null} format
  * @param {{ format?: string }|null|undefined} [render]
- * @returns {'markdown'|'html'}
+ * @returns {'markdown'|'html'|'text'}
  */
 export function formatOf(format, render) {
   const f = String(format ?? render?.format ?? '').toLowerCase();
+  if (f === 'text') return 'text';
   return f === 'html' || f === 'htm' ? 'html' : 'markdown';
 }
 

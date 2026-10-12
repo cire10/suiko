@@ -29,7 +29,7 @@ import { preciseMapper } from '../workmap.js';
 import { addAgentReply } from './threads.js';
 import { lastDeliveredAt } from './common.js';
 import { eolOf, matchEol } from '../apply.js';
-import { isSnapshot } from '../../store/snapshot.js';
+import { isVirtual } from '../../store/snapshot.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -61,6 +61,19 @@ import { isSnapshot } from '../../store/snapshot.js';
  * @property {Review[]} reviews
  * @property {import('../guards.js').GuardResult | null} guards
  * @property {Array<{ via: string, thread?: string, lines?: [number, number], quote?: string }>} overrides
+ *
+ * Optional kind seams (code docs build their own Prepared; absent = today's behaviour):
+ * @property {(item: Thread | Lock, prev: Anchor, linkIds: string[], extra: StepExtra) => Anchor} [stepFor] steps one
+ *   thread / lock anchor from head to the new version (replaces stepAnchor in versionJournal)
+ * @property {(thread: Thread, linkedHunks: import('../attribution.js').AttributedHunk[]) => boolean} [landed]
+ *   whether a staged suggestion's text really is in the new version (replaces suggestionLanded)
+ * @property {Record<string, string | null>} [assetFiles] commitVersion assetFiles (code docs: {}); default: the
+ *   working render's assets (none for a virtual doc)
+ *
+ * @typedef {object} StepExtra
+ * @property {boolean} [linked] the thread is linked to a changed asset
+ * @property {{ lines?: [number, number], quote?: string } | null} [override] the agent's staged override
+ * @property {number} toVersion the version being recorded
  */
 
 /**
@@ -124,8 +137,8 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
 
   const attribution = attribute({ hunks, headSource: head.source, workingSource: working.text, pending, hints, threads: ranges, other, mapper, scopes });
 
-  // A snapshot doc has no workspace files: its versions never reference or snapshot workspace assets.
-  const workingAssets = isSnapshot(doc) ? {} : await hashWorkingAssets(ctx.root, render.assets, ctx.config.assets.maxBytes);
+  // A snapshot or code doc has no workspace files: its versions never reference or snapshot workspace assets.
+  const workingAssets = isVirtual(doc) ? {} : await hashWorkingAssets(ctx.root, render.assets, ctx.config.assets.maxBytes);
   const changed = changedAssets(head.manifest.assets, workingAssets);
   const links = assetLinks(
     threads.map((t) => ({ id: t.id, anchor: anchorAt(t, head.v) })),
@@ -218,9 +231,10 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
  * @param {object} p
  * @param {Actor} p.author
  * @param {string} p.summary
- * @param {'revise' | 'ui-record' | 'ui-apply' | 'snapshot'} p.capturedBy
+ * @param {'revise' | 'ui-record' | 'ui-apply' | 'snapshot' | 'round'} p.capturedBy ('round': a code round)
  * @param {string | null} p.respondsTo
- * @param {Record<string, unknown>} [p.manifestExtra] more manifest fields (a snapshot's `origin`)
+ * @param {Record<string, unknown>} [p.manifestExtra] more manifest fields (a snapshot's `origin`, a code round's
+ *   `code`: CodeManifest)
  * @param {Replies} [p.replies]
  * @param {boolean} [p.autoReply] add "Applied the suggestion verbatim." to applied suggestions without a reply
  * @param {Record<string, string>} [p.breakLocks]
@@ -242,8 +256,8 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
     rewriteRatio: Math.round((g?.rewriteRatio ?? 0) * 10000) / 10000,
   };
   /** @type {Record<string, string | null>} */
-  const assetFiles = {};
-  if (!isSnapshot(doc)) for (const rel of render.assets) assetFiles[rel] = null;
+  const assetFiles = prep.assetFiles ? { ...prep.assetFiles } : {};
+  if (!prep.assetFiles && !isVirtual(doc)) for (const rel of render.assets) assetFiles[rel] = null;
   const counts = { threads: 0, locks: 0, exact: 0, moved: 0, edited: 0, changed: 0, orphaned: 0 };
   for (const tid of Object.keys(replies)) {
     if (prep.threads.some((t) => t.id === tid)) continue;
@@ -274,6 +288,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
         threads: h.threads,
         linkedBy: h.linkedBy,
         other: h.other,
+        ...(/** @type {any} */ (h).file ? { file: /** @type {any} */ (h).file } : {}),
       })),
       guards: {
         errors: issueStrings(g?.errors ?? []),
@@ -292,7 +307,16 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
   await ctx.store.applyJournal(doc.id, /** @type {import('../../store/store.js').Journal} */ (/** @type {unknown} */ (journal)));
 
   const threadIds = [...new Set(attribution.hunks.flatMap((h) => h.threads))].sort();
-  const git = await autoCommit({ root: ctx.root, config: ctx.config, docId: doc.id, docPath: isSnapshot(doc) ? null : doc.path, version: manifest.v, summary, threads: threadIds });
+  const git = await autoCommit({
+    root: ctx.root,
+    config: ctx.config,
+    docId: doc.id,
+    docPath: isVirtual(doc) ? null : doc.path,
+    version: manifest.v,
+    summary,
+    threads: threadIds,
+    ephemeral: Boolean(doc.ephemeral),
+  });
   return { manifest, anchors: counts, git };
 }
 
@@ -325,20 +349,22 @@ function versionJournal(ctx, doc, prep, final, { author, summary, replies, autoR
    * @param {{ linked?: boolean, override?: { lines?: [number, number], quote?: string } | null }} [extra]
    */
   const step = (prev, item, linkIds, extra = {}) =>
-    stepAnchor({
-      anchor: prev,
-      original: originalAnchor(/** @type {any} */ (item)),
-      fromSource: head.source,
-      toSource: working.text,
-      toVersion: newV,
-      toRender: render,
-      env,
-      hunks: prep.hunks,
-      linkIds,
-      linked: extra.linked,
-      override: extra.override ?? null,
-      assets: final.assets ?? null,
-    });
+    prep.stepFor
+      ? prep.stepFor(/** @type {any} */ (item), prev, linkIds, { linked: extra.linked, override: extra.override ?? null, toVersion: newV })
+      : stepAnchor({
+          anchor: prev,
+          original: originalAnchor(/** @type {any} */ (item)),
+          fromSource: head.source,
+          toSource: working.text,
+          toVersion: newV,
+          toRender: render,
+          env,
+          hunks: prep.hunks,
+          linkIds,
+          linked: extra.linked,
+          override: extra.override ?? null,
+          assets: final.assets ?? null,
+        });
   /** @param {Anchor} a */
   const tally = (a) => {
     const st = /** @type {keyof typeof counts} */ (a.state);
@@ -387,7 +413,8 @@ function versionJournal(ctx, doc, prep, final, { author, summary, replies, autoR
   for (const t of byId.values()) {
     const sg = t.suggestion;
     if (!sg || sg.status !== 'staged') continue;
-    if (!suggestionLanded(attribution.hunks.filter((h) => h.threads.includes(t.id)), working.text, sg.new, eol)) {
+    const linkedHunks = attribution.hunks.filter((h) => h.threads.includes(t.id));
+    if (!(prep.landed ? prep.landed(t, linkedHunks) : suggestionLanded(linkedHunks, working.text, sg.new, eol))) {
       sg.status = 'pending';
       continue;
     }

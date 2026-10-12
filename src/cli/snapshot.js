@@ -1,6 +1,6 @@
 // @ts-check
 // CLI plumbing shared by the commands that review text which is not a workspace file (`plan-gate`, `last`,
-// `open -`): where the snapshot doc lives, recording it (engine takeSnapshot: v1, or vN+1 of the doc with the same
+// `open -`, `snapshot <url>`): where the snapshot doc lives, recording it (engine takeSnapshot: v1, or vN+1 of the doc with the same
 // origin key), and what is printed about it.
 //
 // Workspace: --workspace, else discovery from the relevant directory (the hook's or the shell's cwd) as `open`
@@ -67,7 +67,9 @@ export function scratchRootFor(dir) {
  * @param {import('./runtime.js').Runtime} rt
  * @param {SnapshotWorkspace} ws
  * @param {{ source: string | Buffer, format?: 'markdown' | 'html', title?: string | null, slug?: string | null,
- *   origin: { type: string, key?: string | null } & Record<string, unknown>, summary?: string, autoAddress?: boolean }} input
+ *   origin: { type: string, key?: string | null } & Record<string, unknown>, summary?: string, autoAddress?: boolean,
+ *   render?: { network?: 'allow' | 'block' }, replies?: Record<string, { status: string, reply: string, at?: string }>,
+ *   other?: Array<{ at: string, why: string }> }} input
  */
 export async function recordSnapshotDoc(rt, ws, input) {
   const { ctx, engine } = await openContext(rt, { create: true, root: ws.root });

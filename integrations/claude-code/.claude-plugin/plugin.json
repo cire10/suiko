@@ -2,7 +2,7 @@
   "name": "specreview",
   "displayName": "SpecReview",
   "version": "0.1.0",
-  "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec and /specreview-last commands, and hooks that block whole-file rewrites of specs under review and surface submitted reviews. Requires the specreview CLI on PATH (npm install && npm link).",
+  "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec, /review-code and /specreview-last commands, and hooks that block whole-file rewrites of specs under review and surface submitted reviews. Requires the specreview CLI on PATH (npm install && npm link).",
   "author": {
     "name": "Eric Tang"
   },

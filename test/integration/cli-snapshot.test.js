@@ -123,7 +123,7 @@ describe('docs of a kind this version does not know', () => {
     assert.equal((await cli(['open', 'docs/kitchen-sink.md'])).code, 0);
     assert.equal((await cli(['open', '-', '--name', 'notes'], { input: NOTES })).code, 0);
     const file = path.join(ws.root, '.specreview', 'docs', 'notes', 'doc.json');
-    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), kind: 'code' }));
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), kind: 'whiteboard' }));
     const status = await cli(['status']);
     assert.equal(status.code, 0, status.stderr);
     assert.match(status.stdout, /^kitchen-sink /m);
@@ -131,7 +131,7 @@ describe('docs of a kind this version does not know', () => {
     for (const argv of [['wait', 'notes', '--timeout', '1s'], ['feedback', 'notes']]) {
       const r = await cli(argv);
       assert.equal(r.code, 3, `${argv.join(' ')}: ${r.stdout}${r.stderr}`);
-      assert.match(r.stderr, /notes is a "code" doc, made by a newer SpecReview than this one \(file, snapshot\): run the specreview that made it, or update this one/);
+      assert.match(r.stderr, /notes is a "whiteboard" doc, made by a newer SpecReview than this one \(file, snapshot, code\): run the specreview that made it, or update this one/);
     }
   });
 });

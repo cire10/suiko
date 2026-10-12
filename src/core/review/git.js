@@ -59,13 +59,15 @@ export function commitMessage(docId, v, summary, threads) {
  * @param {string} p.root workspace root
  * @param {{ git?: { autoCommit?: boolean } }} p.config
  * @param {string} p.docId
- * @param {string | null} p.docPath workspace-relative path of the working file (null for a snapshot doc)
+ * @param {string | null} p.docPath workspace-relative path of the working file (null for a snapshot or code doc)
  * @param {number} p.version
  * @param {string} p.summary
  * @param {string[]} [p.threads]
+ * @param {boolean} [p.ephemeral] doc.ephemeral (code docs): never committed, whatever the config says
  * @returns {Promise<{ commit: string | null, skipped?: string, error?: string }>}
  */
-export async function autoCommit({ root, config, docId, docPath, version, summary, threads = [] }) {
+export async function autoCommit({ root, config, docId, docPath, version, summary, threads = [], ephemeral = false }) {
+  if (ephemeral) return { commit: null, skipped: 'ephemeral doc' };
   if (!config?.git?.autoCommit) return { commit: null, skipped: 'git.autoCommit is off' };
   if (!(await isGitRepo(root))) return { commit: null, skipped: 'not a git repository' };
   // A pathspec that matches nothing (no assets yet) would fail the whole command.

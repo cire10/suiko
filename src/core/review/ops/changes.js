@@ -21,6 +21,8 @@ import { attribute, newLineRange } from '../attribution.js';
 import { anchorAssetPath, assetLinks, changedAssets, hashWorkingAssets, sridsReferencing } from '../assets.js';
 import { anchorAt, idNumber, isActionable, lastIndexes, originalAnchor } from '../threadstate.js';
 import { parseVersionArg, readHead, readWorkingState, requireThread, resolveDoc, versionLoader } from './common.js';
+import { isCode } from '../../store/snapshot.js';
+import { codeChanges, codeFileDiff, codeThreadMiniDiff, codeUnifiedDiff } from '../../code/files.js';
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -68,6 +70,7 @@ async function loadPair(ctx, doc, { from, to }) {
  */
 export async function changes(ctx, ref, range = {}) {
   const doc = await resolveDoc(ctx, ref);
+  if (isCode(doc)) return codeChanges(ctx, doc, range);
   const p = await loadPair(ctx, doc, range);
   const hunks = lineHunks(p.fromSource, p.source);
   const cs = changeSet({ fromSource: p.fromSource, toSource: p.source, toRender: p.toRender, format: doc.format, hunks });
@@ -175,6 +178,8 @@ async function spanLinks(ctx, doc, from, to, hunks, links, guards) {
  */
 export async function sourceDiffOp(ctx, ref, range = {}) {
   const doc = await resolveDoc(ctx, ref);
+  // code docs: the diff of one repo file (`range.path`; the whole-review text diff means nothing to a reader)
+  if (isCode(doc)) return codeFileDiff(ctx, doc, /** @type {any} */ (range));
   const p = await loadPair(ctx, doc, range);
   const diff = sourceDiff(p.fromSource, p.source, { context: range.context ?? 3 });
   /** @type {Record<string, string[]>} */
@@ -191,6 +196,7 @@ export async function sourceDiffOp(ctx, ref, range = {}) {
  */
 export async function unifiedDiff(ctx, ref, range = {}) {
   const doc = await resolveDoc(ctx, ref);
+  if (isCode(doc)) return codeUnifiedDiff(ctx, doc, range);
   const p = await loadPair(ctx, doc, range);
   const toLabel = p.to === 'live' ? `${doc.path} (working copy)` : `${doc.path} (v${p.to})`;
   return { from: p.from, to: p.to, patch: unifiedPatch(p.fromSource, p.source, { fromLabel: `${doc.path} (v${p.from})`, toLabel }) };
@@ -205,6 +211,7 @@ export async function unifiedDiff(ctx, ref, range = {}) {
  */
 export async function threadMiniDiff(ctx, ref, tid) {
   const doc = await resolveDoc(ctx, ref);
+  if (isCode(doc)) return codeThreadMiniDiff(ctx, doc, tid);
   const t = await requireThread(ctx, doc.id, tid);
   const head = doc.head;
   const { lastHuman } = lastIndexes(t);
@@ -241,6 +248,8 @@ export async function threadMiniDiff(ctx, ref, tid) {
 export async function domTargets(ctx, ref, ver) {
   const doc = await resolveDoc(ctx, ref);
   const v = parseVersionArg(ver, { allowLive: true, fallback: doc.head });
+  // code docs are never framed: nothing to paint
+  if (isCode(doc)) return { version: v, threads: [], locks: [], drafts: [], outline: [] };
   const render = await ctx.render(doc, v);
   const env = envOf(doc, ctx.config);
   const anchorV = v === 'live' ? doc.head : v;

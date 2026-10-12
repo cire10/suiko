@@ -12,7 +12,9 @@
 //    killed wait (write never resolved) therefore re-delivers next time.
 // The waiter file is always removed on exit. `docIds` null / '*' = every doc of the workspace (`wait --all`),
 // except gated snapshots (a Claude Code plan, store/snapshot.js isGated): their reviews are delivered only by the
-// plan gate blocking on them, or by a wait that names the doc.
+// plan gate blocking on them, or by a wait that names the doc. In that mode virtual docs (snapshot and code) skip
+// the dirty pre-check: a code doc is checked for unrecorded edits only by a wait that names it (its working state
+// is the repo, kindOf(doc).workingState).
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -20,7 +22,7 @@ import path from 'node:path';
 import { SSE } from '../../../shared/protocol.js';
 import { NotFoundError } from '../../store/errors.js';
 import { ALL_DOCS } from '../../store/store.js';
-import { isGated } from '../../store/snapshot.js';
+import { isGated, isVirtual } from '../../store/snapshot.js';
 import { createLogger } from '../../util/log.js';
 import { deliverPacket } from './feedback.js';
 import { readHead, readWorkingState, resolveDoc } from './common.js';
@@ -62,7 +64,7 @@ export async function waitForFeedback(ctx, opts = {}) {
   if (!initial.length) throw new NotFoundError('no tracked docs to wait for (run specreview open <file> first)');
   for (const doc of initial) {
     if (doc.state === 'closed') return { status: 'closed', packets: [], text: '', docId: doc.id };
-    if (!allowDirty && doc.head) {
+    if (!allowDirty && doc.head && !(all && isVirtual(doc))) {
       const head = await readHead(ctx, doc);
       const w = await readWorkingState(ctx, doc, head);
       if (w.dirty) return { status: 'dirty', packets: [], text: '', docId: doc.id };

@@ -24,7 +24,7 @@ Contents:
 16. [Command reference](#16-command-reference)
 17. [Rules summary](#17-rules-summary)
 18. [Writing specs that review well](#18-writing-specs-that-review-well)
-19. [Snapshot docs: plans, messages, piped text](#19-snapshot-docs-plans-messages-piped-text)
+19. [Snapshot docs: plans, messages, piped text, web pages](#19-snapshot-docs-plans-messages-piped-text-web-pages)
 
 ## 1. Model
 
@@ -510,6 +510,8 @@ The plugin registers the hooks as `specreview hook pre-write` and `specreview ho
 | Tool | Input | Returns |
 |---|---|---|
 | `specreview_open` | `{path, title?}` | `{doc, version, url}` |
+| `specreview_review` | `{mode?, base?, range?, commit?, paths?, title?}` | the `review --json` shape: a code review (section 20; no PR mode) |
+| `specreview_snapshot` | `{url, title?}` | `{doc, version, recorded, url, page}`; public hosts only (a private host or the network turned off is refused); see section 19 |
 | `specreview_wait` | `{doc?, timeout_sec?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}` |
 | `specreview_feedback` | `{doc, peek?, include_drafts?}` | the packet |
 | `specreview_apply` | `{doc, thread_ids}` | `{applied, conflicts}` |
@@ -517,12 +519,12 @@ The plugin registers the hooks as `specreview hook pre-write` and `specreview ho
 | `specreview_reply` | `{doc, thread_id, body, status?, at?, decision?}` | thread summary |
 | `specreview_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` | the revise report |
 | `specreview_revert` | `{doc, hunk?, lock?}` | report |
-| `specreview_reanchor` | `{doc, thread_id, lines?, quote?}` | the anchor |
-| `specreview_ask` | `{doc, body, quote? or lines?}` | the new agent-question thread |
+| `specreview_reanchor` | `{doc, thread_id, lines?, quote?, file?}` | the anchor |
+| `specreview_ask` | `{doc, body, quote? or lines?, file?}` | the new agent-question thread |
 | `specreview_threads` | `{doc, status?}` | one line per thread (`structuredContent.threads`) |
 | `specreview_diff` | `{doc, from?, to?, format?: "stat" or "unified"}` | the diff |
 | `specreview_log`, `specreview_status` | `{doc?}` | text |
-| `specreview_show` | `{doc, thread_id?, version?, lines?}` | text |
+| `specreview_show` | `{doc, thread_id?, version?, lines?, file?, side?}` | text |
 | `specreview_final` | `{doc, decisions?, out_dir?}` | paths |
 
 While `specreview_wait` blocks, it sends progress notifications every 15 s when the request carries a progress token. MCP-only loop: `specreview_open`, `specreview_wait` (again while it returns `waiting`), `specreview_apply` / `specreview_edit`, `specreview_revise`.
@@ -535,6 +537,8 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `open <dir>` | Open every `.md`/`.markdown`/`.html`/`.htm` file below the folder (at most 200); one line per doc and the UI's home URL | 0 |
 | `open - [--name N] [--title T]` | Piped Markdown (at most 5 MB) as a snapshot doc; the same `--name` records a new version | 0 |
 | `last [--session <id>] [--transcript <path>] [--title T] [--browser pane\|system\|none]` | The agent's last message (Claude Code transcript) as a snapshot doc; prints the URL and the wait command | 0 / 4 |
+| `snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->] [--browser pane\|system\|none]` | A web page as a snapshot doc (the only command that uses the network); again for the same URL records the next version when the page changed; `--replies` posts replies with it | 0 / 1 / 3 / 4 |
+| `review [<range>] [--uncommitted \| --staged \| --base <ref> [--committed] \| --commit <sha> \| --pr <n\|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane\|system\|none]` | Open a code review of the changes (section 20); again with the same arguments: a new round when the files changed | 0 / 1 / 3 / 4 |
 | `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review arrives; print the packet; mark it delivered | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The packet, without blocking; marks delivered unless `--peek` | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim; stage tagged edits | 0 / 3 |
@@ -544,15 +548,15 @@ While `specreview_wait` blocks, it sends progress notifications every 15 s when 
 | `revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies | 0 / 3 |
 | `revise <doc> --source <file\|-> [--replies <file\|->]` | Snapshot docs: record the given text as the new version | 0 |
 | `revert <doc> (--hunk hN \| --lock L1)` | Restore part of the working copy | 0 / 3 |
-| `reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor | 0 / 3 |
-| `ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | Ask the reviewer a question | 0 / 3 |
+| `reanchor <doc> <tid> (--lines A-B \| --quote TEXT) [--file <path>]` | Move a thread's anchor (code reviews: lines of the working file now) | 0 / 3 |
+| `ask <doc> (--quote TEXT \| --lines A-B \| --file <path> [--lines A-B]) -m <question>` | Ask the reviewer a question | 0 / 3 |
 | `threads <doc> [--status open\|addressed\|needs_input\|resolved\|outdated\|all] [--json]` | One line per thread | 0 |
-| `show <doc> [<tid>] [--version N] [--lines A-B]` | A thread with its timeline, or old source | 0 / 4 |
+| `show <doc> [<tid>] [--version N] [--lines A-B] [--file <path> [--side new\|old]]` | A thread with its timeline, or old source (code reviews: a file of a round) | 0 / 4 |
 | `diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Changes (default: last reviewed..head) | 0 |
 | `log <doc> [--json]` | Timeline | 0 |
 | `status [<doc>] [--json]` | Docs, head, counts, undelivered reviews, listeners, working copy | 0 |
 | `final <doc> [--decisions] [--out <dir>]` | Final checks and the decisions export | 0 / 3 |
-| `close <doc>` | End the review session; waits exit 5 | 0 |
+| `close <doc>` | End the review session; waits exit 5; a PR review also loses `refs/specreview/pr/<n>` | 0 |
 | `snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: a screenshot (macOS picker, or `--file`) as a draft comment, or submitted at once with `--send`. Agents do not run it: it opens a picker on the reviewer's screen | 0 |
 | `serve [--foreground] [--port N]` · `stop [--rotate]` · `doctor [--fix]` | Server control and checks | |
 | `mcp` | stdio MCP server | |
@@ -592,9 +596,9 @@ Do not:
 
 The longer version, with reasons, is in [`integrations/claude-code/skills/spec-review/reference.md`](../integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
 
-## 19. Snapshot docs: plans, messages, piped text
+## 19. Snapshot docs: plans, messages, piped text, web pages
 
-A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code) or Markdown piped to `specreview open -`. Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
+A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code), Markdown piped to `specreview open -`, or a web page (`specreview snapshot <url>`). Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`, `web/<slug>.md` or `web/<slug>.html`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
 
 - The packet header names the kind (`token-plan (Claude Code plan)`), line numbers are lines of the head version, and no thread offers `specreview apply`.
 - `apply`, `edit` and `revert` are refused (exit 3) with what to do instead, and so is `revise` without `--source` (exit 1).
@@ -602,3 +606,107 @@ A **snapshot doc** reviews text that is not a file in the workspace: a Claude Co
 - **Revising a plan:** edit the plan file with targeted Edit-tool changes and call ExitPlanMode again; the plan gate records the version.
 - **Workspace:** found from the current directory as usual. When that is your home directory or `/`, the doc goes to the scratch workspace `$SPECREVIEW_HOME/scratch/<8 hex>/`, and every printed command carries `--workspace <dir>`: keep it on every command for that doc.
 - `specreview last` reads `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<session>.jsonl` (session from `--session`, else `$CLAUDE_CODE_SESSION_ID`; else the newest transcript of the current directory), takes the newest assistant message with text (skipping sidechains, tool results and command echoes), and returns at once. When the newest assistant message is still running a tool call (you ran `specreview last` yourself, maybe after a sentence), that whole turn is skipped. The text is stored with a final newline, as `show` prints it. Running it again for the same message reopens the same doc and records nothing, so your revisions stay. Codex transcripts are not supported.
+
+### Web pages
+
+`specreview snapshot <url>` fetches a page once and records it as a snapshot doc whose key is the URL (normalised: lowercase scheme and host, no default port, no fragment). Running the command is the consent to use the network: it is the only command that does, and it is refused (exit 3) when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false` in `$SPECREVIEW_HOME/config.json`.
+
+- **What is fetched:** http(s) only, no user name or password in the URL, at most 10 MB and 30 s, at most 10 redirects. Hosts that resolve to this machine or a private network (loopback, `10/8`, `172.16/12`, `192.168/16`, link-local, unique-local IPv6 and their mapped forms) are refused (exit 3) unless `--allow-private`, and every redirect is checked again. A name that does not resolve exits 4; a connection error or an HTTP status of 400 or more exits 1.
+- **What is stored:** never the page as served. HTML is cleaned with an allowlist (no scripts, styles, forms, frames, embeds, SVG or event handlers; links `http`/`https`/`mailto` only, resolved against the page), the page's single `<main>` or `<article>` is kept when it has one, and the result is converted to Markdown (`web/<slug>.md`). `--as-html` keeps the cleaned HTML (`web/<slug>.html`); a doc keeps its format, so a later run must use the same choice. Markdown pages (a `.md` URL, `raw.githubusercontent.com`, a `github.com/.../blob/...md` page fetched from its raw URL) are kept as served when they contain no raw HTML, and lose it otherwise. A page rendered by JavaScript is nearly empty: the command says so, and `--reader jina` (public hosts only) has r.jina.ai render it, sending it the URL without its query string.
+- **In the review UI** the doc is served with a strict policy (no scripts but the review overlay, no forms) and its remote images and styles are blocked unless the run had `--allow-remote-assets`.
+- **The packet** names the page instead of a file: `Line numbers = lines of SpecReview's Markdown snapshot of <url> (fetched 2026-10-11 14:05 UTC); there is no file for you to edit.` `src>` lines quote that conversion.
+- **A page you build** (fetched with `--allow-private`): the packet says `PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page …` and `NEXT: edit the sources that produce the page -> specreview snapshot <url> --allow-private --replies - (records vN+1) -> specreview wait <doc> (background)`. Change only what the threads ask for, then run that command with the replies JSON (section 8.1) on stdin: it fetches the page again, records the next version and posts the replies in one step. When the page did not change, it records nothing and only posts the replies. `revise <doc>` without `--source` prints the same command.
+- **A public page**: there is nothing for you to edit. The packet says `PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit.` and `NEXT: answer each thread with specreview reply <doc> <tid> -m <md> --status answered|declined -> specreview wait <doc> (background)`. Running `specreview snapshot <url>` again records a newer version when the page itself changed.
+- **MCP:** `specreview_snapshot` `{url, title?}` does the same for public hosts only (no `--allow-private`, `--reader` or `--as-html`); for a page you build, use the CLI.
+
+## 20. Code reviews
+
+
+`review` opens a doc of kind `code`: each round (version) is the diff of the reviewed files plus a stored copy of both sides, and threads anchor on a file, a side and lines. Ids: `cr-<branch>`, `cr-uncommitted`, `cr-staged`, `cr-<from>-<to>`, `cr-<sha7>`, `cr-pr-<n>`.
+
+| Flags | Old side .. new side |
+|---|---|
+| (none) | merge-base(default branch, HEAD) .. working tree, untracked files included. On the default branch, detached, or without a default branch: as `--uncommitted` |
+| `--uncommitted` | HEAD .. working tree (untracked included) |
+| `--staged` | HEAD .. the index |
+| `--base <ref>` | merge-base(ref, HEAD) .. working tree; with `--committed`: .. HEAD |
+| `A..B`, `A...B` | A .. B; with three dots, merge-base(A, B) .. B |
+| `--commit <sha>` | its parent .. the commit; from round 2 on, the working tree, limited to the commit's files |
+| `--pr <n\|url>` | the PR's merge-base .. your working tree when the PR is checked out; otherwise .. its head, fetched once into `refs/specreview/pr/<n>` |
+
+The default branch is `code.defaultBase` in the config, else `origin/HEAD`, else main, master, trunk or develop. `--path <pathspec>` limits any mode, `--context N` sets the context lines, and `--max-files N` raises the file limit.
+
+These are left out and listed as skipped: the `.specreview/` store; untracked files that look like secrets (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa` and other keys) or are very large; and binary or too-large files, which have no `src>`. Your index, branches and commits are never changed: rounds use a temporary index, and `apply` writes working files only.
+
+### 20.1 The code packet
+
+```text
+SPECREVIEW FEEDBACK · cr-feat-token-refresh (code review: since-base main, merge-base 5a7273c) · review rv1 on v1 · CHANGES REQUESTED
+Repo root: /path/to/repo (paths below are relative to it)
+Line numbers = files in your working tree now (all identical to v1).
+3 threads need action (3 new): 1 question · 1 suggestion · 1 comment
+
+[t1] comment · src/auth/refresh.js:L12
+  src>   if (stored.used) throw new TokenReuseError();
+  Eric: Two tabs refreshing at once will trip this. Allow reuse within 30 s before throwing.
+
+[t2] suggestion · src/auth/refresh.js:L11 · apply verbatim: specreview apply cr-feat-token-refresh t2
+  -   const ttlSec = config.refreshTtlSec;
+  +   const ttlSec = config.refreshTtlSec ?? 30 * 24 * 3600;
+  Eric: Keep the old default when the config has no TTL.
+
+[t3] question · src/auth/store.js (old side) base L1-3, now between L1
+  was> export function legacyLookup(id) {
+  was>   return db.tokens.findOne({ id });
+  was> }
+  Eric: Does anything still call legacyLookup? Was removing it intended?
+
+DECISIONS to keep true: (none yet)
+PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
+  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+NEXT: edit the files -> specreview revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> specreview wait cr-feat-token-refresh (background)
+```
+
+- **Items** cite `path:L..` relative to the repo root, with `(new file)`, `(old side)` or `(whole file)` where it applies. There is no `on:` line, no section and no LOCKED line: code reviews have no locks.
+- **`src>`** is the cited lines in the working file now, grown (up to 8 lines or 1200 characters) until it is unique in that file. Otherwise it says `(not unique in the file: Read around L42 before editing)`.
+- **Old-side items** print the deleted lines as `was>`, and `now between L..` says where they would go in the working file.
+- `FILE MISSING in your working tree` means the file is gone: restore it, or reply explaining the deletion.
+- **Line basis:**
+  - normally: the files in your working tree now;
+  - a commit that is not checked out: `Line numbers = files of vN (commit 1a2b3c4), which is not checked out: check it out before editing.`;
+  - a PR that is not checked out: `PR #123 is not checked out here: run \`gh pr checkout 123\` before editing; line numbers are the PR head 4c5d6e7.`;
+  - after a rebase or merge, old-side lines are lines of the new merge-base.
+- **JSON:** `kind: "code"`, `code: {label, baseSha, newSha, worktree, root}`, and per thread `file`, `fileFromCwd`, `side`, `lines`, `src`, `was` and `fileState` (`ok`, `missing`, `not-checked-out`, `binary` or `too-large`).
+
+### 20.2 Revising a code review
+
+Edit the files with your editor tools. Use `apply <doc> <tid>` for suggestions, and re-Read a file after `apply`. Then record the round:
+
+```json
+{"summary": "reuse grace window, TTL default",
+ "threads": {
+   "t1": {"status": "addressed", "reply": "Reuse within 30 s no longer throws.", "at": "src/auth/refresh.js:L12"},
+   "t2": {"status": "addressed", "reply": "Applied."},
+   "t3": {"status": "answered", "reply": "Nothing calls it any more, so the removal is intended."}},
+ "other": [{"at": "src/auth/index.js:L3", "why": "export the new error type"}]}
+```
+
+- `at` and `other[].at` take `path:L..`, or a path for a whole file. The revise report names hunks `src/auth/refresh.js#h1`.
+- `edit` and `revert` are refused on code docs.
+- Code rounds are never refused by guards: there is no rewrite ratio and no locks, and an unexplained change is only a note, and only for files that hold threads.
+- `wait` exits 3 while reviewed files have unrecorded edits. Record them with `revise` first, or pass `--allow-dirty`.
+- `diff <doc> v1..v2` is the interdiff between rounds. `show <doc> --file <path> [--side new|old] [--version N]` prints a file of a round.
+- `ask <doc> --file <path> [--lines A-B] -m "…"` asks about code, with lines of the working file now. `reanchor <doc> tN [--file <path>] --lines A-B` moves a thread.
+
+### 20.3 PR reviews
+
+`review --pr <n|url>` needs the GitHub CLI (`gh`), signed in.
+- **Resolving:** gh resolves the repository (from the URL, or `gh repo view`), the PR and its merge-base. Every value it returns is checked before git runs.
+- **Checked out:** when the PR's head commit is HEAD or an ancestor of HEAD, after `gh pr checkout <n>` plus any commits on top, the review covers your working tree.
+- **Not checked out:** the head is fetched once from the remote whose URL is the PR's repository, rounds compare against that ref, and the packet says to check out before editing. With no such remote, the review is refused (exit 3) with the `git remote add` to run.
+- **Network:** this is the only review that uses the network. Rounds, the review UI and the daemon never run `gh` or `git fetch`. Run `review --pr <n>` again to pick up new PR commits; it refreshes the stored head and merge-base.
+- **Exits:**
+  - `SPECREVIEW_OFFLINE=1` or `network.allow: false`: exit 3, before anything runs;
+  - `gh` missing or not signed in: exit 1;
+  - PR not found: exit 4.
+- `close` deletes the ref. PR mode is not available over MCP.

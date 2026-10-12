@@ -197,7 +197,7 @@ describe('hook prompt', () => {
     const file = path.join(ws.root, '.specreview', 'docs', 'token-service', 'doc.json');
     const text = fs.readFileSync(file, 'utf8');
     try {
-      fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(text), kind: 'code' }));
+      fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(text), kind: 'whiteboard' }));
       assert.equal(hook('prompt', payload()).stdout, '');
     } finally {
       fs.writeFileSync(file, text);

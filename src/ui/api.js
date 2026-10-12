@@ -234,6 +234,16 @@ export async function request(method, path, body, opts = {}) {
 const enc = (s) => encodeURIComponent(String(s));
 
 /**
+ * A query string of the defined values (file paths go in the query, URL-encoded).
+ * @param {Record<string, string|number|undefined|null>} q
+ */
+function codeQuery(q) {
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v != null) out.set(k, String(v));
+  return out.toString();
+}
+
+/**
  * Typed wrappers for every route the UI uses.
  * @param {string} ws
  * @param {string} doc
@@ -287,6 +297,21 @@ export function docApi(ws, doc) {
     diff: (from, to) => request('GET', `${base}/diff?from=${enc(from)}&to=${enc(to)}`),
     /** @param {number} from @param {number|'live'} to */
     sourceDiff: (from, to) => request('GET', `${base}/diff/source?from=${enc(from)}&to=${enc(to)}`),
+    /**
+     * Code reviews: the files of a round ({v}) or the interdiff file list of two rounds ({from, to}).
+     * @param {{ v: number } | { from: number, to: number }} q
+     */
+    files: (q) => request('GET', `${base}/files?${codeQuery(q)}`),
+    /**
+     * Code reviews: one file's display hunks in a round ({path, v}) or between two rounds ({path, from, to}).
+     * @param {{ path: string, v?: number, from?: number, to?: number, context?: number }} q
+     */
+    fileDiff: (q) => request('GET', `${base}/files/diff?${codeQuery(q)}`),
+    /**
+     * Code reviews: one side of one file of a round, as text.
+     * @param {string} path @param {number} v @param {'new'|'old'} side
+     */
+    fileSource: (path, v, side) => request('GET', `${base}/files/source?${codeQuery({ path, v, side })}`),
     /** @param {string} summary */
     record: (summary) => request('POST', `${base}/record`, { summary }),
     /** @param {string} dataUrl */

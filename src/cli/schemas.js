@@ -6,18 +6,21 @@
 import * as z from 'zod/v4';
 import { UsageError } from '../core/store/errors.js';
 import { parseLinesArg } from '../core/util/lines-arg.js';
+import { isCodeAt, isCodeOtherAt } from '../core/util/code-at.js';
 import { AGENT_REPLY_STATUS } from '../shared/protocol.js';
 
 const THREAD_ID = z.string().regex(/^t\d+$/, 'expected a thread id like t3');
 const LOCK_ID = z.string().regex(/^L\d+$/, 'expected a lock id like L1');
 
-/** 'L90-91' | 'L12,L90-91' */
-const LinesAt = z.string().refine(isLinesList, { message: 'expected lines like "L90-91" or "L12,L90-91"' });
-/** 'L12' | 'L12-14' | 'del:h6' | 'h6' */
+/** 'L90-91' | 'L12,L90-91'; code reviews: 'src/a.js:L90-91' | 'src/a.js:L12,L90-91,"a,b.js":L3' (core/util/code-at.js) */
+const LinesAt = z.string().refine((s) => isLinesList(s) || isCodeAt(s), {
+  message: 'expected lines like "L90-91" or "L12,L90-91" (code reviews: "src/a.js:L90-91")',
+});
+/** 'L12' | 'L12-14' | 'del:h6' | 'h6'; code reviews: 'src/a.js:L12' | 'src/a.js#h3' | 'del:src/a.js#h3' */
 const OtherAt = z
   .string()
-  .refine((s) => /^(del:)?h\d+$/.test(s.trim()) || isLinesList(s), {
-    message: 'expected "L12", "L12-14", "del:h6" or "h6"',
+  .refine((s) => /^(del:)?h\d+$/.test(s.trim()) || isLinesList(s) || isCodeOtherAt(s), {
+    message: 'expected "L12", "L12-14", "del:h6" or "h6" (code reviews: "src/a.js:L12", "src/a.js#h3" or "del:src/a.js#h3")',
   });
 
 /**

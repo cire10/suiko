@@ -9,7 +9,8 @@ export {};
 
 // ============================================================================ primitives
 
-/** @typedef {'markdown' | 'html'} DocFormat */
+/** @typedef {'markdown' | 'html' | 'text'} DocFormat 'text': code docs (an empty RenderResult; never framed) */
+/** @typedef {'file' | 'snapshot' | 'code'} DocKind */
 /** @typedef {'agent' | 'human' | 'external'} ActorKind */
 /** @typedef {{ kind: ActorKind, name: string }} Actor */
 /** @typedef {'thread' | 'comment' | 'review' | 'lock' | 'decision' | 'draft' | 'attachment'} IdKind */
@@ -63,9 +64,13 @@ export {};
  * @property {number} schema
  * @property {string} id slug of the basename ('-2' suffix on collision)
  * @property {string} path workspace-relative POSIX path of the working copy (synthetic for a snapshot doc:
- *   '<dir>/<slug>.md', never read or written; see core/store/snapshot.js)
- * @property {'file' | 'snapshot'} [kind] absent = 'file'
- * @property {DocOrigin} [origin] where a snapshot doc's content comes from
+ *   '<dir>/<slug>.md', and for a code doc: 'code/<id>.diff'; never read or written; see core/store/snapshot.js)
+ * @property {DocKind} [kind] absent = 'file'
+ * @property {DocOrigin} [origin] where a snapshot or code doc's content comes from (code: type 'diff')
+ * @property {CodeSpec} [code] code docs: what the review compares (fixed for the doc's life)
+ * @property {boolean} [ephemeral] the doc dir holds a '.gitignore' of '*' and autoCommit skips the doc (code docs)
+ * @property {{ network?: 'allow' | 'block' }} [render] per-doc override of the workspace's render settings (a
+ *   fetched web page: network 'block' unless --allow-remote-assets)
  * @property {DocFormat} format
  * @property {string} title
  * @property {string} createdAt
@@ -81,8 +86,9 @@ export {};
 
 /**
  * Provenance of a snapshot doc (doc.json) or of one of its versions (manifest): `type` 'plan' | 'message' |
- * 'stdin' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
- * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...).
+ * 'stdin' | 'url' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
+ * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...; a web page: url, finalUrl,
+ * private, fetchedAt, and on each version's manifest also status, contentType, etag, reader, removed).
  * @typedef {{ type: string, key: string | null } & Record<string, unknown>} DocOrigin
  */
 
@@ -97,6 +103,7 @@ export {};
  * @property {string[]} threads linked thread ids
  * @property {LinkedBy | null} linkedBy
  * @property {string | null} other explanation from ReviseInput.other
+ * @property {string} [file] code docs: the repo file of the hunk (hunk ids are then '<path>#h<n>')
  */
 
 /**
@@ -113,14 +120,74 @@ export {};
  * @property {Actor} author
  * @property {string} summary
  * @property {string | null} respondsTo review id
- * @property {'open' | 'revise' | 'ui-record' | 'ui-apply' | 'snapshot'} capturedBy
+ * @property {'open' | 'revise' | 'ui-record' | 'ui-apply' | 'snapshot' | 'round'} capturedBy ('round': a code
+ *   round recorded by `revise` on a code doc)
  * @property {DocOrigin} [origin] snapshot docs: provenance of this version
+ * @property {CodeManifest} [code] code docs: what this round captured
  * @property {Record<string, string>} assets workspace-relative path -> 'sha256:<hex>' | 'live'
  * @property {{ added: number, removed: number, hunks: number, rewriteRatio: number }} [stats]
  * @property {ManifestHunk[]} [hunks]
  * @property {{ errors: string[], warnings: string[], forced: boolean, brokenLocks: string[] }} [guards]
  * @property {{ commit: string | null }} [git]
  */
+
+// ============================================================================ code reviews (doc kind 'code')
+
+/**
+ * doc.code: what a code review diffs (fixed for the doc's life). `mode` is one of protocol.js CODE_MODES.
+ * @typedef {object} CodeSpec
+ * @property {'since-base' | 'uncommitted' | 'staged' | 'branch' | 'range' | 'commit' | 'pr'} mode
+ * @property {string} [base] ref name as given, or the detected default branch
+ * @property {string} [from] range start (ref or sha, as given)
+ * @property {string} [to] range end (ref or sha, as given)
+ * @property {boolean} [threeDot]
+ * @property {string} [commit]
+ * @property {{ repo: string, number: number, url: string, title: string, baseRefName: string, headRefName: string,
+ *   headOid: string, mergeBase: string }} [pr] PR mode (core/code/pr.js): headOid and mergeBase as of the last
+ *   `review --pr`, which refreshes them
+ * @property {string[]} [paths] pathspecs
+ * @property {number} context unified-diff context lines
+ */
+
+/**
+ * One changed file of a round (manifest.code.files, sorted by path).
+ * @typedef {object} CodeFile
+ * @property {string} path repo-root-relative POSIX path (the old path for 'D')
+ * @property {string} [oldPath] 'R' only
+ * @property {'A' | 'M' | 'D' | 'R' | 'T' | '='} status '=' unchanged against base, carried because an open thread
+ *   lives there
+ * @property {string} [old] 'sha256:<hex>' doc blob of the old side (Store#putDocBlob)
+ * @property {string} [new] 'sha256:<hex>' doc blob of the new side
+ * @property {true} [binary]
+ * @property {{ side: 'old' | 'new', bytes: number | null }} [tooLarge]
+ * @property {{ old?: string, new?: string }} [mode] git file modes ('100644', '100755', '120000')
+ * @property {number} added
+ * @property {number} removed
+ */
+
+/**
+ * manifest.code: what one round captured.
+ * @typedef {object} CodeManifest
+ * @property {string} root absolute repo top level at capture time
+ * @property {string} baseSha old-side commit, or the empty tree
+ * @property {string | null} headSha HEAD at capture time
+ * @property {string | null} newSha new-side commit (branch, range, commit, pr); null for worktree and staged
+ * @property {string | null} newTree
+ * @property {'commit' | 'worktree' | 'index'} newSide
+ * @property {{ from: string, to: string } | null} baseMoved
+ * @property {CodeFile[]} files sorted by path
+ * @property {Array<{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name' }>} skipped
+ * @property {Record<string, { size: number, mtimeMs: number }>} stat worktree new-side stat cache
+ */
+
+/**
+ * Store#readRepoFile: one repo file, never through a symlink.
+ * @typedef {{ kind: 'file', buf: Buffer, text: string, sha256: string, mode: number }
+ *   | { kind: 'symlink', target: string }
+ *   | { kind: 'other' }} RepoRead
+ */
+
+/** @typedef {{ path: string, side: 'new' | 'old', oldPath?: string }} AnchorFile code docs: the file side an anchor is on */
 
 // ============================================================================ anchors
 
@@ -186,6 +253,8 @@ export {};
  * @property {boolean} [assetChanged] the anchored image's bytes changed
  * @property {Anchor | null} [lastKnown] previous anchor, kept when orphaned
  * @property {SnipInfo} [snip] snip anchors (kind 'snip', or 'doc' when the box covered nothing stamped)
+ * @property {AnchorFile} [file] code docs: the file (and side) the anchor is on; `src` lines are lines of that file
+ *   side at version `v` (absent: a whole-review anchor of kind 'doc')
  */
 
 /**
@@ -209,7 +278,11 @@ export {};
  *   | { kind: 'section', headingSrid: number }
  *   | { kind: 'source', startLine: number, endLine: number }
  *   | SnipCapture
+ *   | { kind: 'line', file: string, side: 'new' | 'old', startLine: number, endLine: number }
+ *   | { kind: 'file', file: string }
  *   | { kind: 'doc' }} Capture
+ * 'line' and 'file' are code-doc captures (lines of one file side; a whole-file comment for binary, too-large or
+ * deleted files). A code doc also accepts { kind: 'doc' } as a whole-review thread.
  */
 
 /**
@@ -249,11 +322,16 @@ export {};
  * @property {number} version version the comment was made against
  * @property {string} [review] review id (reviewer comments)
  * @property {AgentReplyStatus} [status] agent replies
+ * @property {LineRange} [atLines] agent replies: where the change landed (ReviseInput `at`)
+ * @property {string} [atFile] code docs: the repo file of `atLines`
+ * @property {true} [auto] written by SpecReview, not typed by the agent (e.g. "changed in v3 (L14-18)")
  */
 
 /**
  * @typedef {object} Suggestion
- * @property {'text' | 'source'} mode text = the exact slice; source = whole lines
+ * @property {'text' | 'source' | 'lines'} mode text = the exact slice; source = whole lines; lines = whole lines of
+ *   a repo file (code docs)
+ * @property {string} [file] code docs: the repo file the suggestion targets (new side only)
  * @property {number} version
  * @property {number} start
  * @property {number} end
@@ -355,6 +433,7 @@ export {};
  * @property {string} [quote] override
  * @property {string} [beforeSha256]
  * @property {string} [afterSha256]
+ * @property {string} [file] code docs: the repo file edited
  */
 
 // ============================================================================ runtime: events and waiters
@@ -508,6 +587,11 @@ export {};
  * @property {'region' | 'snip' | 'image'} attachmentKind what the attachments show: a region crop ('crop:' lines),
  *   a snipped area or another image ('image:' lines)
  * @property {string | null} apply suggested command
+ * @property {string} [file] code docs: repo-root-relative path of the anchored file
+ * @property {string} [fileFromCwd] code docs: that file as reached from the agent's cwd
+ * @property {'new' | 'old'} [side] code docs: which side the anchor is on
+ * @property {string[]} [was] code docs, old-side anchors: the base lines
+ * @property {'ok' | 'missing' | 'not-checked-out' | 'binary' | 'too-large'} [fileState] code docs
  */
 
 /**

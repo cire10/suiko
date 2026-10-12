@@ -8,6 +8,7 @@
 import { parseArgs } from 'node:util';
 import { UsageError } from '../core/store/errors.js';
 import { parseLinesArg } from '../core/util/lines-arg.js';
+import { formatCodeAt, isCodeAt, parseCodeAt } from '../core/util/code-at.js';
 
 /**
  * @typedef {{ type: 'string' | 'boolean', short?: string, multiple?: boolean, default?: string | boolean }} OptionSpec
@@ -176,7 +177,8 @@ export function parseSingleRange(input, flag = '--lines') {
 }
 
 /**
- * Validates a line-list argument such as --at 'L12,L90-91' and returns it normalised ('L12,L90-91').
+ * Validates a line-list argument such as --at 'L12,L90-91' and returns it normalised ('L12,L90-91'); a code review's
+ * repo-file form ('src/a.js:L12-L14, L20') comes back canonical too ('src/a.js:L12-14,L20').
  * @param {string} input
  * @param {string} [flag]
  * @returns {string}
@@ -187,6 +189,8 @@ export function normalizeAt(input, flag = '--at') {
       .map(([a, b]) => (a === b ? `L${a}` : `L${a}-${b}`))
       .join(',');
   } catch (err) {
+    // code reviews: repo-file forms ('src/a.js:L42-46,L50'), canonicalised; the engine checks them against the doc
+    if (isCodeAt(input)) return formatCodeAt(parseCodeAt(input));
     throw new UsageError(`${flag}: ${/** @type {Error} */ (err).message}`);
   }
 }

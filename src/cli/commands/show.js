@@ -6,8 +6,12 @@
 // formatThread(result) for a thread ({ thread, timeline, ... } or a bare Thread), plus the working-copy `src>` lines
 // and `crop:`/`image:` paths a packet item would carry (format.js withThreadSource); for source lines
 // ({ startLine, lines }) the engine's formatSourceLines (raw lines, copyable) or numbered lines; else a generic
-// rendering. Exit 0; 4 when the doc, thread or version does not exist.
+// rendering.
+// `show <code-doc> --file <path> [--version N] [--side new|old] [--lines A-B]` prints the lines of a repo file of a
+// round (the stored blob: new side by default), numbered; --json gives them raw.
+// Exit 0; 4 when the doc, thread, version or file does not exist.
 
+import { UsageError } from '../../core/store/errors.js';
 import { EXIT } from '../../shared/protocol.js';
 import { assertThreadId, expectPositionals, parseSingleRange, parseVersionRef } from '../args.js';
 import { FALLBACK_FORMATTERS, genericText, withThreadSource } from '../format.js';
@@ -16,9 +20,10 @@ import { callOp, docContext } from '../runtime.js';
 
 export const spec = {
   name: 'show',
-  usage: 'show <doc> [<tid>] [--version N] [--lines A-B] [--json]',
+  usage: 'show <doc> [<tid>] [--version N] [--lines A-B] [--file <path> [--side new|old]] [--json]',
   summary: 'Show a thread with its timeline, or the exact source lines of a version.',
-  options: { version: { type: 'string' }, lines: { type: 'string' } },
+  options: { version: { type: 'string' }, lines: { type: 'string' }, file: { type: 'string' }, side: { type: 'string' } },
+  details: ['Code reviews: --file <path> [--side new|old] prints that file of a round (default: head, new side).'],
 };
 
 /**
@@ -32,17 +37,29 @@ export async function parse({ values, positionals }) {
     thread: positionals[1],
     version: values.version !== undefined ? parseVersionRef(values.version, 'show --version') : undefined,
     lines: values.lines !== undefined ? parseSingleRange(values.lines) : undefined,
+    ...(values.file !== undefined ? { file: values.file } : {}),
+    ...(values.side !== undefined ? { side: values.side } : {}),
   };
 }
 
 /**
  * @param {import('../runtime.js').Runtime} rt
- * @param {{ doc: string, thread?: string, version?: number | 'live' | 'head', lines?: [number, number] }} input
+ * @param {{ doc: string, thread?: string, version?: number | 'live' | 'head', lines?: [number, number], file?: string,
+ *   side?: string }} input
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 export async function execute(rt, input) {
+  if (input.side !== undefined && input.side !== 'new' && input.side !== 'old') throw new UsageError('show: --side must be new or old');
+  if (input.side !== undefined && !input.file) throw new UsageError('show: --side goes with --file <path>');
+  if (input.file !== undefined && !String(input.file).trim()) throw new UsageError('show: --file needs a path');
+  if (input.file && input.thread) throw new UsageError('show: pass a thread id or --file <path>, not both');
+  if (input.file && input.version === 'live') throw new UsageError('show: --file prints a recorded round (--version N); read the working file itself for the live text');
   const { ctx, engine, doc, docId } = await docContext(rt, input.doc);
   const version = input.version === 'head' ? doc.head : input.version;
+  if (input.file) {
+    const res = await callOp(engine, 'show', ctx, docId, { version, file: input.file, side: input.side ?? 'new' });
+    return codeSource(docId, res, input.lines);
+  }
   /** @type {any} */
   let res;
   if (version === 'live' && !input.thread && typeof engine.ops.sourceLines === 'function') {
@@ -53,6 +70,32 @@ export async function execute(rt, input) {
     res = await callOp(engine, 'show', ctx, docId, { thread: input.thread, version, lines: input.lines });
   }
   return { exit: EXIT.OK, text: renderShow(engine, res), json: typeof res === 'string' ? { doc: docId, text: res } : res };
+}
+
+/**
+ * A repo file of a round (ops.show with `file`: { kind: 'code-source', path, side, v, text, lines }), numbered, cut
+ * to `range` when given.
+ * @param {string} docId
+ * @param {any} res
+ * @param {[number, number] | undefined} range
+ * @returns {import('../io.js').CommandResult}
+ */
+function codeSource(docId, res, range) {
+  const all = String(res.text ?? '').split('\n');
+  if (all.length && all[all.length - 1] === '') all.pop();
+  const total = all.length;
+  const from = Math.max(1, range?.[0] ?? 1);
+  const to = Math.min(total, range?.[1] ?? total);
+  const lines = from <= to ? all.slice(from - 1, to) : [];
+  const width = String(Math.max(to, 1)).length;
+  const side = res.side === 'old' ? ' (old side)' : '';
+  const head = `${res.path}${side} · v${res.v} · ${lines.length ? `L${from}-${to} of ${total}` : total ? `no lines in L${range?.[0]}-${range?.[1]} (the file has ${total})` : 'empty file'}`;
+  const body = lines.map((l, i) => `${String(from + i).padStart(width)}  ${l}`);
+  return {
+    exit: EXIT.OK,
+    text: [head, ...body].join('\n'),
+    json: { doc: docId, kind: 'code-source', path: res.path, side: res.side, version: res.v, lines: total, startLine: from, endLine: Math.max(from - 1, to), text: lines.length ? `${lines.join('\n')}\n` : '' },
+  };
 }
 
 /**

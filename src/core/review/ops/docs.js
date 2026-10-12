@@ -22,7 +22,9 @@ import { readLastJsonLine } from '../../store/jsonl.js';
 import { renderSource } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { autoCommit } from '../git.js';
-import { docRefFor, isSnapshot, originType, planFileOf } from '../../store/snapshot.js';
+import { docKind, docOriginType, docRefFor, isCode, isSnapshot, originType, planFileOf } from '../../store/snapshot.js';
+import { deletePrRef } from '../../code/pr.js';
+import { kindOf } from '../kinds.js';
 import { pathFromCwd } from '../packet-data.js';
 import { anchorAt, isActionable, isOutdated } from '../threadstate.js';
 import {
@@ -112,8 +114,13 @@ export async function docState(ctx, ref) {
     ctx.store.listWaiters(ALL_DOCS),
   ]);
   const head = doc.head ? versions.find((m) => m.v === doc.head) ?? null : null;
+  /** @type {{ dirty: boolean, sha256: string | null, missing: boolean, changedFiles?: string[] }} */
   let working = { dirty: false, sha256: /** @type {string | null} */ (null), missing: false };
-  try {
+  if (isCode(doc)) {
+    // a code doc's working state is its repo files (the code engine), never the store's virtual working copy
+    const w = /** @type {any} */ (await kindOf(doc).workingState(ctx, doc, doc.head ? await readHead(ctx, doc) : null));
+    working = { dirty: Boolean(w.dirty), sha256: w.sha256 ?? null, missing: Boolean(w.missing), changedFiles: w.changedFiles ?? [] };
+  } else try {
     const w = await ctx.store.readWorking(doc);
     working = { dirty: head ? w.sha256 !== head.sha256 : true, sha256: w.sha256, missing: false };
   } catch (err) {
@@ -171,8 +178,8 @@ export async function listDocsAcrossWorkspaces(_ctx) {
         root: ws.root,
         id: doc.id,
         path: doc.path,
-        kind: isSnapshot(doc) ? 'snapshot' : 'file',
-        origin: originType(doc) || null,
+        kind: docKind(doc),
+        origin: docOriginType(doc),
         title: doc.title,
         format: doc.format,
         head: doc.head,
@@ -279,7 +286,14 @@ export async function status(ctx, ref = null) {
     const sortedReviews = [...reviews].sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : 1));
     const last = sortedReviews[sortedReviews.length - 1] ?? null;
     let working = 'clean';
-    if (headM) {
+    if (headM && isCode(doc)) {
+      // the code engine reads the repo; one unreadable repo must not cost the listing its other docs
+      try {
+        working = (await kindOf(doc).workingState(ctx, doc, await readHead(ctx, doc))).dirty ? 'dirty' : 'clean';
+      } catch {
+        working = 'unknown';
+      }
+    } else if (headM) {
       try {
         const w = await ctx.store.readWorking(doc);
         working = w.sha256 === headM.sha256 ? 'clean' : 'dirty';
@@ -288,14 +302,17 @@ export async function status(ctx, ref = null) {
       }
     }
     const snapshot = isSnapshot(doc);
+    const code = isCode(doc);
     out.push({
       doc: doc.id,
       path: doc.path,
       // a snapshot doc has no working file (its path is synthetic): say what it is instead
       ...(snapshot ? { kind: 'snapshot', origin: originType(doc), ref: docRefFor(doc.id, ctx.root) } : {}),
+      // a code doc reviews repo files: there is no single file to name
+      ...(code ? { kind: 'code', origin: docOriginType(doc), ref: docRefFor(doc.id, ctx.root) } : {}),
       // (a plan snapshot names its plan file; other snapshots have no file to reach)
-      file: snapshot ? planFileOf(doc) : path.join(ctx.root, ...doc.path.split('/')),
-      pathFromCwd: snapshot ? planFileOf(doc) : pathFromCwd(doc.path, ctx.root, ctx.cwd),
+      file: code ? null : snapshot ? planFileOf(doc) : path.join(ctx.root, ...doc.path.split('/')),
+      pathFromCwd: code ? null : snapshot ? planFileOf(doc) : pathFromCwd(doc.path, ctx.root, ctx.cwd),
       title: doc.title,
       head: doc.head,
       headAuthor: headM?.author?.name ?? null,
@@ -387,7 +404,8 @@ export async function sourceLines(ctx, ref, { version, from, to } = {}) {
 }
 
 /**
- * Ends the review session: doc state 'closed' and a session.closed event (waiters exit 5).
+ * Ends the review session: doc state 'closed' and a session.closed event (waiters exit 5). A PR review also loses
+ * its local ref (refs/specreview/pr/<n>); `review --pr` fetches it again.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  */
@@ -397,6 +415,8 @@ export async function closeSession(ctx, ref) {
       doc.state = 'closed';
       await ctx.store.saveDoc(doc);
     }
+    const spec = /** @type {any} */ (doc).code;
+    if (isCode(doc) && spec?.mode === 'pr') await deletePrRef(ctx.root, Number(spec.pr?.number));
     await emit(ctx, doc.id, SSE.SESSION_CLOSED, {});
     return { ok: true, doc: doc.id, state: doc.state };
   });

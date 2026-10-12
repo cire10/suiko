@@ -32,7 +32,7 @@ export { ASSET_BASE_PLACEHOLDER } from './shell.js';
  * @typedef {import('./srcmap.js').SrcMap} SrcMap
  * @typedef {import('./srcmap.js').OutlineItem} OutlineItem
  * @typedef {Object} RenderResult
- * @property {'markdown'|'html'} format
+ * @property {'markdown'|'html'|'text'} format 'text': code docs, always the empty result of textRender()
  * @property {string} html
  * @property {number} guestInsertAt
  * @property {number} bodyEndAt
@@ -47,15 +47,17 @@ export { ASSET_BASE_PLACEHOLDER } from './shell.js';
  */
 
 /**
- * Normalise a format name ('md' / 'markdown' / 'html' / 'htm'); falls back to the doc path's extension.
+ * Normalise a format name ('md' / 'markdown' / 'html' / 'htm' / 'text'); falls back to the doc path's extension.
+ * 'text' is the format of code docs (doc kind 'code'): it is never rendered (see textRender).
  * @param {string|undefined} format
  * @param {string|undefined} docPath
- * @returns {'markdown'|'html'}
+ * @returns {'markdown'|'html'|'text'}
  */
 export function normalizeFormat(format, docPath) {
   const f = String(format ?? '').toLowerCase();
   if (f === 'markdown' || f === 'md') return 'markdown';
   if (f === 'html' || f === 'htm') return 'html';
+  if (f === 'text') return 'text';
   const ext = path.posix.extname(String(docPath ?? '')).toLowerCase();
   if (ext === '.html' || ext === '.htm' || ext === '.xhtml') return 'html';
   if (ext === '.md' || ext === '.markdown' || ext === '.mdown' || ext === '.mkd') return 'markdown';
@@ -78,9 +80,31 @@ export async function renderSource({ format, source, docPath, stamp = true }) {
  */
 export function renderSourceSync({ format, source, docPath, stamp = true }) {
   const fmt = normalizeFormat(format, docPath);
+  if (fmt === 'text') return textRender();
   const { text } = decodeSource(source ?? '', fmt);
   const r = fmt === 'html' ? renderHtml(text, { docPath, stamp }) : renderMarkdown(text, { docPath, stamp });
   return { format: fmt, ...r };
+}
+
+/**
+ * The RenderResult of a 'text' doc (a code review): no HTML, blocks, outline, assets or externals. Code docs are
+ * shown by the code view of the UI (never in a doc frame), and the content origin serves nothing for them.
+ * @returns {RenderResult}
+ */
+export function textRender() {
+  return {
+    format: 'text',
+    html: '',
+    guestInsertAt: 0,
+    bodyEndAt: 0,
+    srcmap: { order: [], nodes: {} },
+    text: { text: '', spans: {} },
+    outline: [],
+    assets: [],
+    externals: [],
+    title: '',
+    features: { mermaid: false, math: false, code: false },
+  };
 }
 
 const memory = new LruCache(32);
@@ -107,6 +131,7 @@ function sha256(s) {
  */
 export async function getRender(store, doc, ver, { stamp = true } = {}) {
   const format = normalizeFormat(doc.format, doc.path);
+  if (format === 'text') return textRender();
   if (ver === 'live' || ver == null) {
     const w = await store.readWorking(doc);
     const text = typeof w?.text === 'string' ? w.text : decodeSource(w?.buf ?? '', format).text;

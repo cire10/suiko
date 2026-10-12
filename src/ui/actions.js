@@ -24,7 +24,7 @@ import { api, docApi, onConnection, onReconnect, token } from './api.js';
 import { guest } from './frame.js';
 import {
   agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, defaultBase, draftVersion, isComposerDirty,
-  isReplyDirty, numericVersion, panelItems, replyDraftsFor, staleApproveText, suggestionMode, versionNumbers,
+  hasMode, isReplyDirty, kindCaps, numericVersion, panelItems, replyDraftsFor, staleApproveText, suggestionMode, versionNumbers,
 } from './model.js';
 import { EventStream } from './sse.js';
 import { store, writePref } from './state.js';
@@ -35,6 +35,10 @@ import { copyText, debounce, docUrl, originOf } from './util.js';
 
 /** @type {ReturnType<typeof docApi>|null} */
 let client = null;
+/** @type {((id: string | null) => void) | null} a kind view's focus handler (registerKindFocus) */
+let kindFocus = null;
+/** @type {(() => any) | null} a kind view's current selection as a capture (registerKindSelection) */
+let kindSelection = null;
 /** @type {EventStream|null} */
 let stream = null;
 let composerSeq = 0;
@@ -343,7 +347,11 @@ function onDocEvent(name, data) {
       return;
     case SSE.WORKING_CHANGED:
       set((s) => (s.ds ? {
-        ds: { ...s.ds, working: { ...s.ds.working, dirty: !!data?.dirty, missing: !!data?.missing, sha256: data?.sha256 ?? s.ds.working?.sha256 } },
+        ds: { ...s.ds, working: {
+          ...s.ds.working, dirty: !!data?.dirty, missing: !!data?.missing, sha256: data?.sha256 ?? s.ds.working?.sha256,
+          // code reviews: the reviewed files changed since the round (the code poller's working.changed)
+          ...(Array.isArray(data?.changedFiles) ? { changedFiles: data.changedFiles } : {}),
+        } },
         // Nothing left to record: the "Record as my revision" form closes with the banner.
         recording: data?.dirty && !data?.missing ? s.recording : false,
       } : null));
@@ -746,6 +754,11 @@ export function focusItem(id, opts = {}) {
     sidePane: s.mode === 'changes' ? 'threads' : s.sidePane,
   });
   if (opts.fromDoc || !(s.mode === 'review' || s.mode === 'changes')) return;
+  // a kind view without the doc frame (a code review) scrolls to the thread itself
+  if (!kindCaps(s.ds).frame) {
+    kindFocus?.(id);
+    return;
+  }
   guest.send(MSG.FOCUS, { id });
   // A draft made on another version is painted on this one only when the server could carry it forward (its text
   // is still there; never onto an older version): otherwise say so, and offer its own version, instead of a click
@@ -770,7 +783,36 @@ export function focusItem(id, opts = {}) {
 
 export function clearFocus() {
   set({ focusedId: null });
-  guest.send(MSG.FOCUS, { id: null });
+  if (!kindCaps(get().ds).frame) kindFocus?.(null);
+  else guest.send(MSG.FOCUS, { id: null });
+}
+
+/**
+ * A kind view without the doc frame (a code review: kindCaps(ds).frame is false) registers how it shows a focused
+ * thread or draft (scroll to its file and lines, highlight it; null clears). focusItem / clearFocus call it instead of
+ * messaging the guest. Returns the unregister function (call it on unmount).
+ * @param {(id: string | null) => void} fn
+ * @returns {() => void}
+ */
+export function registerKindFocus(fn) {
+  kindFocus = fn;
+  return () => {
+    if (kindFocus === fn) kindFocus = null;
+  };
+}
+
+/**
+ * A kind view without the doc frame registers a getter for its current selection as a capture (a code review: the
+ * selected lines, `{ kind: 'line', file, side, startLine, endLine }`, or null), used by c / s / q and the screen
+ * snip in place of the guest's text selection. Returns the unregister function.
+ * @param {() => any} fn
+ * @returns {() => void}
+ */
+export function registerKindSelection(fn) {
+  kindSelection = fn;
+  return () => {
+    if (kindSelection === fn) kindSelection = null;
+  };
 }
 
 /** j / k. @param {1|-1} dir */
@@ -816,7 +858,7 @@ export function revealTarget(id) {
 /** @param {Mode} mode */
 export function setMode(mode) {
   const s = get();
-  if (!['review', 'changes', 'source', 'history'].includes(mode)) return;
+  if (!hasMode(s.ds, mode)) return;
   if (s.mode === mode) return;
   let base = s.base;
   if (base == null) base = defaultBase(s.ds, s.version, s.baseKind === 'custom' ? 'last' : s.baseKind);
@@ -999,7 +1041,8 @@ async function initSuggestion() {
   const comp = get().composer;
   const a = comp?.anchor;
   if (!c || !comp || !a || !a.src) return;
-  const mode = suggestionMode(a);
+  // a code review's line anchor: whole lines of the file's new side ('lines', from D/files/source)
+  const mode = a.file ? 'lines' : suggestionMode(a);
   // Suggested text restored from a backup applies when it replaces the same old text in the same mode.
   /** @param {string} old */
   const restored = (old) => {
@@ -1011,6 +1054,24 @@ async function initSuggestion() {
       suggestion: { mode, old: a.src.text, new: restored(a.src.text), startLine: a.src.startLine, endLine: a.src.endLine, start: a.src.start, end: a.src.end },
       pendingSuggestion: null,
     });
+    return;
+  }
+  if (a.file) {
+    if (a.kind === 'doc' || a.file.side !== 'new') {
+      updateComposer({ suggestion: null, error: 'Suggestions replace lines of the new side: select lines on the right-hand side, or write a comment.' });
+      return;
+    }
+    const { startLine, endLine } = a.src;
+    updateComposer({ suggestion: { mode, old: '', new: '', startLine, endLine, start: 0, end: 0, loading: true } });
+    try {
+      const r = await c.fileSource(a.file.path, comp.version, 'new');
+      if (get().composer?.key !== comp.key) return;
+      const old = String(r?.text ?? '').split('\n').slice(startLine - 1, endLine).join('\n');
+      updateComposer({ suggestion: { mode, old, new: restored(old), startLine, endLine, start: 0, end: 0 }, pendingSuggestion: null });
+    } catch (err) {
+      if (get().composer?.key !== comp.key) return;
+      updateComposer({ suggestion: null, error: `Cannot load the source lines: ${errorText(err)}` });
+    }
     return;
   }
   updateComposer({
@@ -1584,9 +1645,12 @@ export async function moveThread(id, capture) {
   const c = client;
   const s = get();
   if (!c || !s.ds) return;
-  const cap = capture || s.guest.selection;
+  // a kind view without the doc frame (a code review) gives its own selection (the selected lines)
+  const frame = kindCaps(s.ds).frame;
+  const cap = capture || (frame ? s.guest.selection : kindSelection?.() || null);
   if (!cap) {
-    toast('Select the new text in the document first (or pick an element with E), then click Move here.', { tone: 'warn' });
+    toast(frame ? 'Select the new text in the document first (or pick an element with E), then click Move here.'
+      : 'Select the new lines first (click a line number, shift-click to extend), then click Move here.', { tone: 'warn' });
     return;
   }
   await threadAction(id, async () => {
@@ -1777,6 +1841,7 @@ export function cycleTheme() {
 }
 
 export function toggleHidden() {
+  if (!kindCaps(get().ds).hide) return;
   const hidden = !get().hidden;
   set({ hidden });
   guest.send(MSG.SET_HIDDEN, { hidden });
@@ -1789,6 +1854,11 @@ export function toggleHidden() {
  */
 export function setTool(tool) {
   const s = get();
+  const caps = kindCaps(s.ds);
+  if ((tool === 'pick' && !caps.pick) || (tool === 'snip' && !caps.snip)) {
+    toast('Pick and snip work on rendered documents; click a line number to comment.', { timeout: 2500 });
+    return;
+  }
   if (tool !== 'select' && (s.version === 'live' || !(s.mode === 'review' || s.mode === 'changes'))) {
     if (s.version === 'live') toast('The working copy preview is read-only.', { tone: 'warn' });
     return;
@@ -1824,6 +1894,7 @@ export function toggleSnip(opts = {}) {
 
 /** What a screen snip is about: the selected text in the doc, the selected lines in Source mode, else the whole doc. @param {UiState} s */
 function screenSnipCapture(s) {
+  if (!kindCaps(s.ds).frame) return kindSelection?.() || { kind: 'doc' };
   if (s.mode === 'source' && s.sourceSel) return { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to };
   if ((s.mode === 'review' || s.mode === 'changes') && s.guest.selection) return s.guest.selection;
   return { kind: 'doc' };
@@ -2096,6 +2167,16 @@ export function acceptDecline() {
 export function selectionAction(key) {
   const s = get();
   const action = /** @type {Record<string, string>} */ ({ c: 'comment', s: 'suggest', q: 'question', a: 'agree' })[key];
+  const caps = kindCaps(s.ds);
+  if (key === 'a' && !caps.locks) return false;
+  if (!caps.frame) {
+    // a kind view without the doc frame (a code review): its own selection (the selected lines)
+    if (s.mode === 'history') return false;
+    const capture = kindSelection?.() || null;
+    if (capture) openComposer({ capture, action });
+    else toast('Click a line number (shift-click for a range), then press C.', { timeout: 3000 });
+    return true;
+  }
   if (s.mode === 'source') {
     if (s.sourceSel && key === 'c') {
       openComposer({ capture: { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to }, action });

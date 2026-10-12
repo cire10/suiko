@@ -1,0 +1,704 @@
+/* Code review (doc kind 'code'): the file tree, the diff cards and their inline threads.
+   Tokens only (tokens.css), so light and dark follow the theme. Linked after views.css; it builds on the shared
+   .code-table / .ln-btn / .seg / .sel-bar / .source-toolbar classes and namespaces its own as .code-* and .cd-*. */
+
+/* ---------------------------------------------------------------- the view */
+
+.code-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: var(--bg-subtle);
+  overscroll-behavior: contain;
+}
+
+.code-view[hidden] {
+  display: none;
+}
+
+.code-toolbar {
+  gap: 6px 12px;
+}
+
+.code-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.code-selbar {
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.code-toolbar .seg {
+  margin-left: auto;
+}
+
+.code-files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 24px;
+}
+
+.code-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.code-skipped {
+  padding: 0 16px 24px;
+}
+
+/* ---------------------------------------------------------------- a file card */
+
+.code-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  scroll-margin-top: calc(var(--code-bar, 45px) + 8px);
+  min-width: 0;
+}
+
+.code-file-head {
+  position: sticky;
+  top: var(--code-bar, 45px);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 8px 4px 4px;
+  background: var(--header);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  min-width: 0;
+}
+
+.code-file-head .chip {
+  flex: none;
+}
+
+.code-file.is-active .code-file-head {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.cd-collapse {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.cd-collapse:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.cd-collapse .icon {
+  transition: transform 0.12s ease;
+}
+
+.cd-collapse[aria-expanded="true"] .icon {
+  transform: rotate(90deg);
+}
+
+.cd-status {
+  flex: none;
+  display: inline-block;
+  min-width: 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-align: center;
+  border: 0;
+}
+
+.cd-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  direction: ltr;
+}
+
+.cd-counts {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.cd-head-spacer {
+  flex: 1 1 auto;
+}
+
+.cd-file-comment {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cd-file-items {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cd-outside > p {
+  margin: 0;
+}
+
+.cd-stub,
+.cd-loading,
+.cd-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 16px;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+
+.cd-stub {
+  justify-content: center;
+  background: var(--bg-subtle);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.cd-error {
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------- the diff table */
+
+.cd-table-wrap {
+  min-width: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  overflow: hidden;
+}
+
+.cd-table {
+  background: var(--bg);
+}
+
+.cd-table col.cd-col-ln {
+  width: 52px;
+}
+
+.cd-table col.cd-col-sign {
+  width: 18px;
+}
+
+.cd-table .ln {
+  width: auto;
+  position: relative;
+  border-right: 1px solid var(--border-muted);
+}
+
+.cd-table .ln.old {
+  width: auto;
+}
+
+.cd-table tr.op-ins td.ln {
+  background: var(--ins-strong);
+  color: var(--fg-muted);
+}
+
+.cd-table tr.op-del td.ln {
+  background: var(--del-strong);
+  color: var(--fg-muted);
+}
+
+.cd-table tr.op-ins td.sign { background: var(--ins-bg); color: var(--ok); }
+.cd-table tr.op-del td.sign { background: var(--del-bg); color: var(--danger); }
+
+.cd-table td.ln.op-ins { background: var(--ins-strong); }
+.cd-table td.ln.op-del { background: var(--del-strong); }
+
+.cd-table td.cd-empty {
+  background: var(--bg-subtle);
+}
+
+.cd-table .code {
+  padding-left: 6px;
+}
+
+.cd-table.split td.half {
+  width: auto;
+}
+
+.cd-table.split td.code.half + td.ln {
+  border-left: 1px solid var(--border);
+}
+
+.cd-num {
+  display: block;
+  padding: 0 4px;
+  text-align: right;
+}
+
+.cd-table .ln-btn {
+  display: block;
+  min-height: 20px;
+}
+
+.cd-table .ln-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* the selection: the rows (unified) or the cells of the selected side (split) */
+.cd-table tr.sel td,
+.cd-table tr.sel td.ln,
+.cd-table td.cd-sel {
+  background: var(--accent-soft);
+}
+
+.cd-table tr.sel td.ln,
+.cd-table td.ln.cd-sel {
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* gutter marker of a line where a thread starts (keyed data-marker="file:side:line") */
+.cd-mark {
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.cd-table tr.has-mark td.code {
+  box-shadow: inset 2px 0 0 var(--accent-muted);
+}
+
+.cd-w-ins {
+  background: var(--ins-strong);
+  border-radius: 2px;
+}
+
+.cd-w-del {
+  background: var(--del-strong);
+  border-radius: 2px;
+}
+
+.cd-hunk-row {
+  scroll-margin-top: calc(var(--code-bar, 45px) + 48px);
+}
+
+.cd-hunk-row td {
+  padding: 0;
+  background: var(--accent-soft);
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.cd-hunk-row.active td {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.cd-hunk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 22px;
+}
+
+.cd-hunk-range {
+  overflow-wrap: anywhere;
+}
+
+.cd-hunk-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: var(--font);
+}
+
+.cd-gap-row td {
+  padding: 0;
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.cd-gap-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  line-height: 22px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cd-gap-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.cd-gap-btn:disabled {
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.cd-gap-icon {
+  display: inline-block;
+  width: 28px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.cd-capped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.cd-inline-row td.cd-inline {
+  padding: 8px;
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+  font-family: var(--font);
+  font-size: var(--fs);
+  line-height: 1.5;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.cd-inline-row td.cd-inline:empty {
+  padding: 0;
+}
+
+.cd-inline > * + * {
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------- inline threads */
+
+.cd-thread {
+  max-width: 820px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 8px 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.cd-thread.is-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.cd-thread.is-draft {
+  border-style: dashed;
+  border-color: var(--draft);
+}
+
+.cd-thread.is-resolved {
+  background: var(--bg-subtle);
+}
+
+.cd-thread-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cd-thread-head .tid {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.cd-thread-target {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.cd-thread-toggle {
+  margin-left: auto;
+}
+
+.cd-comments {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.cd-comment + .cd-comment {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.cd-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.cd-comment.by-agent .cd-comment-head strong {
+  color: var(--info);
+}
+
+.cd-thread .comment-body {
+  overflow-wrap: anywhere;
+}
+
+.cd-thread .comment-body > :first-child {
+  margin-top: 2px;
+}
+
+.cd-thread .comment-body > :last-child {
+  margin-bottom: 0;
+}
+
+.cd-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cd-suggestion {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.cd-suggestion-head {
+  padding: 2px 8px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.cd-suggestion-body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cd-sug-del,
+.cd-sug-ins {
+  padding: 0 8px;
+}
+
+.cd-sug-del { background: var(--del-bg); }
+.cd-sug-ins { background: var(--ins-bg); }
+
+/* ---------------------------------------------------------------- the file tree (left rail) */
+
+.code-tree .rail-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cd-tree-total {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-size: var(--fs-xs);
+}
+
+.cd-filter {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.cd-filter:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+  border-color: var(--focus);
+}
+
+.cd-tree,
+.cd-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cd-tree-row {
+  --depth: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px 3px calc(6px + var(--depth) * 12px);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cd-tree-row:hover {
+  background: var(--bg-hover);
+}
+
+.cd-tree-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.cd-tree-file.active {
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.cd-tree-dirrow {
+  color: var(--fg-muted);
+}
+
+.cd-tree-caret {
+  flex: none;
+  display: inline-flex;
+  transition: transform 0.12s ease;
+}
+
+.cd-tree-caret.open {
+  transform: rotate(90deg);
+}
+
+.cd-tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-tree-counts {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.cd-stub-badge {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.cd-tree-skipped {
+  margin: 8px 6px 0;
+}
+
+/* ---------------------------------------------------------------- the Changes list (side panel) */
+
+.cd-side-file {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- narrow windows */
+
+@media (max-width: 899.98px) {
+  .code-files {
+    padding: 8px 8px 16px;
+    gap: 8px;
+  }
+
+  .code-file-head {
+    position: static;
+    flex-wrap: wrap;
+  }
+
+  .code-file {
+    scroll-margin-top: calc(var(--code-bar, 45px) + 8px);
+  }
+
+  .cd-hunk-row {
+    scroll-margin-top: calc(var(--code-bar, 45px) + 8px);
+  }
+
+  .cd-table col.cd-col-ln {
+    width: 38px;
+  }
+
+  .cd-table col.cd-col-sign {
+    width: 14px;
+  }
+
+  .cd-file-comment .icon {
+    display: none;
+  }
+
+  .code-selbar > .small.muted {
+    display: none;
+  }
+}

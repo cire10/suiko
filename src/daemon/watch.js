@@ -10,6 +10,11 @@
 //     hash or its dirtiness against head changes (also re-checked after each version.created);
 //   - polls the waiter files of the doc and of '_all' (`wait --all`) every `presenceMs` and emits `presence`
 //     {waiters} when the set of live waiters changes (liveness decays with time, so polling is required).
+// Code poller (code-contracts.md 11.3): a code doc has no working file; while it has at least one subscriber its
+//   watcher asks the code engine for the working tree's state (Hub#setCodeWorking: kindOf(doc).workingState, i.e.
+//   codeWorkingState, memoized by the engine) every `codePollMs` (LIMITS.codePollMs, 5 s) and after each
+//   version.created, and emits `working` {dirty, missing: false, sha256, changedFiles} when `dirty` or
+//   `changedFiles` change. Nothing polls a code doc nobody is watching (the watcher only lives while subscribed).
 // GlobalWatcher (subscriptions without a doc, e.g. the doc list): scans every registered workspace's events dir
 //   and waiter dirs; emits new events (with ws/doc) and per-workspace presence changes. It never replays history.
 // Hub: subscription refcounting for both kinds.
@@ -22,7 +27,8 @@ import { homeDir, listWorkspaces } from '../core/store/home.js';
 import { WAITER_LIVE_MS } from '../core/store/store.js';
 import { pidAlive } from '../core/util/proc.js';
 import { createLogger } from '../core/util/log.js';
-import { isSnapshot } from '../core/store/snapshot.js';
+import { isCode, isVirtual } from '../core/store/snapshot.js';
+import { LIMITS } from '../shared/protocol.js';
 
 const log = createLogger('daemon.watch');
 
@@ -30,13 +36,15 @@ const log = createLogger('daemon.watch');
  * @typedef {import('../core/store/store.js').Store} Store
  * @typedef {import('../shared/types.js').StoreEvent} StoreEvent
  * @typedef {{ agent: string, since: string, pid: number, doc: string }} PresenceWaiter
- * @typedef {{ dirty: boolean, sha256: string | null, missing?: boolean }} WorkingState
+ * @typedef {{ dirty: boolean, sha256: string | null, missing?: boolean, changedFiles?: string[] }} WorkingState
+ * @typedef {(wsId: string, docId: string) => Promise<WorkingState | null>} CodeWorkingFn
  * @typedef {{ kind: 'event', event: StoreEvent, ws: string, doc: string }
  *   | { kind: 'reset', lastSeq: number, ws: string, doc: string }
  *   | { kind: 'presence', waiters: PresenceWaiter[], ws: string, doc: string | null }
  *   | { kind: 'working', working: WorkingState, ws: string, doc: string }} HubMessage
  * @typedef {(msg: HubMessage) => void} HubListener
- * @typedef {{ pollMs?: number, debounceMs?: number, presenceMs?: number, workingPollMs?: number, globalMs?: number }} WatchTiming
+ * @typedef {{ pollMs?: number, debounceMs?: number, presenceMs?: number, workingPollMs?: number, globalMs?: number,
+ *   codePollMs?: number }} WatchTiming
  */
 
 const DEFAULT_TIMING = Object.freeze({ pollMs: 250, debounceMs: 250, presenceMs: 1000, workingPollMs: 2000, globalMs: 1000 });
@@ -203,9 +211,10 @@ function sortWaiters(list) {
 
 export class DocWatcher {
   /**
-   * @param {{ wsId: string, docId: string, store: Store, timing?: WatchTiming, onMessage: HubListener }} opts
+   * @param {{ wsId: string, docId: string, store: Store, timing?: WatchTiming, onMessage: HubListener,
+   *   codeWorking?: CodeWorkingFn | null }} opts
    */
-  constructor({ wsId, docId, store, timing = {}, onMessage }) {
+  constructor({ wsId, docId, store, timing = {}, onMessage, codeWorking = null }) {
     this.wsId = wsId;
     this.docId = docId;
     this.store = store;
@@ -229,6 +238,9 @@ export class DocWatcher {
     this.busy = { events: false, presence: false, working: false };
     /** @type {Promise<void> | null} */
     this.ready = null;
+    // code poller (11.3): set in #start for a code doc
+    this.codeWorking = codeWorking;
+    this.code = false;
   }
 
   /** Initialises state and starts watching. */
@@ -242,17 +254,20 @@ export class DocWatcher {
     this.lastSeq = await this.store.lastSeq(this.docId);
     this.presence = await this.#readPresence();
     this.presenceSig = JSON.stringify(this.presence);
+    await this.#detectCode();
     this.working = await this.#readWorking();
     this.workingStat = await this.#workingStatSig();
     if (this.closed) return;
     this.timers.push(setInterval(() => void this.#pollEvents(), this.timing.pollMs));
     this.timers.push(setInterval(() => void this.#pollPresence(), this.timing.presenceMs));
     this.timers.push(setInterval(() => void this.#pollWorkingStat(), this.timing.workingPollMs));
+    if (this.code) this.timers.push(setInterval(() => void this.#checkWorking(), this.timing.codePollMs ?? LIMITS.codePollMs));
     for (const t of this.timers) t.unref?.();
     try {
       const doc = await this.store.getDoc(this.docId);
-      // a snapshot doc has no working file: its "working copy" is its head version (it changes with version.created)
-      if (doc && !this.closed && !isSnapshot(doc)) {
+      // a snapshot or code doc has no working file: its "working copy" is its head version (it changes with
+      // version.created); a code doc's repo files are watched by the code poller (WP4), not here
+      if (doc && !this.closed && !isVirtual(doc)) {
         const file = this.store.workingPath(doc);
         this.chokidar = chokidarWatch(file, { ignoreInitial: true, persistent: false });
         this.chokidar.on('all', () => this.#scheduleWorking());
@@ -330,7 +345,7 @@ export class DocWatcher {
     try {
       const doc = await this.store.getDoc(this.docId);
       if (!doc) return 'gone';
-      if (isSnapshot(doc)) return 'snapshot';
+      if (isVirtual(doc)) return 'virtual';
       const st = await fsp.stat(this.store.workingPath(doc));
       return `${st.ino}:${st.size}:${st.mtimeMs}`;
     } catch {
@@ -368,7 +383,10 @@ export class DocWatcher {
       this.workingStat = await this.#workingStatSig();
       const next = await this.#readWorking();
       const prev = this.working;
-      if (!prev || prev.dirty !== next.dirty || prev.sha256 !== next.sha256 || Boolean(prev.missing) !== Boolean(next.missing)) {
+      if (!next) return; // a code doc whose state the engine could not tell: keep what clients have
+      const changed = this.code ? codeWorkingChanged(prev, next)
+        : !prev || prev.dirty !== next.dirty || prev.sha256 !== next.sha256 || Boolean(prev.missing) !== Boolean(next.missing);
+      if (changed) {
         this.working = next;
         if (!this.closed) this.onMessage({ kind: 'working', working: next, ws: this.wsId, doc: this.docId });
       }
@@ -379,9 +397,40 @@ export class DocWatcher {
     }
   }
 
-  /** @returns {Promise<WorkingState>} */
+  /** @returns {Promise<WorkingState | null>} */
   async #readWorking() {
+    if (this.code) return this.#readCodeWorking();
     return workingState(this.store, this.docId);
+  }
+
+  // ---------------------------------------------------------------- code poller (WP4, code-contracts.md 11.3)
+
+  /** A code doc is polled through the code engine (when the daemon gave the hub a code working-state function). */
+  async #detectCode() {
+    if (typeof this.codeWorking !== 'function') return;
+    try {
+      const doc = await this.store.getDoc(this.docId);
+      this.code = !!doc && isCode(doc);
+    } catch {
+      this.code = false;
+    }
+  }
+
+  /**
+   * The working tree of a code doc: {dirty, missing: false, sha256, changedFiles}, or null when the engine cannot
+   * tell (e.g. a build without the code engine); then nothing is sent.
+   * @returns {Promise<WorkingState | null>}
+   */
+  async #readCodeWorking() {
+    try {
+      const w = await /** @type {CodeWorkingFn} */ (this.codeWorking)(this.wsId, this.docId);
+      if (!w || typeof w !== 'object') return null;
+      const files = Array.isArray(w.changedFiles) ? w.changedFiles.filter((f) => typeof f === 'string') : [];
+      return { dirty: Boolean(w.dirty), missing: false, sha256: typeof w.sha256 === 'string' ? w.sha256 : null, changedFiles: files };
+    } catch (err) {
+      log.debug(`code working state failed for ${this.docId}`, err);
+      return null;
+    }
   }
 
   async close() {
@@ -394,6 +443,20 @@ export class DocWatcher {
     this.chokidar = null;
     if (w) await w.close().catch(() => {});
   }
+}
+
+/**
+ * Whether a code doc's working state changed in a way clients need (dirty or the changed file list; the diff hash
+ * alone changes with every edit of a dirty file).
+ * @param {WorkingState | null} prev
+ * @param {WorkingState} next
+ */
+function codeWorkingChanged(prev, next) {
+  if (!prev) return true;
+  if (prev.dirty !== next.dirty) return true;
+  const a = prev.changedFiles || [];
+  const b = next.changedFiles || [];
+  return a.length !== b.length || a.some((f, i) => f !== b[i]);
 }
 
 /**
@@ -533,6 +596,17 @@ export class Hub {
     /** @type {{ watcher: GlobalWatcher, listeners: Set<HubListener> } | null} */
     this.global = null;
     this.closed = false;
+    /** @type {CodeWorkingFn | null} the code poller's source (code-contracts.md 11.3) */
+    this.codeWorking = null;
+  }
+
+  /**
+   * How doc watchers read a code doc's working tree (the daemon's API wires the engine in). Without it a code doc is
+   * not polled.
+   * @param {CodeWorkingFn | null} fn
+   */
+  setCodeWorking(fn) {
+    this.codeWorking = fn;
   }
 
   /**
@@ -556,6 +630,7 @@ export class Hub {
         onMessage: (msg) => {
           for (const l of [...listeners]) safeCall(l, msg);
         },
+        codeWorking: (w, d) => (this.codeWorking ? this.codeWorking(w, d) : Promise.resolve(null)),
       });
       entry = { watcher, listeners };
       this.docs.set(key, entry);

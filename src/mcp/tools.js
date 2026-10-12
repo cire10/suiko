@@ -2,6 +2,7 @@
 // MCP tool table (design 9.7, agent-protocol 15). Every tool maps its arguments onto the input of the matching CLI
 // command module and runs the same execute(), so the tool's text content is the CLI text and its structuredContent
 // is the CLI's --json value. Additive tools beyond the design table: specreview_ask, specreview_threads.
+// specreview_snapshot is the only tool that uses the network (public hosts only: no allow_private, reader or as_html).
 // specreview_revise deliberately has no `force` (only a user at a terminal should force a refused revision).
 
 import path from 'node:path';
@@ -9,6 +10,7 @@ import * as z from 'zod/v4';
 import { AGENT_REPLY_STATUS } from '../shared/protocol.js';
 import { normalizeAt, parseSingleRange, parseVersionRef } from '../cli/args.js';
 import { buildReviseInput } from '../cli/commands/revise.js';
+import { reviewInput } from '../cli/commands/review.js';
 import { OtherSchema, ThreadReplySchema } from '../cli/schemas.js';
 import { defaultDocId } from '../cli/runtime.js';
 
@@ -21,6 +23,7 @@ const threadId = z.string().regex(/^t\d+$/).describe('Thread id, e.g. "t3"');
 const linesArg = z.string().describe('Inclusive line range of the current file, e.g. "42-46" or "L42-46"');
 const versionArg = z.union([z.number().int().min(1), z.string().min(1)]).describe('Version: 3, "v3", "head" or "live"');
 const workspaceArg = z.string().optional().describe('Workspace root (optional; default: discovered from the path or the server cwd)');
+const fileArg = z.string().min(1).describe('Code reviews only: the repo file the lines are in (repo-root-relative, cwd-relative or a unique suffix)');
 
 /**
  * @typedef {object} ToolDef
@@ -45,6 +48,35 @@ export const TOOLS = [
     command: 'open',
     toInput: async (a) => ({ paths: [a.path], title: a.title }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'specreview_review',
+    title: 'Open a code review of your changes',
+    description:
+      'Snapshot your changes in the git repository as a code review (round v1, or a new round when the files changed since the last one), make sure the local review server runs, open the review UI, and return its URL. mode: since-base (default: merge-base with the default branch up to the working tree, untracked included), uncommitted, staged, branch (with base: committed changes only), range (with range "A..B" or "A...B") or commit (with commit). Then wait for the review; after editing the files, record the round with specreview_revise.',
+    schema: z.object({
+      mode: z.enum(['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit']).optional().describe('Default: since-base, else uncommitted'),
+      base: z.string().min(1).optional().describe('Base ref for since-base / branch, e.g. "main"'),
+      range: z.string().min(1).optional().describe('"A..B" or "A...B" (mode range)'),
+      commit: z.string().min(1).optional().describe('Commit to review (mode commit)'),
+      paths: z.array(z.string().min(1)).optional().describe('Limit to these pathspecs'),
+      title: z.string().optional(),
+      workspace: workspaceArg,
+    }),
+    command: 'review',
+    toInput: async (a) => ({ input: reviewInput({ mode: a.mode, base: a.base, range: a.range, commit: a.commit, paths: a.paths }), title: a.title }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'specreview_snapshot',
+    title: 'Snapshot a web page for review',
+    description:
+      'Fetch a public web page once (uses the network), record it as a doc for review (scripts never run; the HTML becomes Markdown), open the review UI and return its URL. Calling it again for the same URL records a new version when the page changed. Public hosts only: a page on localhost or a private network needs the CLI (`specreview snapshot <url> --allow-private`). Refused when the network is turned off (SPECREVIEW_OFFLINE=1, or network.allow false in the user config).',
+    schema: z.object({ url: z.string().min(1).describe('The http(s) URL of the page'), title: z.string().optional(), workspace: workspaceArg }),
+    command: 'snapshot',
+    // no allow_private, reader or as_html (design 2.12): public pages through the user's default reader only
+    toInput: async (a) => ({ url: a.url, title: a.title }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: 'specreview_wait',
@@ -120,7 +152,7 @@ export const TOOLS = [
       thread_id: threadId,
       body: z.string().min(1).describe('Markdown reply'),
       status: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_REPLY_STATUS])).optional(),
-      at: z.string().optional().describe('Lines you changed for it, e.g. "L42-46"'),
+      at: z.string().optional().describe('Lines you changed for it, e.g. "L42-46" (code reviews: "src/a.js:L42-46")'),
       decision: z.string().optional(),
       workspace: workspaceArg,
     }),
@@ -165,19 +197,31 @@ export const TOOLS = [
   {
     name: 'specreview_reanchor',
     title: "Move a thread's anchor",
-    description: "Move a thread's anchor to other lines (\"42-46\") or to an exact quote of the current file.",
-    schema: z.object({ doc: docArg, thread_id: threadId, lines: linesArg.optional(), quote: z.string().optional(), workspace: workspaceArg }),
+    description: "Move a thread's anchor to other lines (\"42-46\") or to an exact quote of the current file. In a code review: file + lines of that file.",
+    schema: z.object({ doc: docArg, thread_id: threadId, lines: linesArg.optional(), quote: z.string().optional(), file: fileArg.optional(), workspace: workspaceArg }),
     command: 'reanchor',
-    toInput: async (a) => ({ doc: a.doc, thread: a.thread_id, lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined, quote: a.quote }),
+    toInput: async (a) => ({
+      doc: a.doc,
+      thread: a.thread_id,
+      lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      quote: a.quote,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
     name: 'specreview_ask',
     title: 'Ask the reviewer a question',
-    description: 'Create an agent-question thread anchored on a quote or lines of the doc; the answer arrives in a later packet as ANSWER.',
-    schema: z.object({ doc: docArg, quote: z.string().optional(), lines: linesArg.optional(), body: z.string().min(1), workspace: workspaceArg }),
+    description: 'Create an agent-question thread anchored on a quote or lines of the doc (in a code review: file + lines, or neither for the whole review); the answer arrives in a later packet as ANSWER.',
+    schema: z.object({ doc: docArg, quote: z.string().optional(), lines: linesArg.optional(), file: fileArg.optional(), body: z.string().min(1), workspace: workspaceArg }),
     command: 'ask',
-    toInput: async (a) => ({ doc: a.doc, quote: a.quote, lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined, body: a.body }),
+    toInput: async (a) => ({
+      doc: a.doc,
+      quote: a.quote,
+      lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+      body: a.body,
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -230,14 +274,24 @@ export const TOOLS = [
   {
     name: 'specreview_show',
     title: 'Show a thread or old source',
-    description: 'A thread with its full timeline (thread_id), or the exact source of a version (version + lines).',
-    schema: z.object({ doc: docArg, thread_id: threadId.optional(), version: versionArg.optional(), lines: linesArg.optional(), workspace: workspaceArg }),
+    description: 'A thread with its full timeline (thread_id), or the exact source of a version (version + lines); in a code review, a repo file of a round (file, side, version).',
+    schema: z.object({
+      doc: docArg,
+      thread_id: threadId.optional(),
+      version: versionArg.optional(),
+      lines: linesArg.optional(),
+      file: fileArg.optional(),
+      side: z.enum(['new', 'old']).optional().describe('Code reviews only, with file: which side of the change (default new)'),
+      workspace: workspaceArg,
+    }),
     command: 'show',
     toInput: async (a) => ({
       doc: a.doc,
       thread: a.thread_id,
       version: a.version !== undefined ? parseVersionRef(a.version, 'version') : undefined,
       lines: a.lines !== undefined ? parseSingleRange(a.lines, 'lines') : undefined,
+      ...(a.file !== undefined ? { file: a.file } : {}),
+      ...(a.side !== undefined ? { side: a.side } : {}),
     }),
     annotations: { readOnlyHint: false, openWorldHint: false },
   },

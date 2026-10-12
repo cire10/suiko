@@ -4,7 +4,9 @@
 //   optional ack of delivered reviews -> fn). Re-entrant, so ops may call ops.
 // - resolveDoc: also rolls forward an interrupted commit (its redo journal) before a reader looks at the doc.
 // - ackDelivered: the agent's next op on a doc acknowledges reviews delivered to it (review.ackedBy[agent]).
-// - loadSnapshot: head version, working copy, head->working mapper, threads, locks and reviews in one read.
+// - loadSnapshot: head version, working copy, head->working mapper, threads, locks and reviews in one read (plus
+//   the kind's add-ons: code docs get `snap.code`, see kinds.js).
+// - readWorkingState dispatches to the doc kind's adapter (kinds.js): a code doc's working state is its repo files.
 // - actors, events (SSE names from protocol.js), version loaders with render caching, small lookups.
 
 import fs from 'node:fs';
@@ -12,7 +14,10 @@ import { SSE } from '../../../shared/protocol.js';
 import { NotFoundError, RefusedError, UsageError } from '../../store/errors.js';
 import { changedAssets, hashWorkingAssets } from '../assets.js';
 import { preciseMapper } from '../workmap.js';
-import { docRefFor, isSnapshot, snapshotRefusal } from '../../store/snapshot.js';
+import { codeEditRefusal, docRefFor, isCode, isSnapshot, isVirtual, snapshotRefusal } from '../../store/snapshot.js';
+import { kindOf, versionLoader } from '../kinds.js';
+
+export { versionLoader };
 
 /**
  * @typedef {import('../context.js').Ctx} Ctx
@@ -125,20 +130,16 @@ export async function readHead(ctx, doc) {
 }
 
 /**
- * The working copy; a missing file yields `missing: true` and the head text (so readers can still work).
+ * The working copy; a missing file yields `missing: true` and the head text (so readers can still work). Dispatched
+ * to the doc kind's adapter (kinds.js `workingState`): spec and snapshot docs read their (virtual) working file, a
+ * code doc asks the code engine about its repo files.
  * @param {Ctx} ctx
  * @param {Doc} doc
  * @param {HeadState | null} head
  * @returns {Promise<WorkingState>}
  */
 export async function readWorkingState(ctx, doc, head) {
-  try {
-    const w = await ctx.store.readWorking(doc);
-    return { text: w.text, sha256: w.sha256, buf: w.buf, missing: false, dirty: head ? w.sha256 !== head.manifest.sha256 : true };
-  } catch (err) {
-    if (err instanceof NotFoundError) return { text: head?.source ?? '', sha256: null, buf: null, missing: true, dirty: true };
-    throw err;
-  }
+  return kindOf(doc).workingState(ctx, doc, head);
 }
 
 /**
@@ -163,7 +164,7 @@ export async function requireWorking(ctx, doc, head) {
  * @returns {Promise<string[]>} changed workspace-relative paths, sorted
  */
 export async function changedWorkingAssets(ctx, doc, head) {
-  if (isSnapshot(doc)) return [];
+  if (isVirtual(doc)) return [];
   const recorded = head.manifest.assets ?? {};
   const render = await ctx.render(doc, head.v);
   const rels = [...new Set([...render.assets, ...Object.keys(recorded)])];
@@ -173,6 +174,7 @@ export async function changedWorkingAssets(ctx, doc, head) {
 
 /**
  * Refuses an agent edit of a snapshot doc (it has no working file) with what to do instead (RefusedError, exit 3).
+ * Code docs are dispatched to the code engine (or refused with their own message) BEFORE this is called.
  * @param {Ctx} ctx
  * @param {Doc} doc
  * @param {string} what 'apply suggestions to', 'edit', 'revert'...
@@ -180,6 +182,17 @@ export async function changedWorkingAssets(ctx, doc, head) {
 export function refuseSnapshot(ctx, doc, what) {
   if (!isSnapshot(doc)) return;
   throw new RefusedError(snapshotRefusal(doc, what, docRefFor(doc.id, ctx.root)), { details: { doc: doc.id, kind: 'snapshot' } });
+}
+
+/**
+ * Refuses an edit command on a code doc (RefusedError, exit 3): the agent edits the repo files with its own tools
+ * and `specreview revise <doc>` records the round.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ */
+export function refuseCode(ctx, doc) {
+  if (!isCode(doc)) return;
+  throw new RefusedError(codeEditRefusal(doc, docRefFor(doc.id, ctx.root)), { details: { doc: doc.id, kind: 'code' } });
 }
 
 /**
@@ -198,29 +211,10 @@ export async function loadSnapshot(ctx, doc, { includeUncommitted = false } = {}
     ctx.store.listReviews(doc.id),
   ]);
   const mapper = preciseMapper(head.source, working.missing ? head.source : working.text);
-  return { doc, head, working, mapper, threads, locks, reviews };
-}
-
-/**
- * Memoised loader of version sources and renders: (v) => { source, render }.
- * @param {Ctx} ctx
- * @param {Doc} doc
- * @returns {(v: number) => Promise<{ source: string, render: RenderResult, manifest: VersionManifest }>}
- */
-export function versionLoader(ctx, doc) {
-  /** @type {Map<number, Promise<{ source: string, render: RenderResult, manifest: VersionManifest }>>} */
-  const cache = new Map();
-  return (v) => {
-    let p = cache.get(v);
-    if (!p) {
-      p = (async () => {
-        const { source, manifest } = await ctx.store.readVersion(doc.id, v);
-        return { source, manifest, render: await ctx.render(doc, v) };
-      })();
-      cache.set(v, p);
-    }
-    return p;
-  };
+  /** @type {Snapshot} */
+  const snap = { doc, head, working, mapper, threads, locks, reviews };
+  await kindOf(doc).loadExtra(ctx, doc, snap);
+  return snap;
 }
 
 /**
@@ -236,6 +230,18 @@ export function lastDeliveredAt(reviews, agent) {
     if (at && (!best || at > best)) best = at;
   }
   return best;
+}
+
+/**
+ * The review a revision answers: the newest review delivered to the agent, else the newest review.
+ * @param {Review[]} reviews
+ * @param {string} agent
+ * @returns {string | null}
+ */
+export function respondsToOf(reviews, agent) {
+  const sorted = [...reviews].sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0));
+  const delivered = sorted.filter((r) => r.deliveredTo?.[agent]);
+  return (delivered[delivered.length - 1] ?? sorted[sorted.length - 1])?.id ?? null;
 }
 
 /**

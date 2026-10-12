@@ -22,6 +22,8 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 - [Plan-mode gate](#plan-mode-gate)
 - [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text)
 - [Folders](#folders)
+- [Code review](#code-review)
+- [Snapshot a web page](#snapshot-a-web-page)
 - [Command reference](#command-reference)
 - [Storage layout and git](#storage-layout-and-git)
 - [Configuration](#configuration)
@@ -67,7 +69,7 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 ## Install
 
-Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
+Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`specreview review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
 ### Quick install
 
@@ -80,7 +82,7 @@ cd specreview
 specreview install --apply     # writes that configuration (same as ./install.sh --yes)
 ```
 
-Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
+Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `specreview install --apply`. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
 
 `install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `specreview` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `specreview install`. Options after `--yes` go to `specreview install`, e.g. `./install.sh --yes --only claude,codex`.
 
@@ -107,7 +109,7 @@ What it configures (user scope; `--project` writes the project-level equivalents
 
 | Agent | Detected by | What `specreview install` writes |
 |---|---|---|
-| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`, `/review-code`, `/specreview-last`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
 | Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
 | Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
 | Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
@@ -164,6 +166,7 @@ The plugin adds:
 
 - the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
 - the **`/review-spec <path>`** command (also `/specreview:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
+- the **`/review-code [args]`** command: opens a code review of Claude's changes, or of a GitHub PR (see [Code review](#code-review)), and waits in the background;
 - the **`/specreview-last`** command: opens Claude's previous message for review (see [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text));
 - two **hooks**: `specreview hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `specreview hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
 
@@ -399,6 +402,56 @@ When you run these from your home directory (which can never be a workspace), th
 
 `specreview open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the review UI's home page, which lists them all; `specreview wait --all` waits for a review of any of them.
 
+## Code review
+
+`specreview review` reviews code changes the way you review a spec: comment on lines, suggest replacement lines, ask questions, then send the review to the agent. Use it when an agent has changed code and you want to go through the diff before it goes any further, or to review a GitHub pull request. In Claude Code, `/review-code [args]` runs it and waits for your review.
+
+```bash
+specreview review                    # this branch since it left the default branch, uncommitted and untracked files included
+specreview review --uncommitted      # HEAD .. working tree
+specreview review --staged           # HEAD .. the index
+specreview review --base main        # merge-base(main, HEAD) .. working tree (--committed: .. HEAD)
+specreview review main..feature      # a range (main...feature: from their merge-base)
+specreview review --commit 1a2b3c4   # one commit
+specreview review --pr 123           # a GitHub PR, through gh
+```
+
+- **The page** lists the changed files and shows one diff card per file, unified or split.
+  - Click a line number, on either side, to select it, and shift-click to extend. Press `c` to comment, or `s` to suggest replacement lines (new side only).
+  - **Comment on file** covers a whole file. `j`/`k` move between files and `n`/`p` between changes.
+  - Threads appear inline under their lines. **Changes** shows what changed between rounds, and **Verify** lists what the agent says it addressed.
+- **What the agent gets:**
+  - Each comment cites `path:L42-44` relative to the repository root, with the exact current lines to replace. A comment on deleted lines carries those lines instead.
+  - The agent edits the real files and applies your suggestions with `specreview apply`. It records the next round with `specreview revise <doc> --replies -`.
+  - `wait` refuses (exit 3) while the reviewed files have edits that are not recorded yet.
+- **Rounds follow the working tree.** Running the same `specreview review` again records a new round when the files changed, and reopens a closed review.
+  - Untracked files are included, except ones that look like secrets (`.env*`, keys) and very large ones.
+  - Binary and very large files are listed, without a diff.
+  - Your index, branches and commits are never changed.
+- **PR mode** (`--pr <n|url>`) needs the GitHub CLI, signed in (`gh auth login`).
+  - **Checked out** (`gh pr checkout <n>`): the review is the PR's merge-base .. your working tree, so you and the agent can fix it in place.
+  - **Not checked out:** SpecReview fetches the PR head once into `refs/specreview/pr/<n>`, from the git remote that points at the PR's repository. Line numbers are then the PR head's, and the agent is told to check it out before editing.
+  - Run the same command again to pick up new commits on the PR; closing the review deletes the ref. Nothing else fetches: not the review page, not later rounds.
+- MCP clients get the same reviews through the `specreview_review` tool (PR mode is CLI only).
+
+## Snapshot a web page
+
+`specreview snapshot <url>` fetches a web page once, now, and opens it for review like any other doc: threads, **Review changes** and **History** work as usual. It uses the network only when you run it (like `specreview review --pr`, the only other command that does); the review UI never fetches the page.
+
+```bash
+specreview snapshot https://docs.example.com/spec
+specreview snapshot http://localhost:3000/design --allow-private   # a page you are building
+```
+
+- **Nothing on the page runs.** The HTML is cleaned with an allowlist (no scripts, styles, forms, frames, embeds or event handlers; only `http`, `https` and `mailto` links), the page's `<main>` or `<article>` is kept when it has one, and the result is converted to Markdown. `--as-html` keeps the cleaned HTML instead. Remote images and styles are blocked in the review UI; `--allow-remote-assets` loads them.
+- **Public pages only, unless you say otherwise.** Hosts on this machine or your network (`localhost`, `10.x`, `192.168.x`, link-local and the like) are refused (exit 3) without `--allow-private`. Every redirect is checked the same way. Pages are limited to 10 MB and 30 seconds.
+- **Run it again to record the next version.** The same URL always maps to the same doc, so a second run records v2 when the page changed and nothing when it is identical. An agent that changed the sources of a page it builds records the new version and its replies in one step with `specreview snapshot <url> --allow-private --replies -` (the `revise` replies JSON on stdin).
+- **Pages rendered by JavaScript** come out nearly empty (SpecReview says so). `--reader jina` lets r.jina.ai render them: it sends the URL, without its query string, to that service, and it is refused for private hosts.
+- **Markdown pages** (`.md` URLs, `raw.githubusercontent.com`, and `github.com/.../blob/...md`, which is fetched from its raw URL) stay Markdown, minus any raw HTML. `--reader direct` fetches the URL exactly as given.
+- **Turning the network off:** with `SPECREVIEW_OFFLINE=1`, or `{"network": {"allow": false}}` in `~/.specreview/config.json`, the command is refused (exit 3).
+
+The MCP tool `specreview_snapshot` does the same for public pages only.
+
 ## Command reference
 
 `<doc>` is a doc id (`token-service`) or a file path. Line numbers are always lines of the current file on disk.
@@ -409,6 +462,8 @@ When you run these from your home directory (which can never be a workspace), th
 | `specreview open <dir>` | Open every spec file below a folder (at most 200); print the home URL listing them |
 | `specreview open - [--name N] [--title T]` | Review piped Markdown; the same `--name` records a new version |
 | `specreview last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
+| `specreview snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page (uses the network); run it again to record the next version. See [Snapshot a web page](#snapshot-a-web-page) |
+| `specreview review [<range>] [--uncommitted \| --staged \| --base <ref> [--committed] \| --commit <sha> \| --pr <n\|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T]` | Open a code review of your changes or of a GitHub PR; run it again to record the next round. See [Code review](#code-review) |
 | `specreview wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted; print the packet |
 | `specreview feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `specreview apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
@@ -417,15 +472,15 @@ When you run these from your home directory (which can never be a workspace), th
 | `specreview revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies; enforce guards |
 | `specreview revise <doc> --source <file\|-> [--replies <file\|->]` | Record a new version of a snapshot doc (a message or piped text) from a file |
 | `specreview revert <doc> (--hunk hN \| --lock L1)` | Undo one unrecorded hunk, or restore agreed text |
-| `specreview reanchor <doc> <tid> (--lines A-B \| --quote TEXT)` | Move a thread's anchor |
-| `specreview ask <doc> (--quote TEXT \| --lines A-B) -m <question>` | The agent asks the reviewer a question |
+| `specreview reanchor <doc> <tid> (--lines A-B \| --quote TEXT) [--file <path>]` | Move a thread's anchor (code reviews: `--file`) |
+| `specreview ask <doc> (--quote TEXT \| --lines A-B \| --file <path> [--lines A-B]) -m <question>` | The agent asks the reviewer a question |
 | `specreview threads <doc> [--status open\|addressed\|needs_input\|resolved\|outdated\|all] [--json]` | List threads |
-| `specreview show <doc> [<tid>] [--version N] [--lines A-B]` | Show a thread's timeline, or old source |
+| `specreview show <doc> [<tid>] [--version N] [--lines A-B] [--file <path> [--side new\|old]]` | Show a thread's timeline, or old source (code reviews: one file of a round) |
 | `specreview diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Show changes (default: your last review to head) |
 | `specreview log <doc> [--json]` | Timeline of versions and reviews |
 | `specreview status [<doc>] [--json]` | Docs, threads, undelivered reviews, listeners, working-copy state |
 | `specreview final <doc> [--decisions] [--out <dir>]` | Check the final version; export the decision log |
-| `specreview close <doc>` | End the review session |
+| `specreview close <doc>` | End the review session (a PR review also loses its fetched ref) |
 | `specreview snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: snip anywhere on screen with the macOS picker (or attach an image with `--file`) as a draft comment, or submit it at once with `--send`. See [Snipping](#snipping) |
 | `specreview serve [--foreground] [--port N]` · `specreview stop [--rotate]` · `specreview doctor [--fix]` | Server control and health checks |
 | `specreview mcp` | stdio MCP server |
@@ -435,7 +490,7 @@ When you run these from your home directory (which can never be a workspace), th
 | `specreview uninstall [--only a,b] [--skip a,b] [--user\|--project] [--apply]` | Remove what `install` added (prints only, unless `--apply`) |
 | `specreview install claude [--user\|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]` · `specreview install agents-md [--apply]` | Install one integration (prints only, unless `--apply`) |
 
-Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port).
+Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port), `SPECREVIEW_OFFLINE=1` (refuse `snapshot <url>`).
 
 Exit codes: `0` ok or delivered · `1` error · `2` wait timed out · `3` refused (guard, dirty working copy, conflict, not unique) · `4` not found · `5` session closed · `6` superseded by a newer `wait`.
 
@@ -463,7 +518,7 @@ Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `
 
 ```text
 ~/.specreview/
-  daemon.json (0600)  workspaces.json  daemon.log
+  daemon.json (0600)  workspaces.json  daemon.log  config.json (optional: your own settings, see Configuration)
   ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/
 ```
 
@@ -502,9 +557,20 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 | `guards.unexplainedDeletion` | `refuse`, `warn` or `off` |
 | `guards.writeHook`, `guards.writeHookRatio` | Claude Code Write hook: `deny`, `warn` (ask the user) or `off`; the share of changed lines that triggers it |
 | `anchoring.*` | Fuzzy re-anchoring thresholds |
-| `render.network` | `allow` lets documents load their own remote resources; `block` adds a CSP that restricts them to local files |
+| `render.network` | `allow` lets documents load their own remote resources; `block` adds a CSP that restricts them to local files. A web page recorded by `specreview snapshot <url>` carries its own setting (`block` unless `--allow-remote-assets`), which wins over this one |
 | `git.autoCommit` | Commit each recorded version |
 | `assets.maxBytes` | Assets larger than this are not snapshotted |
+
+Two settings belong to you rather than to a project, so they live in `~/.specreview/config.json` (`$SPECREVIEW_HOME/config.json`) and a repository cannot change them:
+
+```json
+{"network": {"allow": false}, "snapshot": {"reader": "direct"}}
+```
+
+| Key | Meaning |
+|---|---|
+| `network.allow` | `false` refuses `specreview snapshot <url>` and `specreview review --pr`, the only commands that use the network (like `SPECREVIEW_OFFLINE=1`) |
+| `snapshot.reader` | The default `--reader` of `snapshot`: `auto` (the default) or `direct`. `jina` is only ever used when you pass it |
 
 ## Security model
 
@@ -513,7 +579,8 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 - **Path safety.** Only files inside the workspace are served; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and key files (`*.pem`, `*.key`, `*.p12`, `id_rsa*`) are refused.
 - **Observe-only overlay.** Messages from the document can at most open a comment box; nothing is submitted, resolved or written without a click in the UI. Comment bodies are sanitised before rendering.
 - **Screen snips are interactive.** `B` and `specreview snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.
-- **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`.
+- **No egress.** SpecReview makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`. The two exceptions run only when you run them, and are refused when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false`. `specreview snapshot <url>` fetches the page you name: public hosts only unless `--allow-private`, and every redirect is re-checked. `specreview review --pr <n>` asks `gh` about the PR and fetches its head once with git (https, ssh or git transports only).
+- **Snapshots run nothing.** A fetched page is cleaned with an allowlist before it is stored. Snapshot docs (web pages, plans, messages, piped text) are served with a strict policy (`script-src 'self'`, no form submission, no `<base>`, no plugins) in a sandbox without forms or downloads, and a web page's remote images and styles stay blocked unless it was recorded with `--allow-remote-assets`.
 - **Hooks and install are conservative.** Hooks never block a prompt on error and always exit 0. `install` prints what it would change and writes nothing without `--apply`.
 
 The access token appears in the browser's address bar; it is not sent as a referrer and the document iframe cannot read it. Rotate it with `specreview stop --rotate`.
