@@ -69,7 +69,7 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 ## Install
 
-Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
+Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`specreview review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`B`, `specreview snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
 ### Quick install
 
@@ -82,7 +82,7 @@ cd specreview
 specreview install --apply     # writes that configuration (same as ./install.sh --yes)
 ```
 
-Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
+Then start a new session of each agent so it loads SpecReview, and run `specreview doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `specreview install --apply`. To update later, run `git pull && npm ci` in the clone, then `specreview install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
 
 `install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `specreview` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `specreview install`. Options after `--yes` go to `specreview install`, e.g. `./install.sh --yes --only claude,codex`.
 
@@ -109,7 +109,7 @@ What it configures (user scope; `--project` writes the project-level equivalents
 
 | Agent | Detected by | What `specreview install` writes |
 |---|---|---|
-| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
+| Claude Code | `~/.claude` (or `$CLAUDE_CONFIG_DIR`), or `claude` on PATH | The `spec-review` skill, every command in `integrations/claude-code/commands/` (`/review-spec`, `/review-code`, `/specreview-last`), and two hooks in `settings.json` with absolute paths: `PreToolUse` on `Write` and `UserPromptSubmit`. The plan-mode gate is opt-in: add `--with-plan-gate` (see [Plan-mode gate](#plan-mode-gate)). Skipped when the SpecReview plugin is installed for your user or for the current project, because the hooks would run twice (it warns when hooks from an earlier `specreview install` are still in `settings.json`). |
 | Codex CLI | `codex` on PATH, or a `~/.codex` (`$CODEX_HOME`) that Codex has used | The protocol block in `~/.codex/AGENTS.md` (or in `AGENTS.override.md` when that is in use), the `specreview-review` skill in `~/.agents/skills/`, and an `[mcp_servers.specreview]` block in `~/.codex/config.toml`. |
 | Gemini CLI | `gemini` on PATH, or `~/.gemini/settings.json` | The protocol block in `~/.gemini/GEMINI.md` (or the `context.fileName` you set), and `/specreview-review` in `~/.gemini/commands/specreview-review.toml`. |
 | Cursor | `~/.cursor`, or `cursor` / `cursor-agent` on PATH | `mcpServers.specreview` in `~/.cursor/mcp.json`, and the skill in `~/.agents/skills/`. Cursor keeps user rules in its settings, not in a file. |
