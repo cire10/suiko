@@ -19,7 +19,7 @@
 #   SPECREVIEW_APP_DIR   where to clone (default: $HOME/.specreview/app)
 #   SPECREVIEW_BIN_DIR   where the fallback shim goes (default: $HOME/.local/bin)
 #   SPECREVIEW_NO_LINK=1 skip `npm link` and always use the shim
-# Undo: `suiko uninstall --apply` removes what `suiko install` added; then `npm unlink -g suiko` (or
+# Undo: `suiko uninstall --apply` removes what `suiko install` added; then `npm unlink -g @cire10/suiko` (or
 # delete the shim) and the clone.
 
 set -eu
@@ -80,7 +80,8 @@ NPM=$(command -v npm 2>/dev/null || true)
 
 # 2. The Suiko source: this checkout, or a clone of SPECREVIEW_REPO ----------------------------------------
 is_suiko() {
-  [ -f "$1/bin/suiko.js" ] && [ -f "$1/package.json" ] && grep -q '"name": *"suiko"' "$1/package.json"
+  # the npm package is @cire10/suiko (npm refused the bare name as too close to "shiki"); a plain "suiko" counts too
+  [ -f "$1/bin/suiko.js" ] && [ -f "$1/package.json" ] && grep -Eq '"name": *"(@[A-Za-z0-9._-]+/)?suiko"' "$1/package.json"
 }
 
 SRC=''
@@ -95,9 +96,9 @@ if [ -n "$HERE" ] && [ -f "$HERE/install.sh" ] && is_suiko "$HERE"; then
 else
   MODE=clone
   REPO=${SPECREVIEW_REPO:-}
-  [ -n "$REPO" ] || die 'not run from a Suiko checkout, and SPECREVIEW_REPO is not set. Suiko has no public
-download: set SPECREVIEW_REPO to the git URL of the repository you were given, e.g.
-  curl -fsSL <URL>/install.sh | SPECREVIEW_REPO=git@github.com:<owner>/suiko.git sh
+  [ -n "$REPO" ] || die 'not run from a Suiko checkout, and SPECREVIEW_REPO is not set. Install it from npm instead
+(npm install -g @cire10/suiko), or set SPECREVIEW_REPO to the git URL of the repository, e.g.
+  curl -fsSL <URL>/install.sh | SPECREVIEW_REPO=https://github.com/cire10/suiko.git sh
 or clone it yourself and run ./install.sh from the clone.'
   command -v git >/dev/null 2>&1 || die 'git is required to fetch Suiko'
   SRC=${SPECREVIEW_APP_DIR:-$HOME/.specreview/app}

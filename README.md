@@ -84,13 +84,13 @@ cd suiko
 suiko install --apply     # writes that configuration (same as ./install.sh --yes)
 ```
 
-Or install it from npm instead of a clone: `npm install -g suiko`, then `suiko install --apply`.
+Or install it from npm instead of a clone: `npm install -g @cire10/suiko` (the command is still `suiko`), then `suiko install --apply`.
 
 Then start a new session of each agent so it loads Suiko, and run `suiko doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `suiko install --apply`. To update later, run `git pull && npm ci` in the clone, then `suiko install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
 
 `install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `suiko` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `suiko install`. Options after `--yes` go to `suiko install`, e.g. `./install.sh --yes --only claude,codex`.
 
-Without a checkout, give it the repository's git URL. There is no public download, and the npm name `suiko` belongs to another package:
+Without a checkout, give it the repository's git URL (or install from npm, as above):
 
 ```bash
 curl -fsSL <raw URL of install.sh> | SPECREVIEW_REPO=<git URL> sh -s -- --yes
