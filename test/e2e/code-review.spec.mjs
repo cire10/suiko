@@ -364,6 +364,24 @@ test('"Show all" renders a diff past the first 3000 rows', async ({ page, ui }) 
   expect(ui.errors).toEqual([]);
 });
 
+test('a file picked in the tree stays highlighted while its card shows; scrolling it away moves the highlight on', async ({ page, ui }) => {
+  await openReview(ui);
+  const order = await page.getByTestId(CODE_TESTID.fileDiff).evaluateAll((els) => els.map((e) => /** @type {HTMLElement} */ (e).dataset.path));
+  const last = order[order.length - 1];
+  await treeRow(page, last).click();
+  await expect(card(page, last)).toBeInViewport();
+  await expect(treeRow(page, last)).toHaveAttribute('aria-current', 'true');
+  // cards loading around it must not take the highlight; scrolling it out of view by hand does
+  await page.waitForTimeout(300);
+  await expect(treeRow(page, last)).toHaveAttribute('aria-current', 'true');
+  await page.locator('.code-view').evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(treeRow(page, order[0])).toHaveAttribute('aria-current', 'true');
+  await expect(treeRow(page, last)).not.toHaveAttribute('aria-current', 'true');
+  expect(ui.errors).toEqual([]);
+});
+
 test('keys: j / k move between files, n / p between hunks, c comments the selection, Esc clears it', async ({ page, ui }) => {
   await openReview(ui);
   const top = async () => page.locator('.code-file').evaluateAll((els) => {

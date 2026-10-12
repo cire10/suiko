@@ -166,11 +166,21 @@ export function CodeReviewView({ ds }) {
           if (scrollOffset(root, c) <= NEAR) active = c;
           else break;
         }
-        // at the bottom the last cards cannot reach the top: keep a file the tree or a key just picked if it shows
-        const current = codeStore.get().activePath;
-        if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2 && current && current !== active?.dataset.path) {
-          const el = cards.find((c) => c.dataset.path === current);
-          if (el && el.getBoundingClientRect().top < root.getBoundingClientRect().bottom) return;
+        // A file just picked (the tree, a thread, n / p: the last reveal) stays current while its card shows: the
+        // scroll it caused, cards loading around it and the bottom of the list (the last cards cannot reach the top)
+        // must not hand the highlight to a neighbour. At the bottom, a file j / k picked is kept the same way.
+        const st = codeStore.get();
+        const current = st.activePath;
+        const shows = (/** @type {string} */ p) => {
+          const el = cards.find((c) => c.dataset.path === p);
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const v = root.getBoundingClientRect();
+          return r.bottom > v.top && r.top < v.bottom;
+        };
+        if (current && current !== active?.dataset.path) {
+          if (st.reveal?.path === current && shows(current)) return;
+          if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2 && shows(current)) return;
         }
         setActivePath(active?.dataset.path || null);
       });
