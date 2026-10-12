@@ -2,10 +2,34 @@
   "name": "suiko",
   "version": "0.1.0",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown specs",
+  "keywords": [
+    "review",
+    "spec",
+    "code-review",
+    "ai-agents",
+    "claude-code",
+    "mcp",
+    "markdown"
+  ],
+  "homepage": "https://github.com/cire10/suiko#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cire10/suiko.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cire10/suiko/issues"
+  },
   "type": "module",
   "bin": { "suiko": "bin/suiko.js", "specreview": "bin/specreview.js" },
   "engines": { "node": ">=20.19" },
-  "files": ["bin", "src", "integrations", ".claude-plugin", "README.md", "docs"],
+  "files": [
+    "bin",
+    "src",
+    "integrations",
+    ".claude-plugin",
+    "README.md",
+    "docs"
+  ],
   "scripts": {
     "test": "node --test \"test/unit/**/*.test.js\" \"test/integration/**/*.test.js\"",
     "test:unit": "node --test \"test/unit/**/*.test.js\"",

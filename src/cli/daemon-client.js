@@ -30,7 +30,7 @@ import { APP_NAME, EXIT } from '../shared/protocol.js';
 
 const log = createLogger('daemon-client');
 
-/** Absolute path of the package root (…/html_documentation_annotator). */
+/** Absolute path of the package root (…/suiko). */
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** Absolute path of the CLI entry point. */
 export const BIN_PATH = path.join(PACKAGE_ROOT, 'bin', 'suiko.js');

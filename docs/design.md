@@ -1,6 +1,6 @@
 # SpecReview: design spec, v1 (implementation-ready)
 
-Status: final design for the v1 build · Date: 2026-10-10 · Target: `/Users/erictang/Desktop/Projects/html_documentation_annotator`
+Status: final design for the v1 build · Date: 2026-10-10 · Target: `~/src/suiko`
 
 ## 0. Summary
 
@@ -149,9 +149,9 @@ Running example:
 
 ### 3.0 One-time install
 ```
-cd /Users/erictang/Desktop/Projects/html_documentation_annotator && npm install && npm link
+cd ~/src/suiko && npm install && npm link
 # Claude Code (recommended): in a Claude Code session
-/plugin marketplace add /Users/erictang/Desktop/Projects/html_documentation_annotator
+/plugin marketplace add ~/src/suiko
 /plugin install specreview@specreview          # skill + /review-spec + hooks
 # or without the plugin system (prints what it would do; --apply writes it):
 specreview install claude --user --apply        # -> ~/.claude/skills/spec-review/SKILL.md

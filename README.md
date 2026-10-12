@@ -78,11 +78,13 @@ Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safa
 On a new machine:
 
 ```bash
-git clone https://github.com/cire10/html_documentation_annotator.git suiko
+git clone https://github.com/cire10/suiko.git
 cd suiko
 ./install.sh                   # installs the CLI, then lists what it would configure for each coding agent it finds
 suiko install --apply     # writes that configuration (same as ./install.sh --yes)
 ```
+
+Or install it from npm instead of a clone: `npm install -g suiko`, then `suiko install --apply`.
 
 Then start a new session of each agent so it loads Suiko, and run `suiko doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `suiko install --apply`. To update later, run `git pull && npm ci` in the clone, then `suiko install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
 
