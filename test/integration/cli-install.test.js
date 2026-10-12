@@ -127,6 +127,76 @@ describe('install claude', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  test('the user scope is <HOME>/.claude of the environment it is given, never the OS home; no HOME is refused', async () => {
+    const home = tempDir('user-home');
+    try {
+      const r = await runCli(['install', 'claude', '--with-plan-gate', '--apply'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME, HOME: home } });
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'spec-review', 'SKILL.md')));
+      assert.ok(readJson(path.join(home, '.claude', 'settings.json')).hooks.PermissionRequest);
+      const viaDir = tempDir('claude-config-dir');
+      try {
+        const c = await runCli(['install', 'claude', '--json'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME, HOME: home, CLAUDE_CONFIG_DIR: viaDir } });
+        assert.ok(JSON.parse(c.stdout).files.every((/** @type {any} */ f) => f.path.startsWith(viaDir)), '$CLAUDE_CONFIG_DIR still wins');
+      } finally {
+        fs.rmSync(viaDir, { recursive: true, force: true });
+      }
+      const none = await runCli(['install', 'claude', '--apply'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME } });
+      assert.equal(none.code, 1);
+      assert.match(none.stderr, /cannot tell your home directory: HOME is not set/);
+      const proj = await runCli(['install', 'claude', '--project'], { cwd: path.join(project, 'src'), env: { SPECREVIEW_HOME: HOME } });
+      assert.equal(proj.code, 0, '--project needs no HOME');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test('re-running `install claude` without hook flags re-points the SpecReview hooks already there (none added)', async () => {
+    const home = tempDir('claude-repoint');
+    try {
+      const stale = (/** @type {string} */ what) => `"/old/node" "/old/checkout/bin/specreview.js" ${what}`;
+      const settings = {
+        hooks: {
+          PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: stale('hook pre-write'), timeout: 5 }] }],
+          UserPromptSubmit: [{ hooks: [{ type: 'command', command: stale('hook prompt'), timeout: 5 }] }],
+          PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: stale('plan-gate'), timeout: PLAN_GATE_TIMEOUT }] }],
+          Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }],
+        },
+      };
+      fs.writeFileSync(path.join(home, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
+      const opts = { cwd: path.join(project, 'src'), claudeHome: home, env: { SPECREVIEW_HOME: HOME } };
+      const dry = await runCli(['install', 'claude'], opts);
+      assert.match(dry.stdout, /settings\.json {2}\(hooks: .*plan-gate \(other settings kept; updates the SpecReview hooks already there\)\)/);
+      assert.equal((await runCli(['install', 'claude', '--apply'], opts)).code, 0);
+      const s = readJson(path.join(home, 'settings.json'));
+      assert.deepEqual(s.hooks.PreToolUse, [{ matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] }]);
+      assert.deepEqual(s.hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: hookCommand('prompt'), timeout: 5 }] }]);
+      assert.deepEqual(s.hooks.PermissionRequest, [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: planGateCommand(), timeout: PLAN_GATE_TIMEOUT }] }]);
+      assert.deepEqual(s.hooks.Stop, settings.hooks.Stop);
+
+      // Only the gate there: only the gate is re-pointed, no other hook is added, and the plugin warning is not printed.
+      fs.writeFileSync(path.join(home, 'settings.json'), `${JSON.stringify({ hooks: { PermissionRequest: settings.hooks.PermissionRequest } }, null, 2)}\n`);
+      const gateOnly = await runCli(['install', 'claude', '--apply'], opts);
+      assert.doesNotMatch(gateOnly.stdout, /Claude Code plugin/);
+      assert.deepEqual(Object.keys(readJson(path.join(home, 'settings.json')).hooks), ['PermissionRequest']);
+      assert.equal(readJson(path.join(home, 'settings.json')).hooks.PermissionRequest[0].hooks[0].command, planGateCommand());
+
+      // No SpecReview hooks: settings.json is not touched.
+      const none = tempDir('claude-nohooks');
+      try {
+        fs.writeFileSync(path.join(none, 'settings.json'), '{"model": "opus"}\n');
+        const r = await runCli(['install', 'claude', '--apply'], { ...opts, claudeHome: none });
+        assert.equal(r.code, 0, r.stderr);
+        assert.equal(fs.readFileSync(path.join(none, 'settings.json'), 'utf8'), '{"model": "opus"}\n');
+        assert.doesNotMatch(r.stdout, /settings\.json|Claude Code plugin/);
+      } finally {
+        fs.rmSync(none, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test('--with-plan-gate registers the plan-mode gate; every command file is copied', async () => {
     const dir = tempDir('plangate');
     fs.mkdirSync(path.join(dir, '.git'));

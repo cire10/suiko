@@ -15,6 +15,7 @@ import { ensureHome } from '../core/store/home.js';
 import { findWorkspace, initStoreDir } from '../core/store/workspace.js';
 import { docRefFor, isScratchRoot, originInfo, scratchBase } from '../core/store/snapshot.js';
 import { sha256 } from '../core/util/hash.js';
+import { lineCount } from './format.js';
 import { callOp, openContext, realpathOr, wsIdOfContext } from './runtime.js';
 
 /** Largest text `open -`, `last` and `revise --source` accept. */
@@ -121,7 +122,7 @@ export function externalsLines(hosts) {
 export function snapshotLine(t) {
   const { doc, version } = t;
   const what = originInfo(String(doc.origin?.type ?? '')).label;
-  if (t.created) return `specreview: tracking ${what} as "${doc.id}" (${doc.format}, ${version?.lines ?? '?'} lines) · recorded v${version?.v ?? doc.head}`;
+  if (t.created) return `specreview: tracking ${what} as "${doc.id}" (${doc.format}, ${lineCount(version?.lines)}) · recorded v${version?.v ?? doc.head}`;
   if (t.reopened) return `specreview: ${what} "${doc.id}" is already tracked (head v${doc.head}); reopened it`;
   const r = t.report;
   if (r && r.version && !r.dryRun) return `specreview: recorded v${r.version} of "${doc.id}" (${what}; +${r.stats.added} -${r.stats.removed} lines)`;

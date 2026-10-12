@@ -22,6 +22,15 @@ export function rangeText(range) {
 }
 
 /**
+ * "1 line" / "3 lines"; an unknown count is "? lines".
+ * @param {number | null | undefined} n
+ * @returns {string}
+ */
+export function lineCount(n) {
+  return n == null ? '? lines' : `${n} ${n === 1 ? 'line' : 'lines'}`;
+}
+
+/**
  * A command-line argument as it must be typed in a POSIX shell: as is when plain, else single-quoted.
  * @param {string} s
  * @returns {string}

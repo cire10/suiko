@@ -236,7 +236,7 @@ describe('symlinked config files', () => {
       assert.ok(fs.lstatSync(h.p(link)).isSymbolicLink(), `${link} is still a symlink`);
       assert.ok(fs.lstatSync(`${h.p(link)}.specreview-backup`).isFile(), `${link} backup is a plain copy`);
     }
-    assert.ok(readJson(h.p('dotfiles/settings.json')).hooks.PermissionRequest, 'the target got the hooks');
+    assert.ok(readJson(h.p('dotfiles/settings.json')).hooks.PreToolUse, 'the target got the hooks');
     assert.match(read(h.p('dotfiles/config.toml')), /\[mcp_servers\.specreview\]/);
     assert.match(read(h.p('dotfiles/AGENTS.md')), /^# Rules\n\n<!-- specreview:begin/);
     const un = await h.run(['uninstall', '--only', 'claude,codex', '--apply']);
@@ -265,7 +265,7 @@ describe('backups and pre-existing files', () => {
     const cmd = h.p('.claude/commands/review-spec.md');
     fs.appendFileSync(cmd, 'MY EDIT 1\n');
     const r1 = await h.run(['install', '--only', 'claude,codex', '--apply']);
-    assert.match(r1.stdout, /replaces a file SpecReview did not write \(backed up to review-spec\.md\.specreview-backup\)/);
+    assert.match(r1.stdout, /replaces an older or edited copy \(backed up to review-spec\.md\.specreview-backup\)/);
     assert.match(r1.stdout, new RegExp(`\\n {6}backup: ${esc(cmd)}\\.specreview-backup\\n`));
     assert.equal(r1.stdout.match(/ backup: /g)?.length, 1, 'config.toml was backed up by the first install, not now');
     fs.appendFileSync(cmd, 'MY EDIT 2\n');
@@ -321,7 +321,7 @@ describe('project scope', () => {
     const h = makeHome({ dirs: ['.claude', '.cursor'] });
     const r = await h.run(['install', '--project', '--only', 'claude,cursor', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(readJson(path.join(h.project, '.claude/settings.local.json')).hooks.PermissionRequest);
+    assert.ok(readJson(path.join(h.project, '.claude/settings.local.json')).hooks.PreToolUse);
     assert.equal(fs.existsSync(path.join(h.project, '.claude/settings.json')), false);
     assert.match(r.stdout, /These project files hold paths that exist only on this machine \(.+\): .*\.claude\/settings\.local\.json.*\.cursor\/mcp\.json.*\. Keep them out of version control/);
     // uninstall --project also cleans hooks that `install claude --project --with-hooks` put in settings.json.
@@ -385,12 +385,22 @@ describe('doctor and the Claude Code plugin', () => {
     const { j } = await h.json(['install', '--only', 'claude']);
     const claude = j.agents.find((/** @type {any} */ a) => a.id === 'claude');
     assert.equal(claude.status, 'skipped');
-    assert.match(claude.reason, /WARNING: ~\/\.claude\/settings\.json also has 3 SpecReview hooks from an earlier `specreview install`, so they run twice next to the plugin's \(specreview@local\)\. Remove the settings install with `specreview uninstall --only claude --apply`/);
+    assert.match(claude.reason, /WARNING: ~\/\.claude\/settings\.json also has 2 SpecReview hooks from an earlier `specreview install`, so they run twice next to the plugin's \(specreview@local\)\. Remove the settings install with `specreview uninstall --only claude --apply`/);
     const doc = await h.run(['doctor'], doctorDeps);
-    assert.match(doc.stdout, /^WARN {2}Claude Code: SpecReview plugin installed \(specreview@local\), and ~\/\.claude\/settings\.json also has 3 SpecReview hooks/m);
+    assert.match(doc.stdout, /^WARN {2}Claude Code: SpecReview plugin installed \(specreview@local\), and ~\/\.claude\/settings\.json also has 2 SpecReview hooks/m);
     const un = await h.run(['uninstall', '--only', 'claude', '--apply']);
     assert.equal(un.code, 0, un.stderr);
     assert.match(un.stdout, /The SpecReview plugin is still installed \(specreview@local\)/);
+    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: SpecReview plugin installed \(specreview@local\)$/m);
+  });
+
+  test('a plan gate in settings.json next to the plugin is not a double install: the plugin has no gate', async () => {
+    const h = makeHome({ dirs: ['.claude'] });
+    assert.equal((await h.run(['install', 'claude', '--with-plan-gate', '--apply'])).code, 0);
+    fs.mkdirSync(h.p('.claude/plugins'));
+    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'specreview@local': [{ scope: 'user', installPath: '/x' }] } }));
+    const { j } = await h.json(['install', '--only', 'claude']);
+    assert.doesNotMatch(j.agents.find((/** @type {any} */ a) => a.id === 'claude').reason, /WARNING/);
     assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: SpecReview plugin installed \(specreview@local\)$/m);
   });
 
@@ -433,7 +443,7 @@ describe('agent config details', () => {
     const r = await h.run(['install', '--only', 'claude,cursor', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(readJson(h.p('.cursor/mcp.json')).mcpServers.specreview, { type: 'stdio', command: stable, args: [BIN_PATH, 'mcp'] });
-    assert.equal(readJson(h.p('.claude/settings.json')).hooks.PermissionRequest[0].hooks[0].command, `"${stable}" "${BIN_PATH}" plan-gate`);
+    assert.equal(readJson(h.p('.claude/settings.json')).hooks.PreToolUse[0].hooks[0].command, `"${stable}" "${BIN_PATH}" hook pre-write`);
     // A `node` on PATH that is another node is not used; SPECREVIEW_NODE (install.sh) is, when it is this node.
     const other = makeHome({ dirs: ['.cursor'], bins: ['node'] });
     await other.run(['install', '--only', 'cursor', '--apply']);

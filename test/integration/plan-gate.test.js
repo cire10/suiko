@@ -453,15 +453,13 @@ describe('plan-gate: the plan review belongs to the gate', () => {
     assert.equal(fs.existsSync(path.join(elsewhere, '.specreview')), false);
   });
 
-  test('the plugin registers the gate in hooks/hooks.json next to the other hooks; install claude --with-hooks leaves it out unless --with-plan-gate', async () => {
+  test('the gate is opt-in: the plugin leaves it out; hookEntries adds it only with planGate', async () => {
     const plugin = path.resolve(path.dirname(BIN), '..', 'integrations', 'claude-code');
     const manifest = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
     assert.equal(manifest.hooks, undefined, 'hooks/hooks.json is loaded by default; no extra hook file');
     const hooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks', 'hooks.json'), 'utf8'));
-    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PermissionRequest', 'PreToolUse', 'UserPromptSubmit']);
-    assert.deepEqual(hooks.hooks.PermissionRequest, [
-      { matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: 'specreview plan-gate', timeout: 345600 }] },
-    ]);
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PreToolUse', 'UserPromptSubmit'], 'installing the plugin does not hook plan mode');
+    assert.match(hooks.description, /--with-plan-gate/);
     const { hookEntries } = await import('../../src/cli/install.js');
     assert.equal(hookEntries({ execPath: '/n', binPath: '/b.js', hooks: true }).PermissionRequest, undefined);
     const withGate = hookEntries({ execPath: '/n', binPath: '/b.js', hooks: true, planGate: true });

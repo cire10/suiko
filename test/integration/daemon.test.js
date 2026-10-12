@@ -337,8 +337,9 @@ describe('security', () => {
   test('/api/* needs the Bearer token, except /api/health', async () => {
     const health = await ui('/api/health');
     assert.equal(health.status, 200);
-    assert.deepEqual(Object.keys(health.json()).sort(), ['name', 'ok', 'pid', 'version']);
+    assert.deepEqual(Object.keys(health.json()).sort(), ['build', 'name', 'ok', 'pid', 'version']);
     assert.equal(health.json().name, 'specreview');
+    assert.match(health.json().build, /^[0-9a-f]{16}$/, 'the code identity is an opaque hash, never a path');
     assert.ok(!health.text.includes(token) && !health.text.includes(d.secret));
 
     const missing = await ui('/api/docs');

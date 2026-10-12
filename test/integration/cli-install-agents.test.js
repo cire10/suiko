@@ -126,12 +126,12 @@ describe('specreview install: detection and dry run', () => {
     const r = await h.run(['install'], { platform: 'darwin' });
     assert.equal(r.code, 0, r.stderr);
     const out = r.stdout;
-    // Claude Code: skill, every command file, hooks with the plan gate (absolute node + script)
+    // Claude Code: skill, every command file, hooks (absolute node + script); plan mode is left alone by default
     assert.match(out, new RegExp(`would create ${esc(h.p('.claude/skills/spec-review/SKILL.md'))} {2}\\(copy of integrations/claude-code/skills/spec-review/SKILL\\.md`));
     for (const name of claudeCommandFiles()) assert.match(out, new RegExp(`would create ${esc(h.p(`.claude/commands/${name}`))}`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.claude/settings.json'))} {2}\\(hooks: PreToolUse\\(Write\\) -> hook pre-write, UserPromptSubmit -> hook prompt, PermissionRequest\\(ExitPlanMode\\) -> plan-gate; other settings kept\\)`));
-    assert.ok(out.includes(JSON.stringify(planGateCommand()).slice(1, -1)), 'the plan-gate command is printed');
-    assert.match(out, /"timeout": 345600/);
+    assert.match(out, new RegExp(`would create ${esc(h.p('.claude/settings.json'))} {2}\\(hooks: PreToolUse\\(Write\\) -> hook pre-write, UserPromptSubmit -> hook prompt; other settings kept\\)`));
+    assert.ok(!out.includes('plan-gate'), 'no plan gate unless --with-plan-gate');
+    assert.ok(!out.includes('Plan mode:'));
     // Codex: AGENTS.md block, shared skill, config.toml block printed in full
     assert.match(out, new RegExp(`would create ${esc(h.p('.codex/AGENTS.md'))} {2}\\(new file with the SpecReview protocol block from integrations/agents-md/AGENTS\\.snippet\\.md`));
     assert.match(out, new RegExp(`would create ${esc(h.p('.agents/skills/specreview-review/SKILL.md'))} .*\\[shared with Cursor\\]`));
@@ -152,6 +152,68 @@ describe('specreview install: detection and dry run', () => {
   });
 });
 
+describe('--only', () => {
+  test('agents left out by --only are not reported as "not detected" (and not listed); JSON says why', async () => {
+    const h = makeHome({ dirs: ['.claude', '.codex', '.cursor'] });
+    const r = await h.run(['install', '--only', 'claude']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^Claude Code: detected/m);
+    assert.doesNotMatch(r.stdout, /^(Codex CLI|Cursor|Kiro CLI): /m, 'only the agent asked for is listed');
+    assert.doesNotMatch(r.stdout, /not detected/);
+    const { j } = await h.json(['install', '--only', 'claude']);
+    const cursor = j.agents.find((/** @type {any} */ a) => a.id === 'cursor');
+    assert.equal(cursor.detected, true, 'installed, yet left out');
+    assert.equal(cursor.status, 'skipped');
+    assert.equal(cursor.reason, 'not named with --only');
+    assert.equal(j.agents.find((/** @type {any} */ a) => a.id === 'kiro').status, 'skipped', 'undetected ones too');
+  });
+});
+
+describe('empty files', () => {
+  test('an existing empty AGENTS.md or config.toml is "filled", not reported as a new file', async () => {
+    const h = makeHome({ dirs: ['.codex'], files: { '.codex/AGENTS.md': '', '.codex/config.toml': '\n' } });
+    const r = await h.run(['install', '--only', 'codex']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/AGENTS.md'))} {2}\\(fills the empty file with the SpecReview protocol block from `));
+    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/config.toml'))} {2}\\(fills the empty file with the \\[mcp_servers\\.specreview\\] table \\(6 lines\\)\\)`));
+    assert.doesNotMatch(r.stdout, /new file with/);
+  });
+});
+
+describe('the plan-mode gate (opt-in)', () => {
+  test('--with-plan-gate adds it for Claude Code; a later install without the flag keeps it and re-points it', async () => {
+    const h = makeHome({ dirs: ['.claude'] });
+    const dry = await h.run(['install', '--only', 'claude', '--with-plan-gate']);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.match(dry.stdout, /PermissionRequest\(ExitPlanMode\) -> plan-gate; other settings kept\)/);
+    assert.match(dry.stdout, /note: Plan mode: when Claude calls ExitPlanMode, the plan opens in SpecReview/);
+    assert.equal((await h.run(['install', '--only', 'claude', '--with-plan-gate', '--apply'])).code, 0);
+    const gate = [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: planGateCommand(), timeout: PLAN_GATE_TIMEOUT }] }];
+    assert.deepEqual(readJson(h.p('.claude/settings.json')).hooks.PermissionRequest, gate);
+    assert.equal(PLAN_GATE_TIMEOUT, 345600);
+    assert.equal(planGateCommand(), `"${process.execPath}" "${BIN_PATH}" plan-gate`);
+
+    // An earlier opt-in pointing at another checkout: re-installing without the flag keeps the gate, with this CLI's path.
+    const s = readJson(h.p('.claude/settings.json'));
+    s.hooks.PermissionRequest[0].hooks[0].command = '"/old/node" "/old/checkout/bin/specreview.js" plan-gate';
+    fs.writeFileSync(h.p('.claude/settings.json'), `${JSON.stringify(s, null, 2)}\n`);
+    const again = await h.run(['install', '--only', 'claude', '--apply']);
+    assert.equal(again.code, 0, again.stderr);
+    assert.deepEqual(readJson(h.p('.claude/settings.json')).hooks.PermissionRequest, gate);
+
+    // uninstall removes it with the other hooks
+    assert.equal((await h.run(['uninstall', '--only', 'claude', '--apply'])).code, 0);
+    assert.equal(fs.existsSync(h.p('.claude/settings.json')), false, 'install created the file, so uninstall deletes it');
+  });
+
+  test('--with-plan-gate is accepted by `install` (no target), still refused by `install agents-md`', async () => {
+    const h = makeHome({ dirs: ['.claude'] });
+    assert.equal((await h.run(['install', '--with-plan-gate'])).code, 0);
+    assert.equal((await h.run(['install', '--with-hooks'])).code, 1, '--with-hooks stays an `install claude` option');
+    assert.equal((await h.run(['install', 'agents-md', '--with-plan-gate'])).code, 1);
+  });
+});
+
 describe('specreview install --apply', () => {
   test('writes the right files and entries for each agent; a second apply changes nothing', async () => {
     const h = makeHome({ dirs: ALL_DIRS, files: ALL_FILES });
@@ -169,9 +231,7 @@ describe('specreview install --apply', () => {
     const settings = readJson(h.p('.claude/settings.json'));
     assert.deepEqual(settings.hooks.PreToolUse, [{ matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] }]);
     assert.deepEqual(settings.hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: hookCommand('prompt'), timeout: 5 }] }]);
-    assert.deepEqual(settings.hooks.PermissionRequest, [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: planGateCommand(), timeout: PLAN_GATE_TIMEOUT }] }]);
-    assert.equal(PLAN_GATE_TIMEOUT, 345600);
-    assert.equal(planGateCommand(), `"${process.execPath}" "${BIN_PATH}" plan-gate`);
+    assert.equal(settings.hooks.PermissionRequest, undefined, 'the plan gate is opt-in');
 
     // Codex
     const agentsMd = read(h.p('.codex/AGENTS.md'));
@@ -265,7 +325,7 @@ describe('specreview install --apply', () => {
     // A file at that path that SpecReview did not write is backed up once before it is replaced.
     fs.writeFileSync(skill, 'my own skill\n');
     const r2 = await h.run(['install', '--apply', '--only', 'codex']);
-    assert.match(r2.stdout, /replaces a file SpecReview did not write \(backed up to SKILL\.md\.specreview-backup\)/);
+    assert.match(r2.stdout, /replaces an older or edited copy \(backed up to SKILL\.md\.specreview-backup\)/);
     assert.equal(read(`${skill}.specreview-backup`), 'my own skill\n');
   });
 });
@@ -312,7 +372,7 @@ describe('merging with existing config, and uninstall', () => {
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] },
       { matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] },
     ], 'the old PATH-relative specreview hook is replaced, not duplicated');
-    assert.equal(s.hooks.PermissionRequest[0].matcher, 'ExitPlanMode');
+    assert.equal(s.hooks.PermissionRequest, undefined);
 
     const cursor = read(h.p('.cursor/mcp.json'));
     assert.match(cursor, /^\{\n {4}"mcpServers": \{\n {8}"other"/, '4-space indentation kept');

@@ -51,6 +51,8 @@ export {};
  * @property {string} token Bearer token for /api/*
  * @property {string} secret HMAC key for per-doc content capability paths
  * @property {string} version package version
+ * @property {string} [root] real path of the package folder the daemon runs from
+ * @property {string} [build] fingerprint of the daemon's code files (core/util/build.js)
  * @property {string} startedAt
  */
 

@@ -23,7 +23,7 @@ import { findWorkspace } from '../../core/store/workspace.js';
 import { EXIT } from '../../shared/protocol.js';
 import { VENDOR_DOC, VENDOR_UI, listVendorDirs } from '../../shared/vendor.js';
 import { expectPositionals } from '../args.js';
-import { PACKAGE_ROOT, daemonStatus, ensureDaemon, packageVersion, stopDaemon } from '../daemon-client.js';
+import { PACKAGE_ROOT, daemonStatus, ensureDaemon, packageIdentity, packageVersion, stopDaemon } from '../daemon-client.js';
 import { isCode, isVirtual, snapshotNoun } from '../../core/store/snapshot.js';
 
 export const spec = {
@@ -133,15 +133,23 @@ function checkHome(add, fix) {
 async function checkServer(rt, add, fix) {
   const status = await (rt.deps.daemonStatus ?? daemonStatus)();
   const version = packageVersion();
+  const { root, build } = packageIdentity();
   if (status.running && status.info) {
     const where = `http://127.0.0.1:${status.info.uiPort} (content ${status.info.contentPort}, pid ${status.health?.pid ?? status.info.pid})`;
-    if (status.health?.version && status.health.version !== version) {
+    const otherVersion = Boolean(status.health?.version && status.health.version !== version);
+    if (otherVersion || status.health?.build !== build) {
+      // Same version but another build: another checkout (daemon.json `root`), or this one before its code changed.
+      const other = otherVersion
+        ? `version ${status.health?.version}, this CLI is ${version}`
+        : status.info.root && status.info.root !== root
+          ? `the code in ${status.info.root}, not ${root}`
+          : 'code that has changed since it started';
       if (fix) {
         await (rt.deps.stopDaemon ?? stopDaemon)({});
         const info = await rt.ensureDaemon();
-        add('fixed', 'server', `restarted the review server (was ${status.health.version}, now ${version}) at http://127.0.0.1:${info.uiPort}`);
+        add('fixed', 'server', `restarted the review server (it ran ${other}) at http://127.0.0.1:${info.uiPort}`);
       } else {
-        add('warn', 'server', `review server ${where} runs version ${status.health.version}, this CLI is ${version} (restarts on next open)`);
+        add('warn', 'server', `review server ${where} runs ${other} (restarts on next open)`);
       }
     } else {
       add('ok', 'server', `review server running at ${where}`);

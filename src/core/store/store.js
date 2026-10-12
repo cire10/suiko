@@ -33,6 +33,7 @@ import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
 import { CODE_KIND, codeEditRefusal, codePath, docKind, isCode, isVirtual, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
+import { DOC_KINDS } from '../../shared/protocol.js';
 
 const log = createLogger('store');
 
@@ -288,7 +289,8 @@ export class Store {
   // ---------------------------------------------------------------- docs
 
   /**
-   * Every tracked doc, sorted by id. Unreadable doc.json files are skipped with a warning.
+   * Every tracked doc, sorted by id. Unreadable doc.json files, and docs of a kind this version does not know (made
+   * by a newer SpecReview), are skipped with a warning.
    * @returns {Promise<Doc[]>}
    */
   async listDocs() {
@@ -299,7 +301,13 @@ export class Store {
       if (!DOC_ID_RE.test(name)) continue;
       try {
         const doc = await readJson(path.join(dir, name, 'doc.json'));
-        if (doc) docs.push(withDirId(doc, name));
+        if (!doc) continue;
+        const kind = unknownDocKind(doc);
+        if (kind) {
+          warnOnce(`${dir}/${name}`, `skipping doc ${name}: ${newerKindMessage(name, kind)}`);
+          continue;
+        }
+        docs.push(withDirId(doc, name));
       } catch (err) {
         log.warn(`skipping doc ${name}`, err);
       }
@@ -310,11 +318,15 @@ export class Store {
   /**
    * @param {string} docId
    * @returns {Promise<Doc | null>}
+   * @throws {RefusedError} the doc is of a kind this version does not know (made by a newer SpecReview)
    */
   async getDoc(docId) {
     if (typeof docId !== 'string' || !DOC_ID_RE.test(docId)) return null;
     const doc = await readJson(path.join(this.docDir(docId), 'doc.json'));
-    return doc ? withDirId(doc, docId) : null;
+    if (!doc) return null;
+    const kind = unknownDocKind(doc);
+    if (kind) throw new RefusedError(newerKindMessage(docId, kind), { details: { doc: docId, kind } });
+    return withDirId(doc, docId);
   }
 
   /**
@@ -1484,6 +1496,38 @@ function waiterDocId(docId) {
   const id = docId === '*' ? ALL_DOCS : docId;
   assertRuntimeDocId(id);
   return id;
+}
+
+/**
+ * The doc's kind when this version does not know it (DOC_KINDS; absent = 'file'), else null.
+ * @param {any} doc
+ * @returns {string | null}
+ */
+export function unknownDocKind(doc) {
+  const kind = doc?.kind;
+  return kind === undefined || DOC_KINDS.includes(kind) ? null : String(kind);
+}
+
+/**
+ * @param {string} docId
+ * @param {string} kind
+ * @returns {string}
+ */
+function newerKindMessage(docId, kind) {
+  return `${docId} is a ${JSON.stringify(kind)} doc, made by a newer SpecReview than this one (${DOC_KINDS.join(', ')}): run the specreview that made it, or update this one`;
+}
+
+/** Warnings already logged by this process (listDocs runs on every listing). */
+const warned = new Set();
+
+/**
+ * @param {string} key
+ * @param {string} message
+ */
+function warnOnce(key, message) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  log.warn(message);
 }
 
 /**

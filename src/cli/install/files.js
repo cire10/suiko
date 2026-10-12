@@ -209,7 +209,7 @@ export function stripInvocationNote(text) {
 }
 
 /**
- * Install a whole file. An existing file we did not write is backed up once before it is replaced.
+ * Install a whole file. An existing file that is not our copy (an older or edited one) is backed up before it is replaced.
  * @param {string} file
  * @param {string} content
  * @param {CopyOpts} [o]
@@ -238,7 +238,7 @@ export function copyAction(file, content, o = {}) {
       a.backupPath = prev === null ? once : stampedBackupPath(file);
       what = `backed up to ${path.basename(a.backupPath)}`;
     }
-    a.note = `${a.note ? `${a.note}; ` : ''}replaces a file SpecReview did not write (${what})`;
+    a.note = `${a.note ? `${a.note}; ` : ''}replaces an older or edited copy (${what})`;
   }
   return a;
 }
@@ -375,11 +375,13 @@ export function blockAction(file, block, m, o = {}) {
   const lines = block.split('\n').length;
   const from = o.source ? ` from ${o.source}` : '';
   const note =
-    current === null || current.trim() === ''
+    current === null
       ? `new file with ${what}${from} (${lines} lines)`
-      : findBlock(current, m)
-        ? `replaces ${what} between the specreview markers`
-        : `appends ${what}${from} (${lines} lines); the rest of the file is kept`;
+      : current.trim() === ''
+        ? `fills the empty file with ${what}${from} (${lines} lines)`
+        : findBlock(current, m)
+          ? `replaces ${what} between the specreview markers`
+          : `appends ${what}${from} (${lines} lines); the rest of the file is kept`;
   /** @type {FileAction} */
   const a = {
     path: file,
@@ -475,11 +477,13 @@ export function tomlBlockAction(file, current, blk, block, ours, o) {
     : '';
   const lines = block.split('\n').length;
   const note =
-    current === null || current.trim() === ''
+    current === null
       ? `new file with ${o.what} (${lines} lines)`
-      : blk.region
-        ? `replaces ${o.what} between the specreview markers${moved}`
-        : `appends ${o.what} (${lines} lines); the rest of the file is kept`;
+      : current.trim() === ''
+        ? `fills the empty file with ${o.what} (${lines} lines)`
+        : blk.region
+          ? `replaces ${o.what} between the specreview markers${moved}`
+          : `appends ${o.what} (${lines} lines); the rest of the file is kept`;
   return {
     path: file,
     action: current === null ? 'create' : current === content ? 'unchanged' : 'update',

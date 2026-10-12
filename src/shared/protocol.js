@@ -177,7 +177,11 @@ export const LIMITS = Object.freeze({
   urlLowTextChars: 200,
 });
 
-/** Doc kinds (doc.json `kind`; absent means 'file'). 'snapshot' and 'code' are virtual: no working file of their own. */
+/**
+ * Doc kinds this version understands (doc.json `kind`; absent means 'file'). 'snapshot' and 'code' are virtual: no
+ * working file of their own. A doc of any other kind was made by a newer SpecReview: it is left out of listings and
+ * refused by id, never treated as a file doc (core/store/store.js, cli/hooks.js). A new kind must be added here.
+ */
 export const DOC_KINDS = Object.freeze(['file', 'snapshot', 'code']);
 
 /** CodeSpec.mode values: what a code review compares (see types.js CodeSpec). */

@@ -28,7 +28,7 @@ import { findWorkspace, initStoreDir } from '../../core/store/workspace.js';
 import { formatOfPath, isDeniedPath, isWithin } from '../../core/util/paths.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
-import { shellArg } from '../format.js';
+import { lineCount, shellArg } from '../format.js';
 import { readAllBytes } from '../io.js';
 import { decodeText } from '../../core/util/stable-read.js';
 import { callOp, openContext, realpathOr, wsIdOfContext } from '../runtime.js';
@@ -552,7 +552,7 @@ function describe(t, url, daemonError, browser, ref) {
   const { doc } = t;
   const out = [];
   if (t.created) {
-    out.push(`specreview: tracking ${doc.path} as "${doc.id}" (${doc.format}, ${t.lines} lines) · recorded v${t.version}`);
+    out.push(`specreview: tracking ${doc.path} as "${doc.id}" (${doc.format}, ${lineCount(t.lines)}) · recorded v${t.version}`);
   } else {
     const dirty = t.workingDirty ? ` · working copy differs from v${doc.head ?? t.version} (unrecorded)` : '';
     out.push(`specreview: ${doc.path} is already tracked as "${doc.id}" (head v${doc.head ?? t.version})${dirty}`);

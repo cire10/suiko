@@ -483,7 +483,7 @@ Both hooks read the hook JSON on stdin, print nothing on any error, always exit 
 
   The note is capped at 1,000 characters. When the current directory has no workspace at or above it, the workspaces registered by `open` below it are checked instead, and the suggested command names the workspace (`specreview feedback token-service --workspace notes/specs`).
 
-The plugin registers the hooks as `specreview hook pre-write` and `specreview hook prompt` (the binary on `PATH`). `specreview install claude --with-hooks --apply` writes them into settings with absolute paths instead. The plugin's `hooks/hooks.json` also registers the plan gate below. `specreview install` (all agents) installs it for Claude Code; `install claude --with-hooks` adds it only with `--with-plan-gate`.
+The plugin registers the hooks as `specreview hook pre-write` and `specreview hook prompt` (the binary on `PATH`). `specreview install claude --with-hooks --apply` writes them into settings with absolute paths instead. The plan gate below is opt-in: neither the plugin nor `specreview install` registers it unless asked with `--with-plan-gate` (on `install` or `install claude`). A gate already in settings is kept, and re-pointed, by later installs.
 
 **Plan-mode gate.** `specreview plan-gate` is a PermissionRequest hook (matcher `ExitPlanMode`, timeout 345600 s) that runs the full CLI, not the fast hook path:
 
