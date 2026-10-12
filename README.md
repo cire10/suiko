@@ -10,9 +10,9 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 
 ![Review mode: the rendered spec with highlighted threads, pins and the thread panel](docs/img/review-mode.png)
 
-![Changes mode after a revision: change bars, inserted words, "⊖ was" tabs, thread badges and the change list](docs/img/changes-mode.png)
+![Changes mode after a revision: change bars, inserted words, a removed-line tab, thread badges, the change list and a redrawn image](docs/img/changes-mode.png)
 
-![The Verify queue: an "Addressed in v2" suggestion card with its mini-diff](docs/img/verify.png)
+![The Verify queue: a blocking thread "Addressed in v2", with the mini-diff of the change that addressed it](docs/img/verify.png)
 
 - [Why](#why)
 - [How it works](#how-it-works)
