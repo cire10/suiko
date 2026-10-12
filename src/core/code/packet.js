@@ -283,16 +283,16 @@ export function codeLineBasis(snap, threads) {
 export function codeNextStep(doc, ref, { approved, finalNow }, actionable) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (approved && actionable === 0) {
-    return finalNow ? `specreview final ${ref} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
+    return finalNow ? `suiko final ${ref} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
   }
   if (approved && finalNow) {
-    return `approved: answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined (no edits, no new round) -> specreview final ${ref} --decisions   (then stop waiting)`;
+    return `approved: answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined (no edits, no new round) -> suiko final ${ref} --decisions   (then stop waiting)`;
   }
-  if (actionable === 0) return `nothing to act on; specreview wait ${ref} (background)`;
+  if (actionable === 0) return `nothing to act on; suiko wait ${ref} (background)`;
   const spec = /** @type {any} */ (doc.code ?? {});
-  if (spec.mode === 'staged') return `edit the files -> git add <files> -> specreview revise ${ref} --replies - -> specreview wait ${ref} (background)`;
+  if (spec.mode === 'staged') return `edit the files -> git add <files> -> suiko revise ${ref} --replies - -> suiko wait ${ref} (background)`;
   if ((spec.mode === 'branch' || spec.mode === 'range') && !isFixedEndpoint(spec)) {
-    return `edit -> commit -> specreview revise ${ref} --replies - -> specreview wait ${ref} (background)`;
+    return `edit -> commit -> suiko revise ${ref} --replies - -> suiko wait ${ref} (background)`;
   }
-  return `edit the files -> specreview revise ${ref} --replies - (records round v${(doc.head ?? 0) + 1} from your working tree) -> specreview wait ${ref} (background)`;
+  return `edit the files -> suiko revise ${ref} --replies - (records round v${(doc.head ?? 0) + 1} from your working tree) -> suiko wait ${ref} (background)`;
 }

@@ -61,7 +61,7 @@ export async function waitForFeedback(ctx, opts = {}) {
   const listDocs = async () => (all ? (await ctx.store.listDocs()).filter((d) => !isGated(d)) : Promise.all(refs.map((r) => resolveDoc(ctx, r))));
 
   const initial = await listDocs();
-  if (!initial.length) throw new NotFoundError('no tracked docs to wait for (run specreview open <file> first)');
+  if (!initial.length) throw new NotFoundError('no tracked docs to wait for (run suiko open <file> first)');
   for (const doc of initial) {
     if (doc.state === 'closed') return { status: 'closed', packets: [], text: '', docId: doc.id };
     if (!allowDirty && doc.head && !(all && isVirtual(doc))) {

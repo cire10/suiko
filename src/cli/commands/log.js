@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview log <doc> [--json]` (design 9.6): the timeline of versions and reviews (engine log + formatLog).
+// `suiko log <doc> [--json]` (design 9.6): the timeline of versions and reviews (engine log + formatLog).
 
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';

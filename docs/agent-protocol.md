@@ -1,8 +1,8 @@
-<!-- The complete, agent-agnostic SpecReview protocol: commands, waiting, the feedback packet, edits, the revise JSON, guards and recovery. The Claude Code skill (integrations/claude-code/skills/spec-review/) and the AGENTS.md snippet (integrations/agents-md/) are condensed forms of this document; keep them in sync. -->
+<!-- The complete, agent-agnostic Suiko protocol: commands, waiting, the feedback packet, edits, the revise JSON, guards and recovery. The Claude Code skill (integrations/claude-code/skills/spec-review/) and the AGENTS.md snippet (integrations/agents-md/) are condensed forms of this document; keep them in sync. -->
 
-# SpecReview agent protocol
+# Suiko agent protocol
 
-This is the contract between SpecReview and the coding agent that writes and revises specs. It applies to every agent: Claude Code (through the `spec-review` skill), Codex, Gemini CLI, any MCP client, or a person at a terminal. The CLI's text and JSON output, its exit codes and the MCP tools are the whole interface. SpecReview never calls an LLM.
+This is the contract between Suiko and the coding agent that writes and revises specs. It applies to every agent: Claude Code (through the `spec-review` skill), Codex, Gemini CLI, any MCP client, or a person at a terminal. The CLI's text and JSON output, its exit codes and the MCP tools are the whole interface. Suiko never calls an LLM.
 
 Contents:
 
@@ -47,21 +47,21 @@ Versions are created only by `open` (v1), `revise`, and the reviewer's **Record 
 ## 2. The loop at a glance
 
 ```text
-agent writes the spec once ──> specreview open <file>            (records v1, prints the UI URL)
+agent writes the spec once ──> suiko open <file>            (records v1, prints the UI URL)
                                show the URL to the reviewer
-                               specreview wait <doc>             (background, foreground, or "done" mode)
+                               suiko wait <doc>             (background, foreground, or "done" mode)
 reviewer comments, submits ──> wait exits 0 and prints the packet
-agent reads the file, makes targeted edits (Edit tool or specreview edit), then specreview apply for suggestions
-                               specreview revise <doc> --replies -   (records v2, links hunks to threads, runs guards)
+agent reads the file, makes targeted edits (Edit tool or suiko edit), then suiko apply for suggestions
+                               suiko revise <doc> --replies -   (records v2, links hunks to threads, runs guards)
                                reports to the user, waits again
 reviewer verifies changes  ──> accepts / reopens / replies, submits again ... until APPROVED
-                               specreview final <doc> --decisions
+                               suiko final <doc> --decisions
 ```
 
 ## 3. Conventions
 
 - **`<doc>`** is a doc id or a file path. An id is looked up in the workspace of the current directory; when it is not tracked there (or the directory has none, e.g. a project without git whose `.specreview/` sits next to the specs), in the workspaces `open` registered below or above the current directory. An id tracked in several of them is an error naming them: pass the file path or `--workspace <dir>`.
-- **Line numbers** are 1-based lines of the **current working file**. `L42-43` is inclusive. Hunk ranges inside SpecReview are half-open, but every range printed for the agent is an inclusive `L<a>-<b>`.
+- **Line numbers** are 1-based lines of the **current working file**. `L42-43` is inclusive. Hunk ranges inside Suiko are half-open, but every range printed for the agent is an inclusive `L<a>-<b>`.
 - **Output** is compact text; `--json` (where listed) prints the same data structured.
 - **Agent name** (used for delivery and presence): `--as <name>`, else `$SPECREVIEW_AGENT`, else `claude` when `$CLAUDECODE` is set, else `agent`.
 - **Environment:** `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; the content port is UI port + 1).
@@ -74,16 +74,16 @@ reviewer verifies changes  ──> accepts / reopens / replies, submits again ..
 | 2 | TIMEOUT | `wait --timeout` expired |
 | 3 | REFUSED | A guard refused, the working copy is dirty, a compare-and-swap conflict, or `old` is not unique |
 | 4 | NOT_FOUND | Doc, thread or version not found |
-| 5 | CLOSED | The review session was closed (UI or `specreview close`) |
+| 5 | CLOSED | The review session was closed (UI or `suiko close`) |
 | 6 | SUPERSEDED | A newer `wait` for the same doc and agent replaced this one; ignore it |
 
 ## 4. Starting a review
 
 ```text
-$ specreview open docs/specs/token-service.md
-specreview: tracking docs/specs/token-service.md as "token-service" (markdown, 212 lines) · recorded v1
+$ suiko open docs/specs/token-service.md
+suiko: tracking docs/specs/token-service.md as "token-service" (markdown, 212 lines) · recorded v1
 review UI: http://127.0.0.1:4777/d/3f9a1c2e/token-service?k=Zx81Qm0v7c
-next: the URL was opened in the system browser; run `specreview wait token-service` in the background
+next: the URL was opened in the system browser; run `suiko wait token-service` in the background
 ```
 
 - `open` creates `.specreview/` at the workspace root if needed, records v1 (the source bytes plus snapshots of local images and other assets), and starts the local server in the background if it is not running.
@@ -103,21 +103,21 @@ next: the URL was opened in the system browser; run `specreview wait token-servi
 
 | Strategy | When | How |
 |---|---|---|
-| Background CLI wait | Claude Code (primary) | Bash `specreview wait <doc>` with `run_in_background: true`, then end the turn. No tokens are spent while waiting; the agent is re-invoked when it exits. |
-| Foreground CLI wait | Agents whose shell can block for minutes | `specreview wait <doc> --timeout 10m`; exit 2 means run it again. |
-| MCP wait | MCP-only agents | Call `specreview_wait` repeatedly; it returns `{"status":"waiting"}` after `timeout_sec` (default 50, max 600). |
-| Done mode | Agents with short shell timeouts | The user says "done"; run `specreview feedback <doc> --include-drafts`. |
+| Background CLI wait | Claude Code (primary) | Bash `suiko wait <doc>` with `run_in_background: true`, then end the turn. No tokens are spent while waiting; the agent is re-invoked when it exits. |
+| Foreground CLI wait | Agents whose shell can block for minutes | `suiko wait <doc> --timeout 10m`; exit 2 means run it again. |
+| MCP wait | MCP-only agents | Call `suiko_wait` repeatedly; it returns `{"status":"waiting"}` after `timeout_sec` (default 50, max 600). |
+| Done mode | Agents with short shell timeouts | The user says "done"; run `suiko feedback <doc> --include-drafts`. |
 | Prompt hook | Claude Code safety net | Injects a note when a submitted review was not delivered (see [section 14](#14-claude-code-hooks)). |
-| Polling | Scripts | `specreview status --json` reports undelivered reviews. |
+| Polling | Scripts | `suiko status --json` reports undelivered reviews. |
 
 `wait` details:
 
-- It exits 3 immediately if the working copy differs from head (`run specreview revise first`), unless `--allow-dirty`.
+- It exits 3 immediately if the working copy differs from head (`run suiko revise first`), unless `--allow-dirty`.
 - It returns immediately if undelivered reviews exist; otherwise it blocks until a review is submitted or the session is closed (exit 5). The packet covers **all** undelivered reviews for that doc.
 - `wait --all` waits on every doc in the workspace, except Claude Code plans (their reviews go to the plan gate).
-- While it runs, the UI shows "**claude is listening**" (presence comes from a heartbeat file). On stderr it prints `specreview: waiting for a review of <doc> vN (as claude). Safe to interrupt; nothing is lost.`
-- Only one `wait` per doc and agent is live. Starting a new one makes the older one print `specreview: superseded by pid N (a newer wait is listening); ignore this.` and exit 6.
-- **Single comments.** The reviewer can send one comment at once instead of a whole review (**Send now** in the UI, or `specreview snip --send`). It arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again.
+- While it runs, the UI shows "**claude is listening**" (presence comes from a heartbeat file). On stderr it prints `suiko: waiting for a review of <doc> vN (as claude). Safe to interrupt; nothing is lost.`
+- Only one `wait` per doc and agent is live. Starting a new one makes the older one print `suiko: superseded by pid N (a newer wait is listening); ignore this.` and exit 6.
+- **Single comments.** The reviewer can send one comment at once instead of a whole review (**Send now** in the UI, or `suiko snip --send`). It arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again.
 - **Delivery and acknowledgement.** A review is marked delivered only after the packet has been written to stdout, so a killed `wait` re-delivers next time. The agent's next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. The UI shows "Delivered to claude 14:02", then "revising…".
 
 ## 6. The feedback packet
@@ -141,7 +141,7 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
   crop: /home/eric/proj/.specreview/docs/token-service/attachments/a1.png  (Read it to see the region)
   Eric: Does the gateway sit in front of the auth service or beside it? The arrow is ambiguous.
 
-[t3] suggestion · L120 · §5.1 Retries · apply verbatim: specreview apply token-service t3
+[t3] suggestion · L120 · §5.1 Retries · apply verbatim: suiko apply token-service t3
   - The client MUST retry 3 times.
   + The client MUST retry up to 5 times with exponential backoff (base 200 ms, full jitter).
   Eric: Match the platform retry policy.
@@ -152,9 +152,9 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
   Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
-NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
+NEXT: edits -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
 ```
 
 ### 6.2 Text form (later rounds and approval)
@@ -178,13 +178,13 @@ Reviewer summary: Close. Caption still unclear.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L173-199)
 DECISIONS to keep true: D1 (t1) 30 s reuse-detection grace window · D2 (t3) retries: up to 5, exponential backoff, full jitter
-NEXT: edits -> specreview revise token-service --replies - -> specreview wait token-service (background)
+NEXT: edits -> suiko revise token-service --replies - -> suiko wait token-service (background)
 ```
 
 ```text
 SPECREVIEW FEEDBACK · token-service · review rv3 on v3 · APPROVED · FINAL = v3
 0 threads need action · 7 resolved · 0 open
-NEXT: specreview final token-service --decisions   (then stop waiting)
+NEXT: suiko final token-service --decisions   (then stop waiting)
 ```
 
 ### 6.3 Text grammar
@@ -218,13 +218,13 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
   - `data:` URIs: elided as `data:image/png;base64,...(512 KB)` (`srcEditable: false`).
   - At most 1,200 characters of `src>` per thread.
 - **`crop:`** an absolute path to a PNG of the reviewer's region. Asset paths are absolute too.
-- **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc (`b`; `(Read it to see what the reviewer snipped)`), a screenshot of anything on their screen (`B`, `specreview snip`) or a pasted image (`(Read it to see the image the reviewer attached)`). PNG, or JPEG for very large screenshots. A thread can have several.
+- **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc (`b`; `(Read it to see what the reviewer snipped)`), a screenshot of anything on their screen (`B`, `suiko snip`) or a pasted image (`(Read it to see the image the reviewer attached)`). PNG, or JPEG for very large screenshots. A thread can have several.
 - **Pictures are part of the comment.** The agent MUST open every `crop:` and `image:` file before acting on that thread (Claude Code: the Read tool). The comment text often only makes sense with the picture ("this arrow", "this is what it looks like now").
-- **Suggestion:** `apply verbatim: specreview apply <doc> <tid>` in the header, then `- old` / `+ new` lines.
-- **Conversation:** the last agent reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment after it. Older comments collapse to `(+2 earlier, specreview show <doc> t2)`.
-- **Anchor notes:** `(outdated: text changed)`; `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)`.
+- **Suggestion:** `apply verbatim: suiko apply <doc> <tid>` in the header, then `- old` / `+ new` lines.
+- **Conversation:** the last agent reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment after it. Older comments collapse to `(+2 earlier, suiko show <doc> t2)`.
+- **Anchor notes:** `(outdated: text changed)`; `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)`.
 - **Footer:** `LOCKED (agreed - do not modify): …`, `DECISIONS to keep true: …`, drafts (only with `--include-drafts`, labelled as not submitted), `PROTOCOL: …`, `NEXT: …`.
-- **Size cap:** 10,000 characters. Threads beyond the cap are listed one per line with `specreview show <doc> tN`.
+- **Size cap:** 10,000 characters. Threads beyond the cap are listed one per line with `suiko show <doc> tN`.
 
 ### 6.4 JSON form (`--json`, MCP `structuredContent`)
 
@@ -241,7 +241,7 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
  "locks":[{"id":"L1","lines":[170,196],"section":["7 Rollout plan"]}],
  "decisions":[],"drafts":null,
  "counts":{"actionable":4,"new":4,"reopened":0,"reply":0,"answer":0,"awaitingReviewer":0,"resolved":0,"outdated":0},
- "next":"targeted edits, then: specreview revise token-service --replies -"}
+ "next":"targeted edits, then: suiko revise token-service --replies -"}
 ```
 
 - `why`: `new`, `reopened`, `reply` or `answer`.
@@ -251,7 +251,7 @@ NEXT: specreview final token-service --decisions   (then stop waiting)
 
 ### 6.5 Pictures: snips and screenshots
 
-Reviewers attach pictures with one key: `b` snips any area of the rendered doc, `B` (or `specreview snip`, often bound to a global hotkey) captures anything on their screen. Such threads look like this:
+Reviewers attach pictures with one key: `b` snips any area of the rendered doc, `B` (or `suiko snip`, often bound to a global hotkey) captures anything on their screen. Such threads look like this:
 
 ```text
 [t5] comment · L60-64 · §2 Request flow · snip (figure + 2 paragraphs)
@@ -279,7 +279,7 @@ Reviewers attach pictures with one key: `b` snips any area of the rendered doc, 
 
 | Thread | Action | Reply status |
 |---|---|---|
-| suggestion | `specreview apply <doc> <tid>`; never retype it | `addressed` (an automatic reply is added if you give none) |
+| suggestion | `suiko apply <doc> <tid>`; never retype it | `addressed` (an automatic reply is added if you give none) |
 | comment you agree with | Targeted edit replacing the `src>` text | `addressed` |
 | question | Answer in the reply; edit only if the answer belongs in the spec | `answered`, or `addressed` if you edited |
 | disagree | No edit; explain why | `declined` |
@@ -293,23 +293,23 @@ Reviewers attach pictures with one key: `b` snips any area of the rendered doc, 
 **Editing rules:**
 
 1. Make the smallest local change. Keep the surrounding formatting; never re-wrap paragraphs or reformat tables you were not asked to touch.
-2. Do all Edit-tool (or `specreview edit`) edits first. Then run `specreview apply <doc> <tid...>` for suggestions. `apply` rewrites the file, so re-read it before any later edit. If your editor reports the file changed since it was read, re-read and retry.
+2. Do all Edit-tool (or `suiko edit`) edits first. Then run `suiko apply <doc> <tid...>` for suggestions. `apply` rewrites the file, so re-read it before any later edit. If your editor reports the file changed since it was read, re-read and retry.
 3. Edit bottom-up, or locate text by the `src>` string rather than by line numbers.
 4. Never write the whole file again, never regenerate it, never touch locked text, and never make drive-by edits.
 5. Never revert a change you did not make. The reviewer, a formatter or another tool may have edited the file.
 
-**`specreview apply <doc> <tid...> [--dry-run]`** maps the thread's anchored range from head to the working copy. If the expected text is there, it is replaced. Otherwise, if it occurs exactly once, or one occurrence is within 2,000 characters of the expected place, that one is replaced. Otherwise it reports `conflict t3: expected text not found near L120; treat as a normal comment` (exit 3). On success the edit is tagged to the thread and the suggestion becomes `staged`; it becomes `applied` when the next `revise` records it.
+**`suiko apply <doc> <tid...> [--dry-run]`** maps the thread's anchored range from head to the working copy. If the expected text is there, it is replaced. Otherwise, if it occurs exactly once, or one occurrence is within 2,000 characters of the expected place, that one is replaced. Otherwise it reports `conflict t3: expected text not found near L120; treat as a normal comment` (exit 3). On success the edit is tagged to the thread and the suggestion becomes `staged`; it becomes `applied` when the next `revise` records it.
 
 ```text
-$ specreview apply token-service t3
+$ suiko apply token-service t3
 applied t3 at L120 (exact) · staged (not recorded yet)
 ```
 
-**`specreview edit`** is an exact replace tagged to threads, with Edit-tool semantics: `old` must occur exactly once unless `--all`.
+**`suiko edit`** is an exact replace tagged to threads, with Edit-tool semantics: `old` must occur exactly once unless `--all`.
 
 ```bash
-specreview edit token-service --thread t1 --old "rotated on every use" --new "rotated with a 30 s reuse-detection grace window"
-specreview edit token-service --stdin <<'JSON'
+suiko edit token-service --thread t1 --old "rotated on every use" --new "rotated with a 30 s reuse-detection grace window"
+suiko edit token-service --stdin <<'JSON'
 [{"threads": ["t1"], "old": "rotated on every use", "new": "rotated with a 30 s grace window"},
  {"threads": ["t4"], "old": "| refresh_token | opaque | 30d |", "new": "| refresh_token (user) | opaque | 30d |", "all": false}]
 JSON
@@ -320,7 +320,7 @@ JSON
 ### 8.1 Input
 
 ```bash
-specreview revise token-service --replies - <<'JSON'
+suiko revise token-service --replies - <<'JSON'
 {"summary": "rv1: grace window, retry policy, figure caption",
  "threads": {
   "t1": {"status": "addressed", "reply": "Replaced rotate-every-use with a 30 s reuse-detection grace window; added rationale."},
@@ -354,7 +354,7 @@ Flags: `-m <summary>`, `--replies <file|->`, `--dry-run` (print the full report,
 ### 8.3 Report
 
 ```text
-specreview: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
+suiko: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
   h1 L42-46  §3.2 Token refresh  -> t1 addressed  (overlap)
   h2 L90-91  §4 Architecture     -> t2 addressed  (hint)
   h3 L120    §5.1 Retries        -> t3 addressed  (tagged: apply)
@@ -362,27 +362,27 @@ specreview: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to 
   t4 needs_input (reply only)
 guards: ok · lock L1 untouched · no unexplained deletions · rewrite 4%
 anchors: 4 threads + 1 lock -> 1 exact, 1 moved, 3 edited, 0 changed, 0 orphaned
-reviewer notified (1 UI open). next: specreview wait token-service (background)
+reviewer notified (1 UI open). next: suiko wait token-service (background)
 ```
 
 ### 8.4 Refusal
 
 ```text
-specreview: REFUSED - nothing recorded (exit 3)
+suiko: REFUSED - nothing recorded (exit 3)
   ERR lock: h5 L171-174 changes L1 §7 Rollout plan (agreed in rv1)
-      fix: specreview revert token-service --hunk h5   or   --break-lock L1="<reason>"
+      fix: suiko revert token-service --hunk h5   or   --break-lock L1="<reason>"
   ERR deletion: h6 removes 14 lines (v1 L201-214, §8 Open questions) linked to no thread
-      fix: specreview revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
+      fix: suiko revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
   WARN t2 marked addressed but no hunk is linked to it (add "at":"L90-91" if you changed it)
 working copy left untouched. Preview with --dry-run.
 ```
 
-Follow the printed `fix:` lines. Revert hunks that were your mistake (`specreview revert <doc> --hunk hN`), explain intended changes with `other`, and add `at` hints. For a lock, ask the reviewer (`needs_input`) unless the user explicitly asked you to break it. Never revert a hunk you did not make; explain it instead.
+Follow the printed `fix:` lines. Revert hunks that were your mistake (`suiko revert <doc> --hunk hN`), explain intended changes with `other`, and add `at` hints. For a lock, ask the reviewer (`needs_input`) unless the user explicitly asked you to break it. Never revert a hunk you did not make; explain it instead.
 
 ### 8.5 Replying without a version
 
 ```bash
-specreview reply token-service t2 -m "It sits in front; see the caption at L90." --status answered
+suiko reply token-service t2 -m "It sits in front; see the caption at L90." --status answered
 ```
 
 `reply` accepts `--status answered|declined|needs_input|addressed`, `--at L42-46` and `--decision "text"`. Exit 4 if the thread does not exist.
@@ -419,7 +419,7 @@ Local assets are snapshotted per version. A changed image counts as a change to 
 
 ## 10. Anchors, re-anchoring and agent questions
 
-After every version, SpecReview re-anchors every thread and lock against the new source, one version at a time: untouched text first, then text inside linked hunks, then exact matches elsewhere, then fuzzy matches, then the thread's original anchor.
+After every version, Suiko re-anchors every thread and lock against the new source, one version at a time: untouched text first, then text inside linked hunks, then exact matches elsewhere, then fuzzy matches, then the thread's original anchor.
 
 | State | Meaning | Packet |
 |---|---|---|
@@ -427,14 +427,14 @@ After every version, SpecReview re-anchors every thread and lock against the new
 | `moved` | Same text, different place | lines |
 | `edited` | Changed by a hunk linked to the thread | lines of the new text |
 | `changed` | The quoted text was edited without a link ("outdated") | `(outdated: text changed)` |
-| `orphaned` | Not found | `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)` |
+| `orphaned` | Not found | `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)` |
 
-- **Move an anchor:** `specreview reanchor <doc> <tid> --lines A-B` or `--quote "exact text"`. It applies to head when the working copy is clean; otherwise it is staged until the next `revise`.
-- **Ask the reviewer:** `specreview ask <doc> --quote "exact text" -m "question"` (or `--lines A-B`) creates an `agent-question` thread with status `needs_input`. The answer arrives in a later packet as `ANSWER`.
+- **Move an anchor:** `suiko reanchor <doc> <tid> --lines A-B` or `--quote "exact text"`. It applies to head when the working copy is clean; otherwise it is staged until the next `revise`.
+- **Ask the reviewer:** `suiko ask <doc> --quote "exact text" -m "question"` (or `--lines A-B`) creates an `agent-question` thread with status `needs_input`. The answer arrives in a later packet as `ANSWER`.
 
 ## 11. Locks and decisions
 
-- **Locks** ("Mark agreed" in the UI) are hard guarantees. `revise` refuses a version in which the agreed text is not intact. `specreview revert <doc> --lock L1` writes the agreed text back. Breaking a lock (`--break-lock L1="reason"`) records the break, deactivates the lock and shows a red badge until the reviewer re-locks it.
+- **Locks** ("Mark agreed" in the UI) are hard guarantees. `revise` refuses a version in which the agreed text is not intact. `suiko revert <doc> --lock L1` writes the agreed text back. Breaking a lock (`--break-lock L1="reason"`) records the break, deactivates the lock and shows a red badge until the reviewer re-locks it.
 - **Decisions** are soft. The reviewer records one when accepting a thread ("Record as decision"). A hunk that touches a decision's text, without being linked to that decision's thread, is a warning, and every packet lists decisions under `DECISIONS to keep true`.
 
 ## 12. Approval and the final version
@@ -442,13 +442,13 @@ After every version, SpecReview re-anchors every thread and lock against the new
 When the reviewer approves with "Mark vN final", the packet says `APPROVED · FINAL = vN`. Then:
 
 ```text
-$ specreview final token-service --decisions
+$ suiko final token-service --decisions
 final: token-service = v3 (approved in rv3 by Eric; 3 versions, 3 reviews, 7 threads resolved, 2 decisions)
 working copy matches v3: ok
 wrote docs/specs/token-service.decisions.md
 ```
 
-If the same submission also reopened a thread or answered a question, the packet lists those threads and NEXT says to answer each with `specreview reply <doc> <tid> -m … --status answered|declined` (no edits, no new version) before running `final`; without a status the thread stays open.
+If the same submission also reopened a thread or answered a question, the packet lists those threads and NEXT says to answer each with `suiko reply <doc> <tid> -m … --status answered|declined` (no edits, no new version) before running `final`; without a status the thread stays open.
 
 `final` exits 3 if the working copy does not match the final version. `--out <dir>` changes where the decisions file is written. A later `revise` puts the doc back in review; the earlier final stays in the history.
 
@@ -456,36 +456,36 @@ If the same submission also reopened a thread or answered a question, the packet
 
 | Situation | Do |
 |---|---|
-| The user says "done" or "submitted" but no packet arrived | `specreview feedback <doc> --include-drafts`. If it lists only drafts, ask the user to click **Submit review**. Do not act on drafts. |
-| The background wait died (agent restarted) | `specreview feedback <doc>`; the prompt hook also reminds you. |
+| The user says "done" or "submitted" but no packet arrived | `suiko feedback <doc> --include-drafts`. If it lists only drafts, ask the user to click **Submit review**. Do not act on drafts. |
+| The background wait died (agent restarted) | `suiko feedback <doc>`; the prompt hook also reminds you. |
 | `wait` exits 3 | The working copy has unrecorded edits. Record them with `revise`, then wait. If they are not yours, ask the user (the UI offers **Record as my revision**). |
 | `wait` exits 6 | Another `wait` took over. Ignore it. |
-| The user mentions "t4" | `specreview show <doc> t4` |
-| You need old text | `specreview show <doc> --version N --lines A-B` |
-| What changed between versions | `specreview diff <doc> v1..v2 --stat` or `--unified` |
+| The user mentions "t4" | `suiko show <doc> t4` |
+| You need old text | `suiko show <doc> --version N --lines A-B` |
+| What changed between versions | `suiko diff <doc> v1..v2 --stat` or `--unified` |
 
 ## 14. Claude Code hooks
 
 Both hooks read the hook JSON on stdin, print nothing on any error, always exit 0, and finish quickly.
 
-- **`specreview hook pre-write`** (PreToolUse, matcher `Write`). If the target is a tracked doc with at least one review, its state is not `closed`, and `guards.writeHook` is not `off`, it compares the new content with the file. If more than `guards.writeHookRatio` (0.4) of the lines would change, it denies the Write:
+- **`suiko hook pre-write`** (PreToolUse, matcher `Write`). If the target is a tracked doc with at least one review, its state is not `closed`, and `guards.writeHook` is not `off`, it compares the new content with the file. If more than `guards.writeHookRatio` (0.4) of the lines would change, it denies the Write:
 
   ```json
-  {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"docs/specs/token-service.md is under SpecReview (v2, 3 open threads, L1 locked). Use Edit for targeted changes (or specreview apply/edit). If the user explicitly asked for a full rewrite, use `specreview revise --allow-rewrite` after writing with Edit."}}
+  {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"docs/specs/token-service.md is under Suiko (v2, 3 open threads, L1 locked). Use Edit for targeted changes (or suiko apply/edit). If the user explicitly asked for a full rewrite, use `suiko revise --allow-rewrite` after writing with Edit."}}
   ```
 
   With `guards.writeHook: "warn"` it returns `"ask"` instead, so the user decides.
-- **`specreview hook prompt`** (UserPromptSubmit). For docs in the current workspace, it adds context when a submitted review was not delivered and no live `wait` exists, or was delivered more than about 5 minutes ago and never acknowledged:
+- **`suiko hook prompt`** (UserPromptSubmit). For docs in the current workspace, it adds context when a submitted review was not delivered and no live `wait` exists, or was delivered more than about 5 minutes ago and never acknowledged:
 
   ```json
-  {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"specreview: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run `specreview feedback token-service` and address it per the spec-review skill."}}
+  {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"suiko: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run `suiko feedback token-service` and address it per the spec-review skill."}}
   ```
 
-  The note is capped at 1,000 characters. When the current directory has no workspace at or above it, the workspaces registered by `open` below it are checked instead, and the suggested command names the workspace (`specreview feedback token-service --workspace notes/specs`).
+  The note is capped at 1,000 characters. When the current directory has no workspace at or above it, the workspaces registered by `open` below it are checked instead, and the suggested command names the workspace (`suiko feedback token-service --workspace notes/specs`).
 
-The plugin registers the hooks as `specreview hook pre-write` and `specreview hook prompt` (the binary on `PATH`). `specreview install claude --with-hooks --apply` writes them into settings with absolute paths instead. The plan gate below is opt-in: neither the plugin nor `specreview install` registers it unless asked with `--with-plan-gate` (on `install` or `install claude`). A gate already in settings is kept, and re-pointed, by later installs.
+The plugin registers the hooks as `suiko hook pre-write` and `suiko hook prompt` (the binary on `PATH`). `suiko install claude --with-hooks --apply` writes them into settings with absolute paths instead. The plan gate below is opt-in: neither the plugin nor `suiko install` registers it unless asked with `--with-plan-gate` (on `install` or `install claude`). A gate already in settings is kept, and re-pointed, by later installs.
 
-**Plan-mode gate.** `specreview plan-gate` is a PermissionRequest hook (matcher `ExitPlanMode`, timeout 345600 s) that runs the full CLI, not the fast hook path:
+**Plan-mode gate.** `suiko plan-gate` is a PermissionRequest hook (matcher `ExitPlanMode`, timeout 345600 s) that runs the full CLI, not the fast hook path:
 
 - It reads the plan from `tool_input.planFilePath` when that is an absolute path to a regular `.md` file under 2 MB (a symlink only when its target is one too), else from `tool_input.plan`, and records it as a snapshot doc (section 19) with the origin key `claude-plan:<session_id>:<planFilePath or "inline">`, in the workspace of `$CLAUDE_PROJECT_DIR` (else the hook's `cwd`). The first ExitPlanMode records v1; each later one for the same plan file records the next version, so the reviewer sees a diff. Open threads that the new version's changes are linked to get the reply `Changed in vN.` (status addressed), since Claude has no reply channel at the gate.
 - It opens the review UI in the system browser (unless `--browser none` or `$SPECREVIEW_BROWSER=none`; `pane` means the system browser here, since a hook cannot drive the agent's pane) and blocks until a review of that version is submitted (`--timeout` gives up; by default it waits until Claude Code cancels it). Plan reviews belong to the gate: `wait --all` and a `wait` without a doc skip plan docs. A gate whose version is no longer the doc's head (a newer ExitPlanMode recorded a later one) steps aside.
@@ -498,36 +498,36 @@ The plugin registers the hooks as `specreview hook pre-write` and `specreview ho
 - **Request changes** or **Comment** prints a deny decision whose `message` is the feedback: the packet's threads and `src>` lines, citing the plan file and its line numbers, then what to do: make targeted Edit-tool changes to that file (never rewrite it), address every thread, call ExitPlanMode again.
 
   ```json
-  {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (SpecReview rv1 on v1).\nPlan file: /Users/me/.claude/plans/cache.md   (line numbers below are lines of this file)\n…"}}}
+  {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (Suiko rv1 on v1).\nPlan file: /Users/me/.claude/plans/cache.md   (line numbers below are lines of this file)\n…"}}}
   ```
 
 - The review is marked delivered only after the decision reached stdout. On any error (bad input, the server not starting), on SIGTERM/SIGINT/SIGHUP (the user answered in the terminal first, and Claude Code discards the hook) or on a closed stdout, it prints nothing, exits 0 and marks nothing delivered: Claude Code then decides as if there were no hook. Comments sent with an approval are not passed on: the allow decision has no field for them.
 
 ## 15. MCP tools
 
-`specreview mcp` is a stdio MCP server. Logs go to stderr only. Every tool returns the CLI text as `content: [{type: "text"}]` and the `--json` shape as `structuredContent`, with `isError: true` on a refusal or conflict.
+`suiko mcp` is a stdio MCP server. Logs go to stderr only. Every tool returns the CLI text as `content: [{type: "text"}]` and the `--json` shape as `structuredContent`, with `isError: true` on a refusal or conflict.
 
 | Tool | Input | Returns |
 |---|---|---|
-| `specreview_open` | `{path, title?}` | `{doc, version, url}` |
-| `specreview_review` | `{mode?, base?, range?, commit?, paths?, title?}` | the `review --json` shape: a code review (section 20; no PR mode) |
-| `specreview_snapshot` | `{url, title?}` | `{doc, version, recorded, url, page}`; public hosts only (a private host or the network turned off is refused); see section 19 |
-| `specreview_wait` | `{doc?, timeout_sec?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}` |
-| `specreview_feedback` | `{doc, peek?, include_drafts?}` | the packet |
-| `specreview_apply` | `{doc, thread_ids}` | `{applied, conflicts}` |
-| `specreview_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` | `{lines}` |
-| `specreview_reply` | `{doc, thread_id, body, status?, at?, decision?}` | thread summary |
-| `specreview_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` | the revise report |
-| `specreview_revert` | `{doc, hunk?, lock?}` | report |
-| `specreview_reanchor` | `{doc, thread_id, lines?, quote?, file?}` | the anchor |
-| `specreview_ask` | `{doc, body, quote? or lines?, file?}` | the new agent-question thread |
-| `specreview_threads` | `{doc, status?}` | one line per thread (`structuredContent.threads`) |
-| `specreview_diff` | `{doc, from?, to?, format?: "stat" or "unified"}` | the diff |
-| `specreview_log`, `specreview_status` | `{doc?}` | text |
-| `specreview_show` | `{doc, thread_id?, version?, lines?, file?, side?}` | text |
-| `specreview_final` | `{doc, decisions?, out_dir?}` | paths |
+| `suiko_open` | `{path, title?}` | `{doc, version, url}` |
+| `suiko_review` | `{mode?, base?, range?, commit?, paths?, title?}` | the `review --json` shape: a code review (section 20; no PR mode) |
+| `suiko_snapshot` | `{url, title?}` | `{doc, version, recorded, url, page}`; public hosts only (a private host or the network turned off is refused); see section 19 |
+| `suiko_wait` | `{doc?, timeout_sec?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}` |
+| `suiko_feedback` | `{doc, peek?, include_drafts?}` | the packet |
+| `suiko_apply` | `{doc, thread_ids}` | `{applied, conflicts}` |
+| `suiko_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` | `{lines}` |
+| `suiko_reply` | `{doc, thread_id, body, status?, at?, decision?}` | thread summary |
+| `suiko_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` | the revise report |
+| `suiko_revert` | `{doc, hunk?, lock?}` | report |
+| `suiko_reanchor` | `{doc, thread_id, lines?, quote?, file?}` | the anchor |
+| `suiko_ask` | `{doc, body, quote? or lines?, file?}` | the new agent-question thread |
+| `suiko_threads` | `{doc, status?}` | one line per thread (`structuredContent.threads`) |
+| `suiko_diff` | `{doc, from?, to?, format?: "stat" or "unified"}` | the diff |
+| `suiko_log`, `suiko_status` | `{doc?}` | text |
+| `suiko_show` | `{doc, thread_id?, version?, lines?, file?, side?}` | text |
+| `suiko_final` | `{doc, decisions?, out_dir?}` | paths |
 
-While `specreview_wait` blocks, it sends progress notifications every 15 s when the request carries a progress token. MCP-only loop: `specreview_open`, `specreview_wait` (again while it returns `waiting`), `specreview_apply` / `specreview_edit`, `specreview_revise`.
+While `suiko_wait` blocks, it sends progress notifications every 15 s when the request carries a progress token. MCP-only loop: `suiko_open`, `suiko_wait` (again while it returns `waiting`), `suiko_apply` / `suiko_edit`, `suiko_revise`.
 
 ## 16. Command reference
 
@@ -598,26 +598,26 @@ The longer version, with reasons, is in [`integrations/claude-code/skills/spec-r
 
 ## 19. Snapshot docs: plans, messages, piped text, web pages
 
-A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`specreview last`, `/specreview-last` in Claude Code), Markdown piped to `specreview open -`, or a web page (`specreview snapshot <url>`). Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`, `web/<slug>.md` or `web/<slug>.html`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
+A **snapshot doc** reviews text that is not a file in the workspace: a Claude Code plan (the plan gate), an agent's last message (`suiko last`, `/suiko-last` in Claude Code), Markdown piped to `suiko open -`, or a web page (`suiko snapshot <url>`). Its versions are recorded from text; its synthetic path (`plans/<slug>.md`, `messages/<slug>.md`, `text/<slug>.md`, `web/<slug>.md` or `web/<slug>.html`) is never read or written and never matches a real file. Threads, attribution, re-anchoring, Changes and History work as for file docs.
 
-- The packet header names the kind (`token-plan (Claude Code plan)`), line numbers are lines of the head version, and no thread offers `specreview apply`.
+- The packet header names the kind (`token-plan (Claude Code plan)`), line numbers are lines of the head version, and no thread offers `suiko apply`.
 - `apply`, `edit` and `revert` are refused (exit 3) with what to do instead, and so is `revise` without `--source` (exit 1).
-- **Revising a message or piped text:** write the complete revised text to a temporary file (`specreview show <doc>` prints the current version), address every thread in it, and run `specreview revise <doc> --source <file> --replies -` with the replies JSON (section 8.1) on stdin. With `--source -` the text comes from stdin, so `--replies` must name a file. The guards run, but their errors are recorded as warnings: a snapshot revision is never refused.
+- **Revising a message or piped text:** write the complete revised text to a temporary file (`suiko show <doc>` prints the current version), address every thread in it, and run `suiko revise <doc> --source <file> --replies -` with the replies JSON (section 8.1) on stdin. With `--source -` the text comes from stdin, so `--replies` must name a file. The guards run, but their errors are recorded as warnings: a snapshot revision is never refused.
 - **Revising a plan:** edit the plan file with targeted Edit-tool changes and call ExitPlanMode again; the plan gate records the version.
 - **Workspace:** found from the current directory as usual. When that is your home directory or `/`, the doc goes to the scratch workspace `$SPECREVIEW_HOME/scratch/<8 hex>/`, and every printed command carries `--workspace <dir>`: keep it on every command for that doc.
-- `specreview last` reads `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<session>.jsonl` (session from `--session`, else `$CLAUDE_CODE_SESSION_ID`; else the newest transcript of the current directory), takes the newest assistant message with text (skipping sidechains, tool results and command echoes), and returns at once. When the newest assistant message is still running a tool call (you ran `specreview last` yourself, maybe after a sentence), that whole turn is skipped. The text is stored with a final newline, as `show` prints it. Running it again for the same message reopens the same doc and records nothing, so your revisions stay. Codex transcripts are not supported.
+- `suiko last` reads `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<session>.jsonl` (session from `--session`, else `$CLAUDE_CODE_SESSION_ID`; else the newest transcript of the current directory), takes the newest assistant message with text (skipping sidechains, tool results and command echoes), and returns at once. When the newest assistant message is still running a tool call (you ran `suiko last` yourself, maybe after a sentence), that whole turn is skipped. The text is stored with a final newline, as `show` prints it. Running it again for the same message reopens the same doc and records nothing, so your revisions stay. Codex transcripts are not supported.
 
 ### Web pages
 
-`specreview snapshot <url>` fetches a page once and records it as a snapshot doc whose key is the URL (normalised: lowercase scheme and host, no default port, no fragment). Running the command is the consent to use the network: it is the only command that does, and it is refused (exit 3) when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false` in `$SPECREVIEW_HOME/config.json`.
+`suiko snapshot <url>` fetches a page once and records it as a snapshot doc whose key is the URL (normalised: lowercase scheme and host, no default port, no fragment). Running the command is the consent to use the network: it is the only command that does, and it is refused (exit 3) when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false` in `$SPECREVIEW_HOME/config.json`.
 
 - **What is fetched:** http(s) only, no user name or password in the URL, at most 10 MB and 30 s, at most 10 redirects. Hosts that resolve to this machine or a private network (loopback, `10/8`, `172.16/12`, `192.168/16`, link-local, unique-local IPv6 and their mapped forms) are refused (exit 3) unless `--allow-private`, and every redirect is checked again. A name that does not resolve exits 4; a connection error or an HTTP status of 400 or more exits 1.
 - **What is stored:** never the page as served. HTML is cleaned with an allowlist (no scripts, styles, forms, frames, embeds, SVG or event handlers; links `http`/`https`/`mailto` only, resolved against the page), the page's single `<main>` or `<article>` is kept when it has one, and the result is converted to Markdown (`web/<slug>.md`). `--as-html` keeps the cleaned HTML (`web/<slug>.html`); a doc keeps its format, so a later run must use the same choice. Markdown pages (a `.md` URL, `raw.githubusercontent.com`, a `github.com/.../blob/...md` page fetched from its raw URL) are kept as served when they contain no raw HTML, and lose it otherwise. A page rendered by JavaScript is nearly empty: the command says so, and `--reader jina` (public hosts only) has r.jina.ai render it, sending it the URL without its query string.
 - **In the review UI** the doc is served with a strict policy (no scripts but the review overlay, no forms) and its remote images and styles are blocked unless the run had `--allow-remote-assets`.
-- **The packet** names the page instead of a file: `Line numbers = lines of SpecReview's Markdown snapshot of <url> (fetched 2026-10-11 14:05 UTC); there is no file for you to edit.` `src>` lines quote that conversion.
-- **A page you build** (fetched with `--allow-private`): the packet says `PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page …` and `NEXT: edit the sources that produce the page -> specreview snapshot <url> --allow-private --replies - (records vN+1) -> specreview wait <doc> (background)`. Change only what the threads ask for, then run that command with the replies JSON (section 8.1) on stdin: it fetches the page again, records the next version and posts the replies in one step. When the page did not change, it records nothing and only posts the replies. `revise <doc>` without `--source` prints the same command.
-- **A public page**: there is nothing for you to edit. The packet says `PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit.` and `NEXT: answer each thread with specreview reply <doc> <tid> -m <md> --status answered|declined -> specreview wait <doc> (background)`. Running `specreview snapshot <url>` again records a newer version when the page itself changed.
-- **MCP:** `specreview_snapshot` `{url, title?}` does the same for public hosts only (no `--allow-private`, `--reader` or `--as-html`); for a page you build, use the CLI.
+- **The packet** names the page instead of a file: `Line numbers = lines of Suiko's Markdown snapshot of <url> (fetched 2026-10-11 14:05 UTC); there is no file for you to edit.` `src>` lines quote that conversion.
+- **A page you build** (fetched with `--allow-private`): the packet says `PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page …` and `NEXT: edit the sources that produce the page -> suiko snapshot <url> --allow-private --replies - (records vN+1) -> suiko wait <doc> (background)`. Change only what the threads ask for, then run that command with the replies JSON (section 8.1) on stdin: it fetches the page again, records the next version and posts the replies in one step. When the page did not change, it records nothing and only posts the replies. `revise <doc>` without `--source` prints the same command.
+- **A public page**: there is nothing for you to edit. The packet says `PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit.` and `NEXT: answer each thread with suiko reply <doc> <tid> -m <md> --status answered|declined -> suiko wait <doc> (background)`. Running `suiko snapshot <url>` again records a newer version when the page itself changed.
+- **MCP:** `suiko_snapshot` `{url, title?}` does the same for public hosts only (no `--allow-private`, `--reader` or `--as-html`); for a page you build, use the CLI.
 
 ## 20. Code reviews
 
@@ -650,7 +650,7 @@ Line numbers = files in your working tree now (all identical to v1).
   src>   if (stored.used) throw new TokenReuseError();
   Eric: Two tabs refreshing at once will trip this. Allow reuse within 30 s before throwing.
 
-[t2] suggestion · src/auth/refresh.js:L11 · apply verbatim: specreview apply cr-feat-token-refresh t2
+[t2] suggestion · src/auth/refresh.js:L11 · apply verbatim: suiko apply cr-feat-token-refresh t2
   -   const ttlSec = config.refreshTtlSec;
   +   const ttlSec = config.refreshTtlSec ?? 30 * 24 * 3600;
   Eric: Keep the old default when the config has no TTL.
@@ -663,8 +663,8 @@ Line numbers = files in your working tree now (all identical to v1).
 
 DECISIONS to keep true: (none yet)
 PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
-  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
-NEXT: edit the files -> specreview revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> specreview wait cr-feat-token-refresh (background)
+  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> suiko wait cr-feat-token-refresh (background)
 ```
 
 - **Items** cite `path:L..` relative to the repo root, with `(new file)`, `(old side)` or `(whole file)` where it applies. There is no `on:` line, no section and no LOCKED line: code reviews have no locks.

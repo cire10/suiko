@@ -279,7 +279,7 @@ export async function revert(ctx, ref, target) {
           const lock = await ctx.store.getLock(doc.id, String(target.lock));
           if (!lock) throw new NotFoundError(`lock ${target.lock} not found in ${doc.id}`, { details: { lock: target.lock } });
           const a = anchorAt(lock, head.v);
-          if (!a || a.state === 'orphaned') throw new RefusedError(`lock ${lock.id} lost its place in v${head.v}; restore the text by hand (specreview show ${doc.id} --version ${lock.createdIn})`);
+          if (!a || a.state === 'orphaned') throw new RefusedError(`lock ${lock.id} lost its place in v${head.v}; restore the text by hand (suiko show ${doc.id} --version ${lock.createdIn})`);
           const m = preciseMapper(head.source, working.text).mapRange(a.src.start, a.src.end);
           if (working.text.slice(m.start, m.end) === lock.text) {
             const li = lineIndex(working.text);

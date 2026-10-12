@@ -34,6 +34,6 @@ Reviewer summary: See the snips.
 
 LOCKED (agreed - do not modify): (none)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
   Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
-NEXT: edits -> specreview revise kitchen-sink --replies - (JSON, one entry per thread) -> specreview wait kitchen-sink (background)
+NEXT: edits -> suiko revise kitchen-sink --replies - (JSON, one entry per thread) -> suiko wait kitchen-sink (background)

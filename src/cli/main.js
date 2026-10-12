@@ -4,14 +4,14 @@
 // - Dispatches to the command modules in ./commands (lazy imports), parsing argv with node:util parseArgs
 //   (strict; global options --json, --as <agent>, --workspace <dir>, -h/--help may appear anywhere).
 // - Resolves the agent name: --as, else $SPECREVIEW_AGENT, else 'claude' when $CLAUDECODE is set, else 'agent'.
-// - Prints the CommandResult: text (or JSON with --json) on stdout, `specreview: ...` notes on stderr.
-// - Errors print `specreview: <message>` on stderr (and {"error":{...}} on stdout with --json) and map to the EXIT
-//   codes of src/shared/protocol.js via the error's `exit` (SpecReviewError subclasses), else 1.
+// - Prints the CommandResult: text (or JSON with --json) on stdout, `suiko: ...` notes on stderr.
+// - Errors print `suiko: <message>` on stderr (and {"error":{...}} on stdout with --json) and map to the EXIT
+//   codes of src/shared/protocol.js via the error's `exit` (SuikoError subclasses), else 1.
 // - `wait` and `plan-gate` get an AbortSignal wired to SIGINT/SIGTERM/SIGHUP so an interrupted wait cleans up and
 //   delivers nothing.
 // All collaborators are injectable (deps) so tests run the real argument handling against a stub engine.
 
-import { SpecReviewError } from '../core/store/errors.js';
+import { SuikoError } from '../core/store/errors.js';
 import { EXIT } from '../shared/protocol.js';
 import { GLOBAL_OPTIONS, parseCommandArgs, resolveAgent } from './args.js';
 import { COMMANDS, commandHelp, topLevelHelp } from './commands/index.js';
@@ -23,7 +23,7 @@ import { createRuntime } from './runtime.js';
 const SIGNAL_AWARE = new Set(['wait', 'plan-gate']);
 
 /**
- * @param {string[]} argv arguments after `specreview`
+ * @param {string[]} argv arguments after `suiko`
  * @param {import('./runtime.js').Deps} [deps]
  * @returns {Promise<number>} exit code
  */
@@ -51,7 +51,7 @@ export async function main(argv, deps = {}) {
   }
   const entry = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : null;
   if (!entry) {
-    await writeAll(stderr, `specreview: unknown command "${name}" (run \`specreview --help\`)\n`);
+    await writeAll(stderr, `suiko: unknown command "${name}" (run \`suiko --help\`)\n`);
     return EXIT.ERROR;
   }
 
@@ -126,9 +126,9 @@ export function hoistCommand(argv) {
 async function reportError(err, o) {
   const e = /** @type {any} */ (err);
   const exit = errorExit(err);
-  const message = String(e?.message ?? err).replace(/^specreview:\s*/, '');
-  await writeAll(o.stderr, `specreview: ${message}\n`).catch(() => {});
-  const known = err instanceof SpecReviewError || typeof e?.exit === 'number';
+  const message = String(e?.message ?? err).replace(/^suiko:\s*/, '');
+  await writeAll(o.stderr, `suiko: ${message}\n`).catch(() => {});
+  const known = err instanceof SuikoError || typeof e?.exit === 'number';
   if (!known && (o.env.SPECREVIEW_DEBUG || o.env.SPECREVIEW_LOG_LEVEL === 'debug') && e?.stack) {
     await writeAll(o.stderr, `${e.stack}\n`).catch(() => {});
   }

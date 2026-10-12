@@ -1,5 +1,5 @@
 // @ts-check
-// Agent definitions for `specreview install` (no target) and `specreview uninstall`. Each agent detects itself
+// Agent definitions for `suiko install` (no target) and `suiko uninstall`. Each agent detects itself
 // (config dir and/or binary on PATH, honouring CLAUDE_CONFIG_DIR, CODEX_HOME, GEMINI_CLI_HOME, XDG_CONFIG_HOME and
 // COPILOT_HOME) and plans FileActions for install and uninstall through a Planner. Only surfaces verified in the
 // agent's official docs are written (sources below); everything else is listed as unverified and never touched.
@@ -7,19 +7,19 @@
 //   claude          skill + every command file + hooks (PreToolUse Write, UserPromptSubmit) in settings.json
 //                   (--project: .claude/settings.local.json, which is not committed), absolute node/script paths; the
 //                   plan-mode gate (PermissionRequest/ExitPlanMode) only with --with-plan-gate or when one is already
-//                   there. Skipped when the SpecReview plugin is installed for this scope/project (the hooks would run
+//                   there. Skipped when the Suiko plugin is installed for this scope/project (the hooks would run
 //                   twice), with a warning when settings hooks are left over
 //   codex           protocol block in $CODEX_HOME/AGENTS.md (AGENTS.override.md when that is in use), the shared skill
-//                   in ~/.agents/skills, [mcp_servers.specreview] in a marked block of config.toml (toml.js)
-//   gemini          protocol block in ~/.gemini/GEMINI.md (or the configured context file), /specreview-review TOML
-//   cursor          mcpServers.specreview in ~/.cursor/mcp.json, the shared skill (Cursor has no global rules file)
-//   opencode        protocol block in ~/.config/opencode/AGENTS.md, /specreview-review command, mcp.specreview in
+//                   in ~/.agents/skills, [mcp_servers.suiko] in a marked block of config.toml (toml.js)
+//   gemini          protocol block in ~/.gemini/GEMINI.md (or the configured context file), /suiko-review TOML
+//   cursor          mcpServers.suiko in ~/.cursor/mcp.json, the shared skill (Cursor has no global rules file)
+//   opencode        protocol block in ~/.config/opencode/AGENTS.md, /suiko-review command, mcp.suiko in
 //                   opencode.json
 //   copilot         protocol block in ~/.copilot/copilot-instructions.md, the shared skill
 //   amp             protocol block in ~/.config/amp/AGENTS.md, the shared skill
 //   droid           the shared skill
-//   kiro            ~/.kiro/steering/specreview.md (always included), ~/.kiro/skills/specreview-review
-//   claude-desktop  mcpServers.specreview in claude_desktop_config.json (macOS, Windows)
+//   kiro            ~/.kiro/steering/suiko.md (always included), ~/.kiro/skills/suiko-review
+//   claude-desktop  mcpServers.suiko in claude_desktop_config.json (macOS, Windows)
 // --project writes the project-level equivalents (<root>/AGENTS.md, <root>/.agents/skills, <root>/.cursor/mcp.json, ...).
 // The shared <root>/AGENTS.md is not created in a project that has only a CLAUDE.md: OpenCode and Amp read CLAUDE.md
 // only while AGENTS.md does not exist.
@@ -49,8 +49,8 @@ import { definitionsOutside } from './toml.js';
  * @property {string} cwd
  * @property {string} root project root (nearest .git ancestor of cwd)
  * @property {string} execPath absolute node
- * @property {string} binPath absolute bin/specreview.js
- * @property {boolean} cliOnPath whether `specreview` is on PATH
+ * @property {string} binPath absolute bin/suiko.js
+ * @property {boolean} cliOnPath whether `suiko` is on PATH
  * @property {string} invocation "<node>" "<bin>"
  * @property {string} pathEnv PATH used for detection
  * @property {import('./files.js').Manifest} manifest
@@ -212,7 +212,7 @@ const binHit = (c, ...names) => {
 /** @param {string} source */
 const rel = (source) => path.relative(PACKAGE_ROOT, source);
 
-const PROTOCOL = 'the SpecReview protocol block';
+const PROTOCOL = 'the Suiko protocol block';
 
 /**
  * Lenient JSON read for detection only (never throws). `comments`: strip line and block comments first, as Gemini CLI
@@ -323,9 +323,9 @@ function projectProtocol(c, p) {
     p.note(`Did not create ${file}: this project has only CLAUDE.md (see the note at the end).`);
     p.globalNote(
       `This project has CLAUDE.md and no AGENTS.md. OpenCode and Amp read CLAUDE.md only while AGENTS.md does not exist, so ` +
-        `creating ${file} would make them stop reading it; SpecReview leaves it alone. The skills and commands it installs carry the ` +
+        `creating ${file} would make them stop reading it; Suiko leaves it alone. The skills and commands it installs carry the ` +
         'protocol anyway. To add the protocol block too, create AGENTS.md yourself (for example move the rules from CLAUDE.md into it ' +
-        'and put `@AGENTS.md` in CLAUDE.md, which Claude Code imports), then re-run `specreview install --project`.',
+        'and put `@AGENTS.md` in CLAUDE.md, which Claude Code imports), then re-run `suiko install --project`.',
     );
     return;
   }
@@ -340,10 +340,10 @@ function projectProtocol(c, p) {
  * @returns {FileAction}
  */
 function mcpJsonAction(file, container, entry) {
-  return jsonAction(file, (o) => setEntry(o, container, 'specreview', entry), {
-    note: `${container}.specreview (other entries kept)`,
-    detail: JSON.stringify({ [container]: { specreview: entry } }, null, 2),
-    fix: `add "specreview": ${JSON.stringify(entry)} under "${container}" by hand`,
+  return jsonAction(file, (o) => setEntry(o, container, 'suiko', entry), {
+    note: `${container}.suiko (other entries kept)`,
+    detail: JSON.stringify({ [container]: { suiko: entry } }, null, 2),
+    fix: `add "suiko": ${JSON.stringify(entry)} under "${container}" by hand`,
   });
 }
 
@@ -354,8 +354,8 @@ function mcpJsonAction(file, container, entry) {
  * @returns {FileAction | null}
  */
 function removeMcpJsonAction(c, file, container) {
-  return jsonAction(file, (o) => deleteEntry(o, container, 'specreview'), {
-    note: `removes ${container}.specreview; other entries kept`, deleteWhenEmpty: true, manifest: c.manifest, fix: `remove "specreview" from "${container}" by hand`,
+  return jsonAction(file, (o) => deleteEntry(o, container, 'suiko'), {
+    note: `removes ${container}.suiko; other entries kept`, deleteWhenEmpty: true, manifest: c.manifest, fix: `remove "suiko" from "${container}" by hand`,
   });
 }
 
@@ -379,7 +379,7 @@ function within(dir, parent) {
 }
 
 /**
- * The SpecReview Claude Code plugin, when it is active here and not disabled: installed at user scope, installed at
+ * The Suiko Claude Code plugin, when it is active here and not disabled: installed at user scope, installed at
  * project/local scope for the project containing the working directory (installed_plugins.json records `scope` and
  * `projectPath`), or enabled in one of the settings files Claude Code reads here. An install for another project
  * does not count. `scope` is what `claude plugin uninstall --scope` needs.
@@ -394,7 +394,7 @@ export function claudePlugin(c) {
   const ids = new Map();
   const registry = installed && typeof installed === 'object' ? (installed.plugins && typeof installed.plugins === 'object' ? installed.plugins : installed) : {};
   for (const [key, value] of Object.entries(registry)) {
-    if (!/^specreview@/.test(key)) continue;
+    if (!/^suiko@/.test(key)) continue;
     // v2: an array of installs, one per scope (and project); v1: one object, user scope.
     const entries = Array.isArray(value) ? value : [value];
     for (const e of entries) {
@@ -415,7 +415,7 @@ export function claudePlugin(c) {
   for (const [file, scope] of settingsFiles) {
     const s = readJsonLenient(file);
     const map = s && typeof s.enabledPlugins === 'object' && s.enabledPlugins ? s.enabledPlugins : {};
-    for (const [k, v] of Object.entries(map)) if (/^specreview@/.test(k)) enabled[k] = { value: v, file, scope };
+    for (const [k, v] of Object.entries(map)) if (/^suiko@/.test(k)) enabled[k] = { value: v, file, scope };
   }
   for (const [id, scope] of ids) if (enabled[id]?.value !== false) return { id, where: tilde(c, installedFile), scope };
   for (const [id, e] of Object.entries(enabled)) if (e.value) return { id, where: `enabledPlugins in ${tilde(c, e.file)}`, scope: e.scope };
@@ -447,7 +447,7 @@ const claudeSettings = (c) => path.join(claudeBase(c), c.scope === 'project' ? '
 const claudeSettingsFiles = (c) => (c.scope === 'project' ? [claudeSettings(c), path.join(claudeBase(c), 'settings.json')] : [claudeSettings(c)]);
 
 /**
- * SpecReview hook commands found in the settings files of this scope (an earlier settings install), except the
+ * Suiko hook commands found in the settings files of this scope (an earlier settings install), except the
  * plan-mode gate: the plugin does not include it, so a gate in settings.json next to the plugin runs once.
  * @param {Ctx} c
  * @returns {Array<{ file: string, commands: string[] }>}
@@ -479,9 +479,9 @@ export function claudeDoubleInstall(c, plugin) {
   if (!found.length) return null;
   const n = found.reduce((k, f) => k + f.commands.length, 0);
   return (
-    `${found.map((f) => tilde(c, f.file)).join(' and ')} also ${n === 1 ? 'has a SpecReview hook' : `has ${n} SpecReview hooks`} from an earlier ` +
-    `\`specreview install\`, so ${n === 1 ? 'it runs' : 'they run'} twice next to the plugin's (${plugin.id}). Remove the settings install with ` +
-    '`specreview uninstall --only claude --apply` (it leaves the plugin alone), or remove the plugin.'
+    `${found.map((f) => tilde(c, f.file)).join(' and ')} also ${n === 1 ? 'has a Suiko hook' : `has ${n} Suiko hooks`} from an earlier ` +
+    `\`suiko install\`, so ${n === 1 ? 'it runs' : 'they run'} twice next to the plugin's (${plugin.id}). Remove the settings install with ` +
+    '`suiko uninstall --only claude --apply` (it leaves the plugin alone), or remove the plugin.'
   );
 }
 
@@ -504,7 +504,7 @@ const claude = {
     if (plugin) {
       const twice = claudeDoubleInstall(c, plugin);
       p.skip(
-        `the SpecReview Claude Code plugin is installed (${plugin.id}, ${plugin.where}). It already provides the skill, the commands and the hooks; ` +
+        `the Suiko Claude Code plugin is installed (${plugin.id}, ${plugin.where}). It already provides the skill, the commands and the hooks; ` +
           'installing them into settings.json as well would run every hook twice. To switch to the settings install (absolute paths, so it works when ' +
           `Claude Code does not see your shell PATH), run \`${pluginUninstall(plugin)}\`, then re-run this install.` +
           (twice ? ` WARNING: ${twice}` : ''),
@@ -515,7 +515,7 @@ const claude = {
     for (const cp of claudeCopies(base, c)) {
       p.add(() => copyAction(cp.target, cp.content, { source: cp.source, template: cp.template, manifest: c.manifest }));
     }
-    // The plan-mode gate is opt-in (--with-plan-gate): SpecReview is for the reviews you ask for, not every plan. A gate
+    // The plan-mode gate is opt-in (--with-plan-gate): Suiko is for the reviews you ask for, not every plan. A gate
     // already in the settings file (an earlier opt-in) is kept and re-pointed at this CLI like the other hooks.
     const planGate = Boolean(c.planGate) || installedHooks(claudeSettings(c)).planGate;
     const entries = hookEntries({ execPath: c.execPath, binPath: c.binPath, planGate, hooks: true });
@@ -526,7 +526,7 @@ const claude = {
         fix: 'add the hooks shown above under "hooks" by hand',
       }),
     );
-    if (planGate) p.note('Plan mode: when Claude calls ExitPlanMode, the plan opens in SpecReview; approving it there approves the plan, and the terminal dialog stays usable.');
+    if (planGate) p.note('Plan mode: when Claude calls ExitPlanMode, the plan opens in Suiko; approving it there approves the plan, and the terminal dialog stays usable.');
     if (c.scope === 'project') p.note('The hooks go to .claude/settings.local.json, Claude Code\'s personal project settings: keep it out of git.');
   },
   uninstall(c, p) {
@@ -535,10 +535,10 @@ const claude = {
       p.add(() => removeCopyAction(cp.target, cp.content, { template: cp.template, manifest: c.manifest, rmdirs: cp.dir.endsWith('spec-review') ? [cp.dir] : [] }));
     }
     for (const file of claudeSettingsFiles(c)) {
-      p.add(() => jsonAction(file, (s) => removeOurHooks(s), { note: 'removes the SpecReview hooks; other settings kept', deleteWhenEmpty: true, manifest: c.manifest }));
+      p.add(() => jsonAction(file, (s) => removeOurHooks(s), { note: 'removes the Suiko hooks; other settings kept', deleteWhenEmpty: true, manifest: c.manifest }));
     }
     const plugin = claudePlugin(c);
-    if (plugin) p.note(`The SpecReview plugin is still installed (${plugin.id}); remove it with \`${pluginUninstall(plugin)}\`.`);
+    if (plugin) p.note(`The Suiko plugin is still installed (${plugin.id}); remove it with \`${pluginUninstall(plugin)}\`.`);
   },
 };
 
@@ -559,12 +559,12 @@ function codexInstructions(c) {
 /** @param {Ctx} c */
 const codexConfig = (c) => (c.scope === 'project' ? path.join(c.root, '.codex', 'config.toml') : path.join(paths.codex(c), 'config.toml'));
 
-/** The table SpecReview owns in Codex's config.toml. */
-const CODEX_TABLE = ['mcp_servers', 'specreview'];
-const CODEX_WHAT = 'the [mcp_servers.specreview] table';
+/** The table Suiko owns in Codex's config.toml. */
+const CODEX_TABLE = ['mcp_servers', 'suiko'];
+const CODEX_WHAT = 'the [mcp_servers.suiko] table';
 
 /**
- * The [mcp_servers.specreview] block in config.toml. A definition outside our block (from `codex mcp add`, or our
+ * The [mcp_servers.suiko] block in config.toml. A definition outside our block (from `codex mcp add`, or our
  * own table after Codex rewrote [mcp_servers] and dropped the begin marker) is left alone: adding ours would make the
  * TOML invalid. So is an inline `mcp_servers = {...}` or an array [[mcp_servers]], which cannot take a table.
  * @param {Ctx} c
@@ -579,16 +579,16 @@ function codexMcp(c, p) {
     const defs = definitionsOutside(blk, CODEX_TABLE);
     if (defs.defined) {
       p.note(
-        `${tilde(c, file)} already defines the specreview MCP server outside SpecReview's managed block; left as is.` +
+        `${tilde(c, file)} already defines the suiko MCP server outside Suiko's managed block; left as is.` +
           (blk.strayEnds.length
             ? ' (A leftover "# specreview:end" line suggests Codex rewrote [mcp_servers], e.g. on `codex mcp add`, and dropped the begin marker.' +
-              ' To let SpecReview manage the entry again, run `codex mcp remove specreview` and re-run this install.)'
+              ' To let Suiko manage the entry again, run `codex mcp remove suiko` and re-run this install.)'
             : ''),
       );
       return null;
     }
     if (defs.container) {
-      p.note(`${tilde(c, file)} defines mcp_servers inline (or as [[mcp_servers]]), so a [mcp_servers.specreview] table cannot be added safely; add it to that definition by hand.`);
+      p.note(`${tilde(c, file)} defines mcp_servers inline (or as [[mcp_servers]]), so a [mcp_servers.suiko] table cannot be added safely; add it to that definition by hand.`);
       return null;
     }
     return tomlBlockAction(file, current, blk, codexTomlBlock(c), CODEX_TABLE, { what: CODEX_WHAT, fix });
@@ -596,7 +596,7 @@ function codexMcp(c, p) {
 }
 
 /**
- * Uninstall the block from config.toml; report a specreview server that is defined outside it.
+ * Uninstall the block from config.toml; report a suiko server that is defined outside it.
  * @param {Ctx} c
  * @param {Planner} p
  */
@@ -605,11 +605,11 @@ function removeCodexMcp(c, p) {
   p.add(() => {
     const current = readTextOrNull(file);
     if (current === null) return null;
-    const blk = scanTomlFile(file, current, CODEX_TABLE, `remove the [mcp_servers.specreview] table and the specreview marker lines from ${file} by hand`);
+    const blk = scanTomlFile(file, current, CODEX_TABLE, `remove the [mcp_servers.suiko] table and the suiko marker lines from ${file} by hand`);
     if (definitionsOutside(blk, CODEX_TABLE).defined) {
       p.note(
-        `${tilde(c, file)} defines the specreview MCP server outside SpecReview's markers (Codex drops the begin marker when it rewrites [mcp_servers], ` +
-          'e.g. on `codex mcp add`), so it is not removed; run `codex mcp remove specreview` if you no longer want it.',
+        `${tilde(c, file)} defines the suiko MCP server outside Suiko's markers (Codex drops the begin marker when it rewrites [mcp_servers], ` +
+          'e.g. on `codex mcp add`), so it is not removed; run `codex mcp remove suiko` if you no longer want it.',
       );
     }
     return removeTomlBlockAction(file, current, blk, { what: CODEX_WHAT, manifest: c.manifest });
@@ -649,7 +649,7 @@ const codex = {
     }
     p.add(() => skillAction(c));
     codexMcp(c, p);
-    p.note('Start a new Codex session to load the instructions; run the skill with $specreview-review (or pick it in /skills).');
+    p.note('Start a new Codex session to load the instructions; run the skill with $suiko-review (or pick it in /skills).');
     if (c.scope === 'project') p.note('Codex reads a project .codex/config.toml only in trusted projects.');
   },
   uninstall(c, p) {
@@ -711,7 +711,7 @@ const gemini = {
     if (ctxNames.unreadable) p.note(`${tilde(c, geminiSettings(c))} could not be parsed, so the protocol goes to GEMINI.md, Gemini CLI's default context file; if you set context.fileName there, move the block.`);
     const cmd = geminiCommand(c);
     p.add(() => copyAction(geminiCommandFile(c), cmd.content, { source: GEMINI_COMMAND, template: cmd.template, manifest: c.manifest }));
-    p.note('/specreview-review <file> starts a review round; in a running session, /memory reload and /commands reload pick up the changes.');
+    p.note('/suiko-review <file> starts a review round; in a running session, /memory reload and /commands reload pick up the changes.');
   },
   uninstall(c, p) {
     for (const name of geminiContextNames(geminiSettings(c)).names) p.add(() => removeProtocolAction(c, path.join(geminiBase(c), name)));
@@ -742,8 +742,8 @@ const cursor = {
     p.add(() => mcpJsonAction(cursorMcp(c), 'mcpServers', { type: 'stdio', ...stdioCommand(c) }));
     p.add(() => skillAction(c));
     if (c.scope === 'project') projectProtocol(c, p);
-    else p.note("Cursor's global User Rules live in its settings, not in a file, so the protocol comes with the /specreview-review skill and the MCP tools.");
-    p.note('Reload Cursor (or toggle specreview in Settings > MCP) to start the MCP server.');
+    else p.note("Cursor's global User Rules live in its settings, not in a file, so the protocol comes with the /suiko-review skill and the MCP tools.");
+    p.note('Reload Cursor (or toggle suiko in Settings > MCP) to start the MCP server.');
   },
   uninstall(c, p) {
     p.add(() => removeMcpJsonAction(c, cursorMcp(c), 'mcpServers'));
@@ -793,7 +793,7 @@ const opencode = {
       if (readTextOrNull(agentsMd) === null && isFile(claudeMd) && !fallbackOff) {
         p.note(
           `Skipped ${PROTOCOL}: OpenCode reads ${tilde(c, claudeMd)} as its rules only while ${tilde(c, agentsMd)} does not exist, and creating it would ` +
-            `turn that off. /specreview-review still carries the steps; to add the protocol, create ${tilde(c, agentsMd)} yourself and re-run.`,
+            `turn that off. /suiko-review still carries the steps; to add the protocol, create ${tilde(c, agentsMd)} yourself and re-run.`,
         );
       } else {
         p.add(() => protocolAction(c, agentsMd));
@@ -803,7 +803,7 @@ const opencode = {
     p.add(() => copyAction(opencodeCommandFile(c), cmd.content, { source: OPENCODE_COMMAND, template: cmd.template, manifest: c.manifest }));
     const [config] = opencodeConfigs(c);
     p.add(() => mcpJsonAction(config, 'mcp', { type: 'local', command: [c.execPath, c.binPath, 'mcp'] }));
-    p.note('Restart OpenCode to load the MCP server; /specreview-review <file> starts a review round.');
+    p.note('Restart OpenCode to load the MCP server; /suiko-review <file> starts a review round.');
   },
   uninstall(c, p) {
     const agentsMd = c.scope === 'project' ? projectAgentsMd(c) : path.join(paths.opencode(c), 'AGENTS.md');
@@ -833,7 +833,7 @@ const copilot = {
     if (c.scope === 'project') projectProtocol(c, p);
     else p.add(() => protocolAction(c, path.join(paths.copilot(c), 'copilot-instructions.md')));
     p.add(() => skillAction(c));
-    p.note('Run the skill with /specreview-review.');
+    p.note('Run the skill with /suiko-review.');
   },
   uninstall(c, p) {
     if (c.scope === 'project') p.add(() => removeProtocolAction(c, projectAgentsMd(c), 'agents-md'));
@@ -879,7 +879,7 @@ const droid = {
   detect: (c) => detection(c, [dirHit(c, paths.factory(c)), binHit(c, 'droid')]),
   install(c, p) {
     if (c.scope === 'project') projectProtocol(c, p);
-    else p.note('Droid documents no global instructions file, so only the skill is installed: run it with /specreview-review.');
+    else p.note('Droid documents no global instructions file, so only the skill is installed: run it with /suiko-review.');
     p.add(() => skillAction(c));
   },
   uninstall(c, p) {
@@ -906,7 +906,7 @@ const kiro = {
   install(c, p) {
     const steer = kiroSteering(c);
     p.add(() =>
-      copyAction(path.join(kiroBase(c), 'steering', 'specreview.md'), steer.content, {
+      copyAction(path.join(kiroBase(c), 'steering', 'suiko.md'), steer.content, {
         source: AGENTS_SNIPPET, template: steer.template, manifest: c.manifest, note: `steering file (inclusion: always) with the protocol from ${rel(AGENTS_SNIPPET)}`,
       }),
     );
@@ -915,7 +915,7 @@ const kiro = {
   },
   uninstall(c, p) {
     const steer = kiroSteering(c);
-    p.add(() => removeCopyAction(path.join(kiroBase(c), 'steering', 'specreview.md'), steer.content, { template: steer.template, manifest: c.manifest }));
+    p.add(() => removeCopyAction(path.join(kiroBase(c), 'steering', 'suiko.md'), steer.content, { template: steer.template, manifest: c.manifest }));
     p.add(() => removeSkillAction(c, path.join(kiroBase(c), 'skills', SKILL_NAME), ''));
   },
 };

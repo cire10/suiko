@@ -68,7 +68,7 @@ async function toHeadLines(ctx, doc, f, headText, lines, v) {
   const back = preciseMapper(text, headText);
   const m = back.mapRange(wli.startOf(lines[0]), wli.endOf(lines[1]));
   if (m.end <= m.start || !headText.slice(m.start, m.end).trim()) {
-    throw new RefusedError(`${f.path}:L${lines[0]}-${lines[1]} exist only in your working tree (not in v${v} yet): run specreview revise ${docRefFor(doc.id, ctx.root)} first`, { details: { path: f.path } });
+    throw new RefusedError(`${f.path}:L${lines[0]}-${lines[1]} exist only in your working tree (not in v${v} yet): run suiko revise ${docRefFor(doc.id, ctx.root)} first`, { details: { path: f.path } });
   }
   const a = hli.lineOf(m.start);
   return { lines: [a, Math.max(a, hli.lineOf(m.end - 1))], workingText: text };

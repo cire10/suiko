@@ -1,4 +1,4 @@
-// SpecReview guest, part 45: element captures, labels, table cells, mermaid nodes, regions and crops.
+// Suiko guest, part 45: element captures, labels, table cells, mermaid nodes, regions and crops.
 //
 // Builds the FROZEN capture shapes (amendments 3.3):
 //   { kind: 'element', srid, tag, label, region?: {x,y,w,h}, svg?: {nodeId, label},

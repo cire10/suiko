@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview snapshot <url>` fetching (cli/fetch-url.js), with no internet: local HTTP servers on 127.0.0.1
+// `suiko snapshot <url>` fetching (cli/fetch-url.js), with no internet: local HTTP servers on 127.0.0.1
 // (allowPrivate), and an injected DNS `lookup` plus an injected `request` that connects to the local server while
 // the URL names a "public" host, to test what happens after a public hop. Covers the address rules (private,
 // mapped, NAT64, decimal and hex literals, mixed answers), pinning, redirects re-checked (public -> private refused),
@@ -206,7 +206,7 @@ describe('address rules', () => {
     assert.equal(r.etag, '"v1"');
     assert.equal(r.finalUrl, local('/page.html'));
     assert.match(r.text, /<p>Hello<\/p>/);
-    assert.match(String(hits.at(-1)?.headers['user-agent']), /^specreview\//);
+    assert.match(String(hits.at(-1)?.headers['user-agent']), /^suiko\//);
   });
 
   test('literal forms of private addresses are refused before any connection', async () => {

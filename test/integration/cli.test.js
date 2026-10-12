@@ -76,19 +76,19 @@ describe('top level', () => {
     for (const cmd of ['open', 'wait', 'revise', 'install', 'hook']) assert.match(r.stdout, new RegExp(`\\n  ${cmd} `));
     assert.equal((await runCli([])).code, 1);
   });
-  test('unknown command and unknown flag are usage errors (exit 1, specreview: prefix)', async () => {
+  test('unknown command and unknown flag are usage errors (exit 1, suiko: prefix)', async () => {
     const r = await runCli(['frobnicate']);
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /^specreview: unknown command "frobnicate"/);
+    assert.match(r.stderr, /^suiko: unknown command "frobnicate"/);
     const { d } = deps();
     const r2 = await runCli(['status', '--bogus'], d);
     assert.equal(r2.code, 1);
-    assert.match(r2.stderr, /^specreview: status: Unknown option '--bogus'/);
+    assert.match(r2.stderr, /^suiko: status: Unknown option '--bogus'/);
   });
   test('<cmd> --help prints usage', async () => {
     const r = await runCli(['revise', '--help']);
     assert.equal(r.code, 0);
-    assert.match(r.stdout, /Usage: specreview revise <doc>/);
+    assert.match(r.stdout, /Usage: suiko revise <doc>/);
   });
   test('--version', async () => {
     const r = await runCli(['--version']);
@@ -124,7 +124,7 @@ describe('agent name and doc resolution', () => {
     const { d } = deps();
     const r = await runCli(['log', 'nope'], d);
     assert.equal(r.code, 4);
-    assert.match(r.stderr, /^specreview: doc not found: nope \(tracked: token-service\)/);
+    assert.match(r.stderr, /^suiko: doc not found: nope \(tracked: token-service\)/);
   });
   test('--json error object on stdout', async () => {
     const { d } = deps();
@@ -171,10 +171,10 @@ describe('open', () => {
     const r = await runCli(['open', 'design.md', '--browser', 'system'], d);
     assert.equal(r.code, 0, r.stderr);
     const lines = r.stdout.split('\n');
-    assert.equal(lines[0], 'specreview: tracking design.md as "design" (markdown, 5 lines) · recorded v1');
+    assert.equal(lines[0], 'suiko: tracking design.md as "design" (markdown, 5 lines) · recorded v1');
     assert.equal(lines[1], `review UI: http://127.0.0.1:5801/d/${store.wsId}/design?k=tok123`);
     assert.match(lines[2], /^external hosts loaded live by the doc: cdn\.example\.com, img\.example\.org/);
-    assert.match(r.stdout, /run `specreview wait design` in the background/);
+    assert.match(r.stdout, /run `suiko wait design` in the background/);
     assert.match(r.stdout, /Recommended \.gitattributes lines/);
     assert.equal(engine.calls[0].create, true);
     assert.equal(engine.calls[0].root, root);
@@ -215,7 +215,7 @@ describe('open', () => {
     const pane = await runCli(['open', doc], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'pane' } });
     assert.match(pane.stdout, /next: open the URL \(browser pane\)/);
     const flag = await runCli(['open', doc, '--browser', 'none'], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'system' } });
-    assert.match(flag.stdout, /^next: run `specreview wait/m);
+    assert.match(flag.stdout, /^next: run `suiko wait/m);
     assert.equal(opened.length, 1);
     const bad = await runCli(['open', doc], { ...d, env: { SPECREVIEW_HOME: home, SPECREVIEW_BROWSER: 'lynx' } });
     assert.equal(bad.code, 1);
@@ -327,7 +327,7 @@ describe('apply / edit', () => {
     assert.equal((await runCli(['edit', 'token-service', '--old', 'a', '--new', 'b'], deps().d)).code, 1);
     const r = await runCli(['edit', 'token-service', '--thread', 't1', '--old', 'missing', '--new', 'b'], deps().d);
     assert.equal(r.code, 3);
-    assert.match(r.stderr, /^specreview: old_string not found/);
+    assert.match(r.stderr, /^suiko: old_string not found/);
   });
   test('edit --stdin batch; stops at the first failure', async () => {
     const { engine, d } = deps({
@@ -431,7 +431,7 @@ describe('revise', () => {
     const { d } = deps({ input: JSON.stringify({ summary: 'refuse-me', threads: {} }) });
     const r = await runCli(['revise', 'token-service', '--replies', '-'], d);
     assert.equal(r.code, 3);
-    assert.match(r.stdout, /^specreview: REFUSED - nothing recorded \(exit 3\)\n {2}ERR lock: h1 changes L1/);
+    assert.match(r.stdout, /^suiko: REFUSED - nothing recorded \(exit 3\)\n {2}ERR lock: h1 changes L1/);
   });
   test('invalid replies JSON -> exit 1 naming the field', async () => {
     const r1 = await runCli(['revise', 'token-service', '--replies', '-'], deps({ input: '{"threads":{"t1":{"status":"done","reply":"x"}}}' }).d);
@@ -509,7 +509,7 @@ describe('inspect commands', () => {
       ops: {},
       createContext: async () => {
         const { NotFoundError } = await import('../../src/core/store/errors.js');
-        throw new NotFoundError('no SpecReview store');
+        throw new NotFoundError('no Suiko store');
       },
     });
     assert.equal(r.code, 0);

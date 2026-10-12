@@ -1,5 +1,5 @@
 // @ts-check
-// PR mode (design 4.18, WP3b): `specreview review --pr <n|url>` against a real repository whose origin is a local
+// PR mode (design 4.18, WP3b): `suiko review --pr <n|url>` against a real repository whose origin is a local
 // bare repository named acme/widgets.git holding refs/pull/1/head, with a fake gh (deps.gh) that records its calls.
 // Covers: not checked out (one fetch into refs/specreview/pr/1, the packet's `gh pr checkout` line), checked out (the
 // working tree, no fetch), the URL form, offline, gh missing / not signed in / PR not found, values from gh validated
@@ -118,7 +118,7 @@ describe('review --pr', () => {
     assert.deepEqual(g.calls[1], ['pr', 'view', '1', '-R', 'acme/widgets', '--json', FIELDS]);
 
     const text = await cli(['review', '--pr', '1'], { gh: fakeGh().fn });
-    assert.match(text.stdout, /^specreview: code review cr-pr-1 unchanged since v1 · pr #1 \(merge-base [0-9a-f]{7}\) \.\. [0-9a-f]{7}$/m);
+    assert.match(text.stdout, /^suiko: code review cr-pr-1 unchanged since v1 · pr #1 \(merge-base [0-9a-f]{7}\) \.\. [0-9a-f]{7}$/m);
     assert.match(text.stdout, /^ {2}PR #1 is not checked out here: line numbers are its head [0-9a-f]{7}; run `gh pr checkout 1` before editing$/m);
 
     const ctx = await r.ctx();

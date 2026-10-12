@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview final <doc> [--decisions] [--out <dir>]` (design 3.12, 8.9):
+// `suiko final <doc> [--decisions] [--out <dir>]` (design 3.12, 8.9):
 //   finalize(ctx, doc, { decisions, outDir }) -> { doc, final, versions, reviews, resolved, decisions,
 //                                                  workingMatches, decisionsPath, decisionsAbs }
 // Requires a final version (an approved review with "Mark final") and a working copy identical to it

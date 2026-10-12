@@ -8,7 +8,7 @@
 //   3. SPECREVIEW_DEBUG = 1 | true | * | all          -> debug for every scope
 //      SPECREVIEW_DEBUG = store,lock                   -> debug for those scopes (prefix match), warn elsewhere
 //   4. default: warn
-// Line format: `specreview <level> [<scope>] <message> <json data>`; prefixed by an ISO timestamp when
+// Line format: `suiko <level> [<scope>] <message> <json data>`; prefixed by an ISO timestamp when
 // `configureLogger({ time: true })` or SPECREVIEW_LOG_TIME=1 (the daemon enables it for daemon.log).
 
 /** @typedef {'debug' | 'info' | 'warn' | 'error' | 'silent'} LogLevel */
@@ -96,7 +96,7 @@ export function createLogger(scope) {
     if (RANK[level] < RANK[effective]) return;
     const withTime = settings.time ?? /^(1|true)$/i.test(process.env.SPECREVIEW_LOG_TIME || '');
     const prefix = withTime ? `${new Date().toISOString()} ` : '';
-    emit(`${prefix}specreview ${level} [${scope}] ${message}${formatData(data, effective === 'debug')}`);
+    emit(`${prefix}suiko ${level} [${scope}] ${message}${formatData(data, effective === 'debug')}`);
   });
   return {
     debug: make('debug'),

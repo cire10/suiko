@@ -3,7 +3,7 @@ Line numbers = current file on disk (identical to v1).
 Reviewer summary: Good start. The note about the gateway is agreed - keep it.
 4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
 
-[t3] suggestion · L23 · §1 Goals > 1.1 Milestones · apply verbatim: specreview apply kitchen-sink t3
+[t3] suggestion · L23 · §1 Goals > 1.1 Milestones · apply verbatim: suiko apply kitchen-sink t3
   - Prototype the issuer.
   + Prototype the issuer behind the gateway.
   Eric: Name where it runs.
@@ -24,6 +24,6 @@ Reviewer summary: Good start. The note about the gateway is agreed - keep it.
 
 LOCKED (agreed - do not modify): L1 §2 Architecture "the gateway never stores tokens" (L38)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
   Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
-NEXT: edits -> specreview revise kitchen-sink --replies - (JSON, one entry per thread) -> specreview wait kitchen-sink (background)
+NEXT: edits -> suiko revise kitchen-sink --replies - (JSON, one entry per thread) -> suiko wait kitchen-sink (background)

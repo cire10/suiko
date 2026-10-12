@@ -63,9 +63,9 @@ describe('handshake', () => {
       assert.ok(!authorMsgs.some((/** @type {any} */ m) => m && m.type === 'connect'));
 
       const g = await d.frame.evaluate(() => ({
-        enumerable: Object.keys(window).includes('__specreviewGuest'),
-        present: '__specreviewGuest' in window,
-        connected: /** @type {any} */ (window).__specreviewGuest.connected,
+        enumerable: Object.keys(window).includes('__suikoGuest'),
+        present: '__suikoGuest' in window,
+        connected: /** @type {any} */ (window).__suikoGuest.connected,
         children: [...document.documentElement.children].map((c) => c.localName),
       }));
       assert.deepEqual(g, { enumerable: false, present: true, connected: true, children: ['head', 'body', 'sr-overlay'] });
@@ -324,7 +324,7 @@ describe('pick mode', () => {
   async function hover(d, r, label) {
     await d.page.mouse.move(r.cx, r.cy);
     await d.frame.waitForFunction((l) => {
-      const ins = /** @type {any} */ (window).__specreviewGuest.inspect();
+      const ins = /** @type {any} */ (window).__suikoGuest.inspect();
       return ins.pickBox && ins.pickBox.label === l;
     }, label, { timeout: 3000 });
   }
@@ -362,7 +362,7 @@ describe('pick mode', () => {
       await hover(d, cell, 'td refresh_token / TTL');
       await d.page.mouse.down();
       await d.page.mouse.up();
-      await d.frame.waitForFunction(() => !!(/** @type {any} */ (window).__specreviewGuest.inspect().chooser));
+      await d.frame.waitForFunction(() => !!(/** @type {any} */ (window).__suikoGuest.inspect().chooser));
       const ins = await inspect(d.frame);
       assert.deepEqual(ins.chooser.buttons.map((/** @type {any} */ b) => b.action), ['cell', 'row', 'column', 'table']);
       const btn = ins.chooser.buttons.find((/** @type {any} */ b) => b.action === 'cell');
@@ -383,7 +383,7 @@ describe('pick mode', () => {
       await hover(d, jwt, 'td access_token / Notes');
       await d.page.mouse.down();
       await d.page.mouse.up();
-      await d.frame.waitForFunction(() => !!(/** @type {any} */ (window).__specreviewGuest.inspect().chooser));
+      await d.frame.waitForFunction(() => !!(/** @type {any} */ (window).__suikoGuest.inspect().chooser));
       const from2 = await mark(d.page);
       await d.page.keyboard.press('2');
       const act2 = await waitMsg(d.page, 'action', from2);
@@ -405,12 +405,12 @@ describe('pick mode', () => {
       const t = await rectOf(d.frame, '[data-srid="27"]');
       await hover(d, t, 'svg g "Auth"');
       await d.page.keyboard.press('[');
-      await d.frame.waitForFunction(() => /** @type {any} */ (window).__specreviewGuest.inspect().pickBox.label === 'svg "Auth Gateway"');
+      await d.frame.waitForFunction(() => /** @type {any} */ (window).__suikoGuest.inspect().pickBox.label === 'svg "Auth Gateway"');
       await d.page.keyboard.press(']');
       await d.page.keyboard.press(']');
-      await d.frame.waitForFunction(() => /** @type {any} */ (window).__specreviewGuest.inspect().pickBox.label === 'svg text "Auth"');
+      await d.frame.waitForFunction(() => /** @type {any} */ (window).__suikoGuest.inspect().pickBox.label === 'svg text "Auth"');
       await d.page.keyboard.press('[');
-      await d.frame.waitForFunction(() => /** @type {any} */ (window).__specreviewGuest.inspect().pickBox.label === 'svg g "Auth"');
+      await d.frame.waitForFunction(() => /** @type {any} */ (window).__suikoGuest.inspect().pickBox.label === 'svg g "Auth"');
       const from = await mark(d.page);
       await d.page.mouse.down();
       await d.page.mouse.up();
@@ -742,7 +742,7 @@ describe('targets', () => {
       assert.equal(await pinned(), null, 'system: no forced background');
       assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__themes), ['dark', 'light', 'system']);
 
-      const raw = await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.modules.TextWalk.docIndex().raw);
+      const raw = await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.modules.TextWalk.docIndex().raw);
       assert.ok(!raw.includes('Alpha'), 'mermaid source is not rendered text');
       assert.ok(raw.includes('const answer = 42;\nconsole.log(answer);'), 'code text is kept verbatim');
       // Selecting inside the diagram snaps to the diagram element.
@@ -992,7 +992,7 @@ describe('security and fidelity', () => {
       }));
       assert.deepEqual(state, { a: true, b: false, clicks: 'clicks: 2' });
       assert.deepEqual(d.pageErrors, []);
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
     } finally {
       await d.close();
     }
@@ -1027,7 +1027,7 @@ describe('security and fidelity', () => {
           overlays: document.querySelectorAll('sr-overlay').length,
         }));
         const added = now.props.filter((p) => !base.props.includes(p));
-        assert.deepEqual(added, ['__specreviewGuest']);
+        assert.deepEqual(added, ['__suikoGuest']);
         assert.equal(now.body, base.body);
         assert.deepEqual(now.tail, ['head', 'body', 'sr-overlay']);
         assert.equal(now.overlays, 1);

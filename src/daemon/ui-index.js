@@ -47,7 +47,7 @@ export const DEFAULT_IMPORT_MAP = Object.freeze({
     marked: '/vendor/marked/marked.esm.js',
     dompurify: '/vendor/dompurify/purify.es.mjs',
     diff: '/vendor/diff/index.js',
-    'specreview/protocol': '/ui-shared/protocol.js',
+    'suiko/protocol': '/ui-shared/protocol.js',
   },
 });
 
@@ -126,7 +126,7 @@ export function withImportMap(html, importMap) {
 /** Page served when src/ui/index.html does not exist yet. */
 const PLACEHOLDER = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SpecReview</title>
+<title>Suiko</title>
 <style>
 :root{color-scheme:light dark;--bg:#ffffff;--fg:#1f2328;--muted:#59636e}
 @media (prefers-color-scheme: dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1}}
@@ -134,7 +134,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-appl
 main{max-width:560px;margin:15vh auto;padding:0 16px}h1{font-size:20px;margin:0 0 8px}p{color:var(--muted)}
 code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
 </style></head>
-<body><main><h1>SpecReview is running</h1>
+<body><main><h1>Suiko is running</h1>
 <p>The reviewer UI is not installed in this build (<code>src/ui/index.html</code> is missing). The daemon, the API and the
 document origin are available.</p></main></body></html>
 `;

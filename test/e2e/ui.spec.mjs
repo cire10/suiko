@@ -281,7 +281,7 @@ test('a rejected token shows the reconnect banner until the daemon accepts it ag
   mock.setAcceptedToken('rotated-token');
   const banner = page.locator('.banner-conn');
   await expect(banner).toBeVisible({ timeout: 15000 });
-  await expect(banner).toContainText('Reconnecting to SpecReview...');
+  await expect(banner).toContainText('Reconnecting to Suiko...');
   await expect(banner).toContainText('access token was rejected');
   mock.setAcceptedToken(null);
   await expect(banner).toBeHidden({ timeout: 15000 });

@@ -1,9 +1,9 @@
 // @ts-check
-// `specreview review` against real (scripted) repositories, main() in-process with the daemon stubbed: every local
+// `suiko review` against real (scripted) repositories, main() in-process with the daemon stubbed: every local
 // mode, the JSON and text output, the file kinds (untracked, binary, renamed, deleted, secrets excluded), re-runs
 // (unchanged, a new round, a closed review reopened), the workspace at the repository root, the exit codes
 // (1 not a repo, 3 refused, 4 not found / nothing to review), `--file` on ask/show, `diff` of a code review, wait's
-// dirty refusal, and MCP specreview_review.
+// dirty refusal, and MCP suiko_review.
 
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,7 +61,7 @@ async function reviewJson(args, o = {}) {
   return JSON.parse(res.stdout);
 }
 
-describe('specreview review: modes', () => {
+describe('suiko review: modes', () => {
   test('default on a feature branch: since-base against main; the JSON of design 4.2; the file kinds', async () => {
     const base = r.git('rev-parse', 'HEAD');
     r.git('checkout', '-q', '-b', 'feat/token-refresh');
@@ -105,10 +105,10 @@ describe('specreview review: modes', () => {
     const text = await cli(['review', '--uncommitted']);
     assert.equal(text.code, 0, text.stderr);
     const out = text.stdout.trimEnd().split('\n');
-    assert.match(out[0], /^specreview: code review cr-uncommitted v1 · uncommitted HEAD [0-9a-f]{7} \.\. working tree$/);
+    assert.match(out[0], /^suiko: code review cr-uncommitted v1 · uncommitted HEAD [0-9a-f]{7} \.\. working tree$/);
     assert.equal(out[1], '  2 files · +2 -1');
     assert.match(out[2], /^ {2}review UI: http:\/\/127\.0\.0\.1:5873\/d\/[^/]+\/cr-uncommitted\?k=tok$/);
-    assert.equal(out[3], 'next: run `specreview wait cr-uncommitted` in the background');
+    assert.equal(out[3], 'next: run `suiko wait cr-uncommitted` in the background');
 
     const cases = /** @type {Array<[string[], Record<string, unknown>]>} */ ([
       [['--staged'], { doc: 'cr-staged', mode: 'staged', worktree: false, files: 1 }],
@@ -141,7 +141,7 @@ describe('specreview review: modes', () => {
     r.write('src/a.js', lines(21));
     await reviewJson(['--uncommitted']);
     const same = await cli(['review', '--uncommitted']);
-    assert.match(same.stdout, /^specreview: code review cr-uncommitted unchanged since v1 · /);
+    assert.match(same.stdout, /^suiko: code review cr-uncommitted unchanged since v1 · /);
     r.write('src/a.js', lines(22));
     const again = await reviewJson(['--uncommitted']);
     assert.deepEqual([again.created, again.recorded, again.version], [false, true, 2]);
@@ -153,7 +153,7 @@ describe('specreview review: modes', () => {
   });
 });
 
-describe('specreview review: exit codes', () => {
+describe('suiko review: exit codes', () => {
   test('1 outside a repository; 4 nothing to review / unknown base or commit; 3 too many files or unmerged --staged', async () => {
     const plain = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-plain-')));
     try {
@@ -193,7 +193,7 @@ describe('code reviews through the other commands', () => {
     r.write('src/a.js', lines(20, (i) => (i === 5 ? 'FIVE' : `line ${i}`)));
     const dirty = await cli(['wait', 'cr-uncommitted', '--timeout', '5s']);
     assert.equal(dirty.code, 3);
-    assert.match(dirty.stderr, /files changed since v1 \(src\/a\.js\): run `specreview revise cr-uncommitted` to record the round first, or pass --allow-dirty/);
+    assert.match(dirty.stderr, /files changed since v1 \(src\/a\.js\): run `suiko revise cr-uncommitted` to record the round first, or pass --allow-dirty/);
 
     const rev = await cli(['revise', 'cr-uncommitted', '-m', 'caps']);
     assert.equal(rev.code, 0, rev.stderr);
@@ -208,9 +208,9 @@ describe('code reviews through the other commands', () => {
     assert.equal((await cli(['revert', 'cr-uncommitted', '--hunk', 'h1'])).code, 3, 'revert too');
   });
 
-  test('MCP specreview_review runs the same command (structured JSON)', async () => {
+  test('MCP suiko_review runs the same command (structured JSON)', async () => {
     r.write('src/a.js', lines(21));
-    const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'specreview_review'));
+    const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'suiko_review'));
     const deps = { cwd: r.root, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: r.home, HOME: r.base, PATH: process.env.PATH }, ensureDaemon: async () => /** @type {any} */ (DAEMON) };
     const res = await callTool(tool, tool.schema.parse({ mode: 'uncommitted' }), null, deps);
     assert.ok(!res.isError, JSON.stringify(res.content));
@@ -232,7 +232,7 @@ describe('a full loop through the CLI', () => {
     const w = await cli(['wait', 'cr-uncommitted', '--timeout', '10s']);
     assert.equal(w.code, 0, w.stderr);
     assert.match(w.stdout, /\[t1\] comment · src\/a\.js:L12\n  src> const twelve = 12;/);
-    assert.match(w.stdout, /\[t2\] suggestion · src\/a\.js:L5 · apply verbatim: specreview apply cr-uncommitted t2/);
+    assert.match(w.stdout, /\[t2\] suggestion · src\/a\.js:L5 · apply verbatim: suiko apply cr-uncommitted t2/);
     assert.equal((await cli(['apply', 'cr-uncommitted', 't2'])).code, 0);
     // the agent's Edit with the src> line as old_string
     r.write('src/a.js', r.read('src/a.js').replace('const twelve = 12;', 'const TWELVE = 12;'));

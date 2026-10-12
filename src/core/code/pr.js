@@ -1,5 +1,5 @@
 // @ts-check
-// PR mode (design 4.18): `specreview review --pr <n|url>` reviews a GitHub pull request. Only the CLI calls
+// PR mode (design 4.18): `suiko review --pr <n|url>` reviews a GitHub pull request. Only the CLI calls
 // resolvePr and fetchPr: rounds (snapshot.js resolveSides), the daemon's Re-snapshot and the poller use local refs
 // and never run `gh` or `git fetch`; a re-fetch happens only when `review --pr` runs again.
 //
@@ -212,14 +212,14 @@ export async function fetchPr(repo, pr) {
   const remote = await prRemote(repo, pr.repo);
   if (!remote) {
     throw new RefusedError(
-      `no git remote here points at ${pr.repo}: add one (\`git remote add upstream https://github.com/${pr.repo}.git\`), then run \`specreview review --pr ${pr.number}\` again`,
+      `no git remote here points at ${pr.repo}: add one (\`git remote add upstream https://github.com/${pr.repo}.git\`), then run \`suiko review --pr ${pr.number}\` again`,
       { details: { repo: pr.repo } },
     );
   }
   const refspecs = [...(checkedOut ? [] : [`+refs/pull/${pr.number}/head:${prRef(pr.number)}`]), ...(haveBase ? [] : [pr.mergeBase])];
   await repo.fetch(remote, refspecs);
   if (!checkedOut && (await repo.verifyCommit(prRef(pr.number))) !== pr.headOid) {
-    throw new UsageError(`PR #${pr.number} changed while it was fetched: run \`specreview review --pr ${pr.number}\` again`);
+    throw new UsageError(`PR #${pr.number} changed while it was fetched: run \`suiko review --pr ${pr.number}\` again`);
   }
   if (!(await repo.verifyCommit(pr.mergeBase))) {
     throw new NotFoundError(`the merge-base ${pr.mergeBase.slice(0, 7)} of PR #${pr.number} could not be fetched from ${remote}`);

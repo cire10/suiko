@@ -204,7 +204,7 @@ export function initialState() {
  */
 export function readPref(name, allowed, fallback) {
   try {
-    const v = /** @type {T} */ (localStorage.getItem(`specreview.${name}`));
+    const v = /** @type {T} */ (localStorage.getItem(`suiko.${name}`));
     return v && allowed.includes(v) ? v : fallback;
   } catch {
     return fallback;
@@ -214,7 +214,7 @@ export function readPref(name, allowed, fallback) {
 /** @param {string} name @param {string} value */
 export function writePref(name, value) {
   try {
-    localStorage.setItem(`specreview.${name}`, value);
+    localStorage.setItem(`suiko.${name}`, value);
   } catch {
     /* storage unavailable: the preference lasts for this page only */
   }
@@ -236,7 +236,7 @@ export function createStore(initial) {
       try {
         fn();
       } catch (err) {
-        console.error('specreview: store subscriber failed', err);
+        console.error('suiko: store subscriber failed', err);
       }
     }
   }

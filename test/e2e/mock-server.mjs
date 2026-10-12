@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
-// E2E / development mock of the SpecReview daemon (WP5) for the reviewer UI (WP7).
+// E2E / development mock of the Suiko daemon (WP5) for the reviewer UI (WP7).
 //
 // Two HTTP servers on 127.0.0.1, like the daemon:
 //   UI origin       /, /d/:ws/:doc        src/ui/index.html with the UI CSP (src/ui/csp.js)
@@ -634,7 +634,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = Number(arg('--port') || 5810);
   const scenario = /** @type {any} */ (arg('--scenario') || 'round2');
   const mock = await startMockServer({ scenario, uiPort: port, contentPort: port + 1, token: arg('--token') });
-  console.log(`SpecReview mock (${scenario}) on ${mock.uiOrigin} (content ${mock.contentOrigin})`);
+  console.log(`Suiko mock (${scenario}) on ${mock.uiOrigin} (content ${mock.contentOrigin})`);
   console.log(`  home:         ${mock.url()}`);
   for (const d of mock.docs) console.log(`  ${d.id.padEnd(13)} ${mock.url(d.id)}`);
   const stop = async () => {

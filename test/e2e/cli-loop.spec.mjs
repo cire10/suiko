@@ -1,5 +1,5 @@
 // @ts-check
-// The product as a user runs it (integration): the daemon is started by `specreview open` (a real CLI process that
+// The product as a user runs it (integration): the daemon is started by `suiko open` (a real CLI process that
 // spawns the detached `serve --foreground` daemon on a test port), the reviewer works in the real UI in Chrome, and
 // the agent side is the real CLI (`wait` in the background, a file edit, `revise --replies -`) as subprocesses.
 // Checks: the UI and the doc iframe load with the guest handshake and no console errors, a mouse selection ->
@@ -7,7 +7,7 @@
 // highlights) after the agent's revision. Same for the HTML fixture (its own scripts run).
 //
 // Isolation: temp workspace, SPECREVIEW_HOME and HOME for the subprocesses, a free port pair in 5850-5899
-// (SPECREVIEW_PORT, never 4777/4778); `specreview stop` (and a pid kill as a fallback) in afterAll.
+// (SPECREVIEW_PORT, never 4777/4778); `suiko stop` (and a pid kill as a fallback) in afterAll.
 
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -20,7 +20,7 @@ import { TESTID } from '../../src/shared/protocol.js';
 import { Ui } from './fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const BIN = path.join(ROOT, 'bin', 'specreview.js');
+const BIN = path.join(ROOT, 'bin', 'suiko.js');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'docs');
 
 test.describe.configure({ mode: 'serial' });
@@ -64,7 +64,7 @@ function cli(args, { stdin } = {}) {
 /** @param {string[]} args @param {{ stdin?: string }} [opts] */
 async function ok(args, opts) {
   const r = await cli(args, opts).done;
-  expect(r.code, `specreview ${args.join(' ')}\n${r.stdout}\n${r.stderr}`).toBe(0);
+  expect(r.code, `suiko ${args.join(' ')}\n${r.stdout}\n${r.stderr}`).toBe(0);
   return r;
 }
 

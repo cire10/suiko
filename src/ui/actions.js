@@ -138,7 +138,7 @@ export async function openHome() {
   set({
     route: { view: 'home' }, ds: null, composer: null, reply: null, dialog: null, submitForm: null, busyThreads: [], targets: null, changes: null,
   });
-  document.title = 'SpecReview';
+  document.title = 'Suiko';
   updateFavicon(false);
   stream = new EventStream({
     onEvent: (name) => {
@@ -248,7 +248,7 @@ export async function refreshNow() {
   try {
     ds = await c.state();
   } catch (err) {
-    if (!(/** @type {any} */ (err).offline)) console.warn('specreview: refresh failed', err);
+    if (!(/** @type {any} */ (err).offline)) console.warn('suiko: refresh failed', err);
     return;
   }
   if (client !== c) return;
@@ -382,7 +382,7 @@ function onDocEvent(name, data) {
 }
 
 /**
- * `specreview snip` (from a terminal or a macOS Shortcut) added a screenshot draft: a toast says so, with [Edit] to
+ * `suiko snip` (from a terminal or a macOS Shortcut) added a screenshot draft: a toast says so, with [Edit] to
  * focus the draft card and write about it. When the draft is already gone (`snip --send` submitted it), the toast
  * only says it arrived.
  * @param {any} data {source: 'snip', draft: 'dN'}
@@ -472,8 +472,8 @@ export function openVerify(v) {
 
 export function updateTitle() {
   const s = get();
-  const title = s.ds?.doc?.title || s.ds?.doc?.id || 'SpecReview';
-  document.title = `${s.unseenVersion != null ? `(v${s.unseenVersion}) ` : ''}${title} · SpecReview`;
+  const title = s.ds?.doc?.title || s.ds?.doc?.id || 'Suiko';
+  document.title = `${s.unseenVersion != null ? `(v${s.unseenVersion}) ` : ''}${title} · Suiko`;
   updateFavicon(s.unseenVersion != null);
 }
 
@@ -514,7 +514,7 @@ export async function loadTargets() {
     pushTargets();
     flushPendingFocus();
   } catch (err) {
-    if (!(/** @type {any} */ (err).offline)) console.warn('specreview: cannot load targets', err);
+    if (!(/** @type {any} */ (err).offline)) console.warn('suiko: cannot load targets', err);
   }
 }
 
@@ -1404,7 +1404,7 @@ const autosaveDraftSoon = debounce(async () => {
       saveBackupSoon();
       return;
     }
-    if (!(/** @type {any} */ (err).offline)) console.warn('specreview: draft autosave failed', err);
+    if (!(/** @type {any} */ (err).offline)) console.warn('suiko: draft autosave failed', err);
   }
 }, 800);
 
@@ -1412,7 +1412,7 @@ const autosaveDraftSoon = debounce(async () => {
 
 function backupKey() {
   const r = get().route;
-  return r.view === 'doc' ? `specreview.composer.${r.ws}/${r.doc}` : null;
+  return r.view === 'doc' ? `suiko.composer.${r.ws}/${r.doc}` : null;
 }
 
 const saveBackupSoon = debounce(() => {
@@ -1900,7 +1900,7 @@ function screenSnipCapture(s) {
   return { kind: 'doc' };
 }
 
-const SNIP_SCREEN_UNSUPPORTED = 'Snipping the screen needs macOS (SpecReview runs the system screenshot picker on your Mac). Press b (without Shift) to snip an area of the document instead.';
+const SNIP_SCREEN_UNSUPPORTED = 'Snipping the screen needs macOS (Suiko runs the system screenshot picker on your Mac). Press b (without Shift) to snip an area of the document instead.';
 
 /**
  * Shift+B / the screen button: the daemon runs the macOS region picker (`screencapture -i`, like Cmd+Shift+4) on the
@@ -1945,7 +1945,7 @@ export async function snipScreen() {
     } else if (e?.status === 409 || code === 'busy') {
       toast('A screen snip is already running on your Mac. Finish it there (or press Esc) first.', { tone: 'warn' });
     } else {
-      toast(`Screen snip failed: ${e?.offline ? 'the connection to SpecReview was lost' : errorText(err)}`, { tone: 'danger' });
+      toast(`Screen snip failed: ${e?.offline ? 'the connection to Suiko was lost' : errorText(err)}`, { tone: 'danger' });
     }
     return;
   } finally {
@@ -2218,7 +2218,7 @@ export function submitWithVerdict(verdict) {
 /** localStorage key of the "seen" marks of the comparison shown (base -> version), or null off a doc. @param {UiState} s */
 export function seenStorageKey(s) {
   const r = s.route;
-  return r.view === 'doc' ? `specreview.seen.${r.ws}/${r.doc}.${s.base}-${s.version}` : null;
+  return r.view === 'doc' ? `suiko.seen.${r.ws}/${r.doc}.${s.base}-${s.version}` : null;
 }
 
 /** The hunk ids marked seen in a comparison. @param {string|null} key @returns {Set<string>} */
@@ -2272,7 +2272,7 @@ export function stopRecording() {
   set({ recording: false });
 }
 
-/** Ends the review session (like `specreview close`): a waiting agent stops waiting. */
+/** Ends the review session (like `suiko close`): a waiting agent stops waiting. */
 export async function closeSession() {
   const c = client;
   if (!c) return;
@@ -2285,7 +2285,7 @@ export async function closeSession() {
   await refreshNow();
 }
 
-/** Copies the review URL of the open doc, with the access token like `specreview open` prints it. */
+/** Copies the review URL of the open doc, with the access token like `suiko open` prints it. */
 export async function copyReviewLink() {
   const r = get().route;
   if (r.view !== 'doc') return;

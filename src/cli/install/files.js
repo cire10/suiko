@@ -5,9 +5,9 @@
 // Ownership rules (what "ours" means, so install never clobbers and uninstall removes only what install added):
 //   - Markdown: the text between our marker comments (`<!-- specreview:begin ... -->` .. `<!-- specreview:end -->`).
 //     Nothing outside the markers is ever rewritten; markers that are not one well-formed pair are refused.
-//   - TOML (Codex's config.toml): the marker lines and the [mcp_servers.specreview] table between them, nothing else
+//   - TOML (Codex's config.toml): the marker lines and the [mcp_servers.suiko] table between them, nothing else
 //     (Codex adds its own tables inside the markers; see toml.js).
-//   - JSON: one named entry (e.g. mcpServers.specreview) or the hook commands that run specreview. The file is parsed,
+//   - JSON: one named entry (e.g. mcpServers.suiko) or the hook commands that run suiko. The file is parsed,
 //     only that entry changes, and a file that is not valid JSON is refused (InstallRefusal), never overwritten.
 //   - Whole files we copy (skills, commands): ours when the content is what we install now, or what an earlier install
 //     wrote (sha256 in the install manifest, $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user
@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { SpecReviewError } from '../../core/store/errors.js';
+import { SuikoError } from '../../core/store/errors.js';
 import { EXIT } from '../../shared/protocol.js';
 import { TomlScanError, definitionsOutside, findTomlBlock, removeTomlBlock, upsertTomlBlock } from './toml.js';
 
@@ -37,7 +37,7 @@ export const BACKUP_SUFFIX = '.specreview-backup';
  * A file the installer must not touch (invalid JSON, a conflicting entry it does not own...). The agent's other
  * changes still go ahead; the refusal is reported with `fix` (what to do by hand).
  */
-export class InstallRefusal extends SpecReviewError {
+export class InstallRefusal extends SuikoError {
   /**
    * @param {string} file
    * @param {string} message
@@ -77,7 +77,7 @@ export function sha256(text) {
 
 /**
  * @typedef {{ schema: 1, files: Record<string, { sha256: string[] }>, created: string[] }} Manifest
- * `created`: config files install created (uninstall may delete them once only SpecReview's part is left).
+ * `created`: config files install created (uninstall may delete them once only Suiko's part is left).
  */
 
 /**
@@ -157,7 +157,7 @@ export function writeAtomic(file, content) {
     try {
       file = fs.realpathSync(file);
     } catch {
-      throw new Error(`${file} is a symlink to a missing file (${fs.readlinkSync(file)}); SpecReview does not replace the link`);
+      throw new Error(`${file} is a symlink to a missing file (${fs.readlinkSync(file)}); Suiko does not replace the link`);
     }
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -205,7 +205,7 @@ export function isOurCopy(file, current, content, o) {
  * @returns {string}
  */
 export function stripInvocationNote(text) {
-  return text.replace(/^> \*\*On this machine `specreview` is not on PATH\.\*\*[^\n]*\n> [^\n]*\n/m, '');
+  return text.replace(/^> \*\*On this machine `suiko` is not on PATH\.\*\*[^\n]*\n> [^\n]*\n/m, '');
 }
 
 /**
@@ -266,9 +266,9 @@ export function removeCopyAction(file, content, o = {}) {
   const current = readTextOrNull(file);
   if (current === null) return null;
   if (isOurCopy(file, current, content, o)) {
-    return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: 'installed by SpecReview' };
+    return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: 'installed by Suiko' };
   }
-  return { path: file, action: 'unchanged', content: current, kept: true, note: 'kept: changed since SpecReview installed it (delete it yourself if you no longer need it)' };
+  return { path: file, action: 'unchanged', content: current, kept: true, note: 'kept: changed since Suiko installed it (delete it yourself if you no longer need it)' };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -316,8 +316,8 @@ export function checkMarkers(file, text, m) {
   if (!problem) return;
   throw new InstallRefusal(
     file,
-    `${file}: ${problem}, so where SpecReview's block ends is unclear; the file is left as is`,
-    `repair the markers by hand (one "${m.begin} ... -->" line and one "${m.end}" line around the SpecReview block, or delete the block with both markers), then re-run`,
+    `${file}: ${problem}, so where Suiko's block ends is unclear; the file is left as is`,
+    `repair the markers by hand (one "${m.begin} ... -->" line and one "${m.end}" line around the Suiko block, or delete the block with both markers), then re-run`,
   );
 }
 
@@ -355,7 +355,7 @@ export function removeBlock(current, m) {
  * @typedef {object} BlockOpts
  * @property {string} [source] integration file the block comes from
  * @property {string} [share]
- * @property {string} [what] e.g. 'the SpecReview protocol block'
+ * @property {string} [what] e.g. 'the Suiko protocol block'
  * @property {boolean} [showBlock] print the block in the dry run (small blocks such as the TOML table)
  */
 
@@ -371,7 +371,7 @@ export function blockAction(file, block, m, o = {}) {
   const current = readTextOrNull(file);
   if (current !== null) checkMarkers(file, current, m);
   const content = upsertBlock(current, block, m);
-  const what = o.what ?? 'the SpecReview block';
+  const what = o.what ?? 'the Suiko block';
   const lines = block.split('\n').length;
   const from = o.source ? ` from ${o.source}` : '';
   const note =
@@ -380,7 +380,7 @@ export function blockAction(file, block, m, o = {}) {
       : current.trim() === ''
         ? `fills the empty file with ${what}${from} (${lines} lines)`
         : findBlock(current, m)
-          ? `replaces ${what} between the specreview markers`
+          ? `replaces ${what} between the suiko markers`
           : `appends ${what}${from} (${lines} lines); the rest of the file is kept`;
   /** @type {FileAction} */
   const a = {
@@ -408,7 +408,7 @@ export function removeBlockAction(file, m, o = {}) {
   checkMarkers(file, current, m);
   const next = removeBlock(current, m);
   if (next === null) return null;
-  return removalAction(file, next, o.what ?? 'the SpecReview block', o);
+  return removalAction(file, next, o.what ?? 'the Suiko block', o);
 }
 
 /**
@@ -424,7 +424,7 @@ function removalAction(file, next, what, o) {
   const share = o.share ? { share: o.share } : {};
   const extra = o.extra ? `; ${o.extra}` : '';
   if (next.trim() === '' && createdByUs(file, o.manifest)) return { path: file, action: 'delete', content: '', note: `only ${what} was left in it${extra}`, ...share };
-  const rest = next.trim() === '' ? `nothing else is in it, but ${isSymlink(file) ? 'it is a symlink' : 'it existed before SpecReview'}, so the file stays` : 'the rest of the file is kept';
+  const rest = next.trim() === '' ? `nothing else is in it, but ${isSymlink(file) ? 'it is a symlink' : 'it existed before Suiko'}, so the file stays` : 'the rest of the file is kept';
   return { path: file, action: 'update', content: next, note: `removes ${what}; ${rest}${extra}`, backup: true, ...share };
 }
 
@@ -444,7 +444,7 @@ export function scanTomlFile(file, text, ours, fix) {
     return findTomlBlock(text, ours);
   } catch (err) {
     const msg = /** @type {Error} */ (err).message;
-    if (err instanceof TomlScanError) throw new InstallRefusal(file, `${file} could not be parsed as TOML (${msg}); SpecReview never rewrites a file it cannot parse`, fix);
+    if (err instanceof TomlScanError) throw new InstallRefusal(file, `${file} could not be parsed as TOML (${msg}); Suiko never rewrites a file it cannot parse`, fix);
     throw new InstallRefusal(file, `${file}: ${msg}; the file is left as is`, fix);
   }
 }
@@ -473,7 +473,7 @@ export function tomlBlockAction(file, current, blk, block, ours, o) {
     throw new InstallRefusal(file, `${file}: adding ${o.what} would define it twice; the file is left as is`, o.fix);
   }
   const moved = blk.foreignTables.length
-    ? `; moves ${blk.foreignTables.join(', ')} (found inside the markers, not SpecReview's) below them`
+    ? `; moves ${blk.foreignTables.join(', ')} (found inside the markers, not Suiko's) below them`
     : '';
   const lines = block.split('\n').length;
   const note =
@@ -482,7 +482,7 @@ export function tomlBlockAction(file, current, blk, block, ours, o) {
       : current.trim() === ''
         ? `fills the empty file with ${o.what} (${lines} lines)`
         : blk.region
-          ? `replaces ${o.what} between the specreview markers${moved}`
+          ? `replaces ${o.what} between the suiko markers${moved}`
           : `appends ${o.what} (${lines} lines); the rest of the file is kept`;
   return {
     path: file,
@@ -506,7 +506,7 @@ export function removeTomlBlockAction(file, text, blk, o) {
   const next = removeTomlBlock(text, blk);
   if (next === null) return null;
   const what = blk.region ? o.what : 'a leftover "# specreview:end" line';
-  const extra = blk.foreignTables.length ? `keeps ${blk.foreignTables.join(', ')} (found inside the markers, not SpecReview's)` : undefined;
+  const extra = blk.foreignTables.length ? `keeps ${blk.foreignTables.join(', ')} (found inside the markers, not Suiko's)` : undefined;
   return removalAction(file, next, what, { manifest: o.manifest, extra });
 }
 
@@ -526,7 +526,7 @@ export function readJsonFile(file, fix) {
   try {
     value = JSON.parse(text);
   } catch (err) {
-    throw new InstallRefusal(file, `${file} is not valid JSON (${/** @type {Error} */ (err).message}); SpecReview never rewrites a file it cannot parse`, fix);
+    throw new InstallRefusal(file, `${file} is not valid JSON (${/** @type {Error} */ (err).message}); Suiko never rewrites a file it cannot parse`, fix);
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new InstallRefusal(file, `${file} does not contain a JSON object`, fix);
   return { text, value };
@@ -584,8 +584,8 @@ export function jsonAction(file, mutate, o = {}) {
     return { path: file, action: 'unchanged', content: /** @type {string} */ (raw), ...(o.note ? { note: o.note } : {}) };
   }
   if (o.deleteWhenEmpty && Object.keys(next).length === 0 && createdByUs(file, o.manifest)) {
-    // Nothing but SpecReview's entries was in it, and install created it: no backup worth keeping.
-    return { path: file, action: 'delete', content: '', note: 'only SpecReview\'s entries were left in it' };
+    // Nothing but Suiko's entries was in it, and install created it: no backup worth keeping.
+    return { path: file, action: 'delete', content: '', note: 'only Suiko\'s entries were left in it' };
   }
   return {
     path: file,
@@ -639,7 +639,7 @@ function restoreEmptyContainers(next, current, file) {
 export function setEntry(obj, container, name, entry) {
   const present = obj[container] !== undefined && obj[container] !== null;
   if (present && (typeof obj[container] !== 'object' || Array.isArray(obj[container]))) {
-    throw new InstallRefusal('', `"${container}" is not a JSON object; SpecReview does not replace it`);
+    throw new InstallRefusal('', `"${container}" is not a JSON object; Suiko does not replace it`);
   }
   const box = present ? obj[container] : {};
   box[name] = entry;

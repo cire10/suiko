@@ -1,5 +1,5 @@
 // @ts-check
-// The multi-agent installer: `specreview install` (no target) and `specreview uninstall`, against a temp HOME with
+// The multi-agent installer: `suiko install` (no target) and `suiko uninstall`, against a temp HOME with
 // fake config dirs for each agent (never the real home: HOME, PATH and SPECREVIEW_HOME are passed explicitly, and
 // CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME are only set where a test points them at temp dirs).
 // Covers: detection (nothing installed, config dirs, binaries on PATH), the dry run, --apply, idempotency, merging
@@ -86,12 +86,12 @@ const esc = (/** @type {string} */ s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 const ALL_DIRS = ['.claude', '.codex/sessions', '.cursor', '.config/opencode', 'Library/Application Support/Claude'];
 const ALL_FILES = { '.gemini/settings.json': '{}\n' };
 
-describe('specreview install: detection and dry run', () => {
+describe('suiko install: detection and dry run', () => {
   test('nothing installed: says so, lists the unverified agents, writes nothing', async () => {
     const h = makeHome();
     const r = await h.run(['install']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^SpecReview install: dry run \(user scope\)\. Nothing is written without --apply\./);
+    assert.match(r.stdout, /^Suiko install: dry run \(user scope\)\. Nothing is written without --apply\./);
     for (const name of ['Claude Code', 'Codex CLI', 'Gemini CLI', 'Cursor', 'OpenCode', 'Claude Desktop']) assert.match(r.stdout, new RegExp(`^${name}: not detected$`, 'm'));
     assert.match(r.stdout, /No supported agent detected\. Name one with --only/);
     assert.match(r.stdout, /Not configured \(unverified integration surface\):\n {2}Google Antigravity: .*\n {2}Devin Desktop \(Windsurf\): /);
@@ -133,19 +133,19 @@ describe('specreview install: detection and dry run', () => {
     assert.ok(!out.includes('plan-gate'), 'no plan gate unless --with-plan-gate');
     assert.ok(!out.includes('Plan mode:'));
     // Codex: AGENTS.md block, shared skill, config.toml block printed in full
-    assert.match(out, new RegExp(`would create ${esc(h.p('.codex/AGENTS.md'))} {2}\\(new file with the SpecReview protocol block from integrations/agents-md/AGENTS\\.snippet\\.md`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.agents/skills/specreview-review/SKILL.md'))} .*\\[shared with Cursor\\]`));
-    assert.match(out, /\| \[mcp_servers\.specreview\]\n {6}\| command = ".+"\n {6}\| args = \[".+specreview\.js", "mcp"\]\n {6}\| tool_timeout_sec = 660/);
+    assert.match(out, new RegExp(`would create ${esc(h.p('.codex/AGENTS.md'))} {2}\\(new file with the Suiko protocol block from integrations/agents-md/AGENTS\\.snippet\\.md`));
+    assert.match(out, new RegExp(`would create ${esc(h.p('.agents/skills/suiko-review/SKILL.md'))} .*\\[shared with Cursor\\]`));
+    assert.match(out, /\| \[mcp_servers\.suiko\]\n {6}\| command = ".+"\n {6}\| args = \[".+suiko\.js", "mcp"\]\n {6}\| tool_timeout_sec = 660/);
     // Gemini, Cursor, OpenCode, Claude Desktop
     assert.match(out, new RegExp(`would create ${esc(h.p('.gemini/GEMINI.md'))}`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.gemini/commands/specreview-review.toml'))}`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.cursor/mcp.json'))} {2}\\(mcpServers\\.specreview`));
+    assert.match(out, new RegExp(`would create ${esc(h.p('.gemini/commands/suiko-review.toml'))}`));
+    assert.match(out, new RegExp(`would create ${esc(h.p('.cursor/mcp.json'))} {2}\\(mcpServers\\.suiko`));
     assert.match(out, /\| {7}"type": "stdio",/);
     assert.match(out, new RegExp(`would create ${esc(h.p('.config/opencode/AGENTS.md'))}`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.config/opencode/commands/specreview-review.md'))}`));
-    assert.match(out, new RegExp(`would create ${esc(h.p('.config/opencode/opencode.json'))} {2}\\(mcp\\.specreview`));
+    assert.match(out, new RegExp(`would create ${esc(h.p('.config/opencode/commands/suiko-review.md'))}`));
+    assert.match(out, new RegExp(`would create ${esc(h.p('.config/opencode/opencode.json'))} {2}\\(mcp\\.suiko`));
     assert.match(out, new RegExp(`would create ${esc(h.p('Library/Application Support/Claude/claude_desktop_config.json'))}`));
-    assert.match(out, /`specreview` is not on PATH, so the installed instructions tell agents to run ".+" ".+specreview\.js" instead/);
+    assert.match(out, /`suiko` is not on PATH, so the installed instructions tell agents to run ".+" ".+suiko\.js" instead/);
     assert.match(out, /\nRun with --apply to write these changes\.\n$/);
     assert.deepEqual(snapshot(h.home), before, 'nothing written');
     assert.deepEqual(fs.readdirSync(h.srHome), [], 'no manifest in a dry run');
@@ -174,8 +174,8 @@ describe('empty files', () => {
     const h = makeHome({ dirs: ['.codex'], files: { '.codex/AGENTS.md': '', '.codex/config.toml': '\n' } });
     const r = await h.run(['install', '--only', 'codex']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/AGENTS.md'))} {2}\\(fills the empty file with the SpecReview protocol block from `));
-    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/config.toml'))} {2}\\(fills the empty file with the \\[mcp_servers\\.specreview\\] table \\(6 lines\\)\\)`));
+    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/AGENTS.md'))} {2}\\(fills the empty file with the Suiko protocol block from `));
+    assert.match(r.stdout, new RegExp(`would update ${esc(h.p('.codex/config.toml'))} {2}\\(fills the empty file with the \\[mcp_servers\\.suiko\\] table \\(6 lines\\)\\)`));
     assert.doesNotMatch(r.stdout, /new file with/);
   });
 });
@@ -186,7 +186,7 @@ describe('the plan-mode gate (opt-in)', () => {
     const dry = await h.run(['install', '--only', 'claude', '--with-plan-gate']);
     assert.equal(dry.code, 0, dry.stderr);
     assert.match(dry.stdout, /PermissionRequest\(ExitPlanMode\) -> plan-gate; other settings kept\)/);
-    assert.match(dry.stdout, /note: Plan mode: when Claude calls ExitPlanMode, the plan opens in SpecReview/);
+    assert.match(dry.stdout, /note: Plan mode: when Claude calls ExitPlanMode, the plan opens in Suiko/);
     assert.equal((await h.run(['install', '--only', 'claude', '--with-plan-gate', '--apply'])).code, 0);
     const gate = [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: planGateCommand(), timeout: PLAN_GATE_TIMEOUT }] }];
     assert.deepEqual(readJson(h.p('.claude/settings.json')).hooks.PermissionRequest, gate);
@@ -195,7 +195,7 @@ describe('the plan-mode gate (opt-in)', () => {
 
     // An earlier opt-in pointing at another checkout: re-installing without the flag keeps the gate, with this CLI's path.
     const s = readJson(h.p('.claude/settings.json'));
-    s.hooks.PermissionRequest[0].hooks[0].command = '"/old/node" "/old/checkout/bin/specreview.js" plan-gate';
+    s.hooks.PermissionRequest[0].hooks[0].command = '"/old/node" "/old/checkout/bin/suiko.js" plan-gate';
     fs.writeFileSync(h.p('.claude/settings.json'), `${JSON.stringify(s, null, 2)}\n`);
     const again = await h.run(['install', '--only', 'claude', '--apply']);
     assert.equal(again.code, 0, again.stderr);
@@ -214,17 +214,17 @@ describe('the plan-mode gate (opt-in)', () => {
   });
 });
 
-describe('specreview install --apply', () => {
+describe('suiko install --apply', () => {
   test('writes the right files and entries for each agent; a second apply changes nothing', async () => {
     const h = makeHome({ dirs: ALL_DIRS, files: ALL_FILES });
     const r = await h.run(['install', '--apply'], { platform: 'darwin' });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^SpecReview install: applied \(user scope\)/);
+    assert.match(r.stdout, /^Suiko install: applied \(user scope\)/);
     assert.match(r.stdout, /\nDone: \d+ files written\.\n$/);
 
     // Claude Code
     const skill = read(h.p('.claude/skills/spec-review/SKILL.md'));
-    assert.match(skill, /^---\n[\s\S]*?\n---\n\n> \*\*On this machine `specreview` is not on PATH\.\*\*/, 'not-on-PATH note after the front matter');
+    assert.match(skill, /^---\n[\s\S]*?\n---\n\n> \*\*On this machine `suiko` is not on PATH\.\*\*/, 'not-on-PATH note after the front matter');
     assert.equal(read(h.p('.claude/skills/spec-review/reference.md')), read(path.join(SKILL_SRC, 'reference.md')));
     assert.ok(claudeCommandFiles().length >= 1);
     for (const name of claudeCommandFiles()) assert.ok(fs.existsSync(h.p(`.claude/commands/${name}`)), name);
@@ -237,13 +237,13 @@ describe('specreview install --apply', () => {
     const agentsMd = read(h.p('.codex/AGENTS.md'));
     assert.ok(agentsMd.startsWith('<!-- specreview:begin'));
     assert.ok(agentsMd.trimEnd().endsWith('<!-- specreview:end -->'));
-    assert.match(agentsMd, /^> \*\*On this machine `specreview` is not on PATH\.\*\*/m);
+    assert.match(agentsMd, /^> \*\*On this machine `suiko` is not on PATH\.\*\*/m);
     const toml = read(h.p('.codex/config.toml'));
     assert.equal(
       toml,
       [
-        '# specreview:begin (managed by `specreview install`; edits inside this block are replaced on reinstall)',
-        '[mcp_servers.specreview]',
+        '# specreview:begin (managed by `suiko install`; edits inside this block are replaced on reinstall)',
+        '[mcp_servers.suiko]',
         `command = ${JSON.stringify(process.execPath)}`,
         `args = [${JSON.stringify(BIN_PATH)}, "mcp"]`,
         'tool_timeout_sec = 660',
@@ -251,29 +251,29 @@ describe('specreview install --apply', () => {
         '',
       ].join('\n'),
     );
-    const agentSkill = read(h.p('.agents/skills/specreview-review/SKILL.md'));
-    assert.match(agentSkill, /^---\nname: specreview-review\ndescription: /);
-    assert.ok(agentSkill.includes('## Spec reviews (SpecReview)'), 'the protocol is inlined');
+    const agentSkill = read(h.p('.agents/skills/suiko-review/SKILL.md'));
+    assert.match(agentSkill, /^---\nname: suiko-review\ndescription: /);
+    assert.ok(agentSkill.includes('## Spec reviews (Suiko)'), 'the protocol is inlined');
     assert.ok(!agentSkill.includes('<!-- specreview:protocol'), 'the placeholder is replaced');
     assert.ok(!agentSkill.includes('<!-- specreview:begin'), 'no marker lines in a file we own');
 
     // Gemini
     assert.match(read(h.p('.gemini/GEMINI.md')), /^<!-- specreview:begin/);
-    const gcmd = read(h.p('.gemini/commands/specreview-review.toml'));
+    const gcmd = read(h.p('.gemini/commands/suiko-review.toml'));
     assert.match(gcmd, /^description = "/m);
     assert.match(gcmd, /^prompt = '''\n> \*\*On this machine/m);
     assert.ok(gcmd.includes('{{args}}'));
 
     // Cursor
-    assert.deepEqual(readJson(h.p('.cursor/mcp.json')), { mcpServers: { specreview: { type: 'stdio', command: process.execPath, args: [BIN_PATH, 'mcp'] } } });
+    assert.deepEqual(readJson(h.p('.cursor/mcp.json')), { mcpServers: { suiko: { type: 'stdio', command: process.execPath, args: [BIN_PATH, 'mcp'] } } });
 
     // OpenCode
     assert.match(read(h.p('.config/opencode/AGENTS.md')), /^<!-- specreview:begin/);
-    assert.match(read(h.p('.config/opencode/commands/specreview-review.md')), /^---\ndescription: [\s\S]*\$ARGUMENTS/);
-    assert.deepEqual(readJson(h.p('.config/opencode/opencode.json')), { mcp: { specreview: { type: 'local', command: [process.execPath, BIN_PATH, 'mcp'] } } });
+    assert.match(read(h.p('.config/opencode/commands/suiko-review.md')), /^---\ndescription: [\s\S]*\$ARGUMENTS/);
+    assert.deepEqual(readJson(h.p('.config/opencode/opencode.json')), { mcp: { suiko: { type: 'local', command: [process.execPath, BIN_PATH, 'mcp'] } } });
 
     // Claude Desktop
-    assert.deepEqual(readJson(h.p('Library/Application Support/Claude/claude_desktop_config.json')), { mcpServers: { specreview: { command: process.execPath, args: [BIN_PATH, 'mcp'] } } });
+    assert.deepEqual(readJson(h.p('Library/Application Support/Claude/claude_desktop_config.json')), { mcpServers: { suiko: { command: process.execPath, args: [BIN_PATH, 'mcp'] } } });
 
     // No backups for files that did not exist; the manifest records the copies
     assert.deepEqual(Object.keys(snapshot(h.home)).filter((f) => f.endsWith('.specreview-backup')), []);
@@ -294,13 +294,13 @@ describe('specreview install --apply', () => {
     assert.match(dry.stdout, /\nEverything is already installed; nothing to write\.\n$/);
   });
 
-  test('specreview on PATH: instructions and copies carry no invocation note', async () => {
-    const h = makeHome({ dirs: ['.claude', '.codex/sessions'], bins: ['specreview'] });
+  test('suiko on PATH: instructions and copies carry no invocation note', async () => {
+    const h = makeHome({ dirs: ['.claude', '.codex/sessions'], bins: ['suiko'] });
     const r = await h.run(['install', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     assert.equal(read(h.p('.claude/skills/spec-review/SKILL.md')), read(path.join(SKILL_SRC, 'SKILL.md')));
     assert.equal(read(h.p('.codex/AGENTS.md')), `${SNIPPET}\n`);
-    assert.ok(!read(h.p('.agents/skills/specreview-review/SKILL.md')).includes('not on PATH'));
+    assert.ok(!read(h.p('.agents/skills/suiko-review/SKILL.md')).includes('not on PATH'));
     assert.doesNotMatch(r.stdout, /is not on PATH/);
   });
 
@@ -312,7 +312,7 @@ describe('specreview install --apply', () => {
     assert.ok(text.endsWith('<!-- specreview:end -->\n\nTrailer.\n'));
     assert.equal(text.match(/specreview:begin/g)?.length, 1, 'replaced, not duplicated');
     // A copy we wrote earlier (recorded in the manifest) is replaced without a backup.
-    const skill = h.p('.agents/skills/specreview-review/SKILL.md');
+    const skill = h.p('.agents/skills/suiko-review/SKILL.md');
     const manifestFile = path.join(h.srHome, 'install-manifest.json');
     const old = 'old version of our skill\n';
     fs.writeFileSync(skill, old);
@@ -322,7 +322,7 @@ describe('specreview install --apply', () => {
     const r = await h.json(['install', '--apply', '--only', 'codex']);
     assert.deepEqual(r.j.written, [skill]);
     assert.equal(fs.existsSync(`${skill}.specreview-backup`), false);
-    // A file at that path that SpecReview did not write is backed up once before it is replaced.
+    // A file at that path that Suiko did not write is backed up once before it is replaced.
     fs.writeFileSync(skill, 'my own skill\n');
     const r2 = await h.run(['install', '--apply', '--only', 'codex']);
     assert.match(r2.stdout, /replaces an older or edited copy \(backed up to SKILL\.md\.specreview-backup\)/);
@@ -337,7 +337,7 @@ describe('merging with existing config, and uninstall', () => {
     hooks: {
       PreToolUse: [
         { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] },
-        { matcher: 'Write', hooks: [{ type: 'command', command: 'specreview hook pre-write', timeout: 5 }] },
+        { matcher: 'Write', hooks: [{ type: 'command', command: 'suiko hook pre-write', timeout: 5 }] },
       ],
       Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }],
     },
@@ -371,7 +371,7 @@ describe('merging with existing config, and uninstall', () => {
     assert.deepEqual(s.hooks.PreToolUse, [
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] },
       { matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] },
-    ], 'the old PATH-relative specreview hook is replaced, not duplicated');
+    ], 'the old PATH-relative suiko hook is replaced, not duplicated');
     assert.equal(s.hooks.PermissionRequest, undefined);
 
     const cursor = read(h.p('.cursor/mcp.json'));
@@ -380,7 +380,7 @@ describe('merging with existing config, and uninstall', () => {
 
     const oc = readJson(h.p('.config/opencode/opencode.json'));
     assert.equal(oc.theme, 'dark');
-    assert.deepEqual(Object.keys(oc.mcp), ['other', 'specreview']);
+    assert.deepEqual(Object.keys(oc.mcp), ['other', 'suiko']);
 
     const toml = read(h.p('.codex/config.toml'));
     assert.ok(toml.startsWith(`${tomlText}\n# specreview:begin`), 'TOML: the original text is untouched, our block appended');
@@ -398,15 +398,15 @@ describe('merging with existing config, and uninstall', () => {
     // Uninstall: dry run first, then apply.
     const dry = await h.run(['uninstall']);
     assert.equal(dry.code, 0, dry.stderr);
-    assert.match(dry.stdout, /^SpecReview uninstall: dry run/);
-    assert.match(dry.stdout, new RegExp(`would update ${esc(h.p('.codex/config.toml'))} {2}\\(removes the \\[mcp_servers\\.specreview\\] table`));
+    assert.match(dry.stdout, /^Suiko uninstall: dry run/);
+    assert.match(dry.stdout, new RegExp(`would update ${esc(h.p('.codex/config.toml'))} {2}\\(removes the \\[mcp_servers\\.suiko\\] table`));
     assert.match(dry.stdout, new RegExp(`would delete ${esc(h.p('.claude/skills/spec-review/SKILL.md'))}`));
     assert.match(dry.stdout, /\nRun with --apply to remove these\.\n$/);
     const un = await h.run(['uninstall', '--apply']);
     assert.equal(un.code, 0, un.stderr);
     assert.match(un.stdout, /\nDone: \d+ files updated, \d+ removed\.\n$/);
     const afterUn = snapshot(h.home);
-    // settings.json loses the PATH-relative `specreview hook pre-write` hook too (it runs specreview, so it is ours);
+    // settings.json loses the PATH-relative `suiko hook pre-write` hook too (it runs suiko, so it is ours);
     // every other file is restored byte for byte.
     const expected = { ...before, '.claude/settings.json': `${JSON.stringify({ ...settings, hooks: { PreToolUse: [settings.hooks.PreToolUse[0]], Stop: settings.hooks.Stop } }, null, 2)}\n` };
     for (const [rel, text] of Object.entries(expected)) assert.equal(afterUn[rel], text, `${rel} restored`);
@@ -422,15 +422,15 @@ describe('merging with existing config, and uninstall', () => {
     const r = await h.run(['install', '--apply']);
     assert.equal(r.code, 1);
     assert.match(r.stdout, new RegExp(`REFUSED ${esc(h.p('.cursor/mcp.json'))}: .*is not valid JSON`));
-    assert.match(r.stdout, /fix: add "specreview": \{"type":"stdio".*\} under "mcpServers" by hand/);
+    assert.match(r.stdout, /fix: add "suiko": \{"type":"stdio".*\} under "mcpServers" by hand/);
     assert.match(r.stdout, new RegExp(`REFUSED ${esc(h.p('.config/opencode/opencode.json'))}: `));
     assert.match(r.stdout, /2 files were refused/);
     assert.match(r.stderr, /refused .*mcp\.json/);
     assert.equal(read(h.p('.cursor/mcp.json')), '{ "mcpServers": { broken');
     assert.equal(fs.existsSync(h.p('.cursor/mcp.json.specreview-backup')), false);
-    assert.ok(fs.existsSync(h.p('.agents/skills/specreview-review/SKILL.md')), 'Cursor\'s other file is still written');
+    assert.ok(fs.existsSync(h.p('.agents/skills/suiko-review/SKILL.md')), 'Cursor\'s other file is still written');
     assert.ok(fs.existsSync(h.p('.codex/AGENTS.md')), 'Codex is configured');
-    assert.ok(fs.existsSync(h.p('.config/opencode/commands/specreview-review.md')));
+    assert.ok(fs.existsSync(h.p('.config/opencode/commands/suiko-review.md')));
     const un = await h.run(['uninstall', '--apply']);
     assert.equal(un.code, 1, 'uninstall refuses the invalid file too');
     assert.equal(read(h.p('.cursor/mcp.json')), '{ "mcpServers": { broken');
@@ -502,10 +502,10 @@ describe('selection, scope and environment', () => {
     const r = await h.run(['install', '--apply'], { env });
     assert.equal(r.code, 0, r.stderr);
     for (const f of ['claude/settings.json', 'claude/skills/spec-review/SKILL.md', 'codex/AGENTS.md', 'codex/config.toml', 'xdg/opencode/AGENTS.md',
-      'xdg/opencode/opencode.json', 'ghome/.gemini/GEMINI.md', 'ghome/.gemini/commands/specreview-review.toml', 'copilot/copilot-instructions.md']) {
+      'xdg/opencode/opencode.json', 'ghome/.gemini/GEMINI.md', 'ghome/.gemini/commands/suiko-review.toml', 'copilot/copilot-instructions.md']) {
       assert.ok(fs.existsSync(path.join(alt, f)), f);
     }
-    assert.deepEqual(Object.keys(snapshot(h.home)).sort(), ['.agents/skills/specreview-review/SKILL.md'], 'only the shared skill goes under HOME');
+    assert.deepEqual(Object.keys(snapshot(h.home)).sort(), ['.agents/skills/suiko-review/SKILL.md'], 'only the shared skill goes under HOME');
   });
 
   test('--project writes the project-level files; a project AGENTS.md is shared; Claude Desktop has no project config', async () => {
@@ -513,8 +513,8 @@ describe('selection, scope and environment', () => {
     const r = await h.json(['install', '--project', '--apply'], { platform: 'darwin' });
     assert.equal(r.code, 0, r.stderr);
     const root = h.project;
-    for (const f of ['.claude/settings.local.json', '.claude/skills/spec-review/SKILL.md', 'AGENTS.md', '.agents/skills/specreview-review/SKILL.md', '.codex/config.toml',
-      '.cursor/mcp.json', '.opencode/commands/specreview-review.md', 'opencode.json']) {
+    for (const f of ['.claude/settings.local.json', '.claude/skills/spec-review/SKILL.md', 'AGENTS.md', '.agents/skills/suiko-review/SKILL.md', '.codex/config.toml',
+      '.cursor/mcp.json', '.opencode/commands/suiko-review.md', 'opencode.json']) {
       assert.ok(fs.existsSync(path.join(root, f)), f);
     }
     assert.equal(read(path.join(root, 'AGENTS.md')).match(/specreview:begin/g)?.length, 1);
@@ -530,17 +530,17 @@ describe('selection, scope and environment', () => {
     assert.deepEqual(Object.keys(snapshot(root)).filter((f) => !f.startsWith('.git')), []);
   });
 
-  test('Codex: AGENTS.override.md in use gets the block; an existing [mcp_servers.specreview] is left alone', async () => {
-    const h = makeHome({ files: { '.codex/AGENTS.override.md': '# Override\n', '.codex/config.toml': '[mcp_servers.specreview]\ncommand = "specreview"\nargs = ["mcp"]\n' } });
+  test('Codex: AGENTS.override.md in use gets the block; an existing [mcp_servers.suiko] is left alone', async () => {
+    const h = makeHome({ files: { '.codex/AGENTS.override.md': '# Override\n', '.codex/config.toml': '[mcp_servers.suiko]\ncommand = "suiko"\nargs = ["mcp"]\n' } });
     const r = await h.run(['install', '--apply', '--only', 'codex']);
     assert.equal(r.code, 0, r.stderr);
     assert.match(read(h.p('.codex/AGENTS.override.md')), /^# Override\n\n<!-- specreview:begin/);
     assert.equal(fs.existsSync(h.p('.codex/AGENTS.md')), false);
-    assert.match(r.stdout, /note: ~\/\.codex\/config\.toml already defines the specreview MCP server outside SpecReview's managed block; left as is\./);
-    assert.equal(read(h.p('.codex/config.toml')), '[mcp_servers.specreview]\ncommand = "specreview"\nargs = ["mcp"]\n');
+    assert.match(r.stdout, /note: ~\/\.codex\/config\.toml already defines the suiko MCP server outside Suiko's managed block; left as is\./);
+    assert.equal(read(h.p('.codex/config.toml')), '[mcp_servers.suiko]\ncommand = "suiko"\nargs = ["mcp"]\n');
     await h.run(['uninstall', '--apply', '--only', 'codex']);
     assert.equal(read(h.p('.codex/AGENTS.override.md')), '# Override\n');
-    assert.equal(read(h.p('.codex/config.toml')), '[mcp_servers.specreview]\ncommand = "specreview"\nargs = ["mcp"]\n', 'a server we did not add is not removed');
+    assert.equal(read(h.p('.codex/config.toml')), '[mcp_servers.suiko]\ncommand = "suiko"\nargs = ["mcp"]\n', 'a server we did not add is not removed');
   });
 
   test('Gemini: the block goes to the configured context file; OpenCode: no AGENTS.md while it falls back to ~/.claude/CLAUDE.md', async () => {
@@ -550,39 +550,39 @@ describe('selection, scope and environment', () => {
     assert.ok(fs.existsSync(h.p('.gemini/AGENTS.md')));
     assert.equal(fs.existsSync(h.p('.gemini/GEMINI.md')), false);
     assert.equal(fs.existsSync(h.p('.config/opencode/AGENTS.md')), false);
-    assert.match(r.stdout, /Skipped the SpecReview protocol block: OpenCode reads ~\/\.claude\/CLAUDE\.md as its rules only while ~\/\.config\/opencode\/AGENTS\.md does not exist/);
-    assert.ok(fs.existsSync(h.p('.config/opencode/commands/specreview-review.md')));
+    assert.match(r.stdout, /Skipped the Suiko protocol block: OpenCode reads ~\/\.claude\/CLAUDE\.md as its rules only while ~\/\.config\/opencode\/AGENTS\.md does not exist/);
+    assert.ok(fs.existsSync(h.p('.config/opencode/commands/suiko-review.md')));
   });
 });
 
 describe('Claude Code plugin and shared files', () => {
-  test('an installed SpecReview plugin: Claude Code is skipped with an explanation (hooks would run twice)', async () => {
-    const plugins = JSON.stringify({ version: 2, plugins: { 'specreview@specreview': [{ scope: 'user', installPath: '/x', version: '0.1.0' }] } });
+  test('an installed Suiko plugin: Claude Code is skipped with an explanation (hooks would run twice)', async () => {
+    const plugins = JSON.stringify({ version: 2, plugins: { 'suiko@suiko': [{ scope: 'user', installPath: '/x', version: '0.1.0' }] } });
     const h = makeHome({ dirs: ['.codex/sessions'], files: { '.claude/plugins/installed_plugins.json': plugins } });
     const r = await h.json(['install', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     const claude = r.j.agents.find((/** @type {any} */ a) => a.id === 'claude');
     assert.equal(claude.status, 'skipped');
-    assert.match(claude.reason, /the SpecReview Claude Code plugin is installed \(specreview@specreview, ~\/\.claude\/plugins\/installed_plugins\.json\)/);
+    assert.match(claude.reason, /the Suiko Claude Code plugin is installed \(suiko@suiko, ~\/\.claude\/plugins\/installed_plugins\.json\)/);
     assert.match(claude.reason, /would run every hook twice/);
-    assert.match(claude.reason, /claude plugin uninstall specreview@specreview/);
+    assert.match(claude.reason, /claude plugin uninstall suiko@suiko/);
     assert.equal(fs.existsSync(h.p('.claude/settings.json')), false);
     assert.equal(fs.existsSync(h.p('.claude/skills')), false);
     assert.ok(fs.existsSync(h.p('.codex/AGENTS.md')), 'other agents are configured');
     const text = await h.run(['install', '--only', 'claude']);
-    assert.match(text.stdout, /^Claude Code: detected \(~\/\.claude\); skipped: the SpecReview Claude Code plugin is installed/m);
+    assert.match(text.stdout, /^Claude Code: detected \(~\/\.claude\); skipped: the Suiko Claude Code plugin is installed/m);
     // A plugin disabled in settings does not count; one enabled only in the project's settings does.
-    const h2 = makeHome({ files: { '.claude/plugins/installed_plugins.json': plugins, '.claude/settings.json': '{"enabledPlugins": {"specreview@specreview": false}}' } });
+    const h2 = makeHome({ files: { '.claude/plugins/installed_plugins.json': plugins, '.claude/settings.json': '{"enabledPlugins": {"suiko@suiko": false}}' } });
     assert.equal((await h2.json(['install'])).j.agents[0].status, 'planned');
     fs.mkdirSync(path.join(h2.project, '.claude'));
-    fs.writeFileSync(path.join(h2.project, '.claude', 'settings.json'), '{"enabledPlugins": {"specreview@local": true}}');
+    fs.writeFileSync(path.join(h2.project, '.claude', 'settings.json'), '{"enabledPlugins": {"suiko@local": true}}');
     assert.equal((await h2.json(['install'])).j.agents[0].status, 'skipped');
   });
 
   test('the shared skill stays while an agent left out of the uninstall still uses it', async () => {
     const h = makeHome({ dirs: ['.codex/sessions', '.cursor'] });
     await h.run(['install', '--apply']);
-    const skill = h.p('.agents/skills/specreview-review/SKILL.md');
+    const skill = h.p('.agents/skills/suiko-review/SKILL.md');
     const r = await h.run(['uninstall', '--only', 'codex', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, new RegExp(`kept ${esc(skill)} {2}\\(kept: still used by Cursor\\)`));
@@ -596,7 +596,7 @@ describe('Claude Code plugin and shared files', () => {
     await d.run(['install', '--only', 'codex', '--apply']);
     const r2 = await d.run(['uninstall', '--only', 'codex', '--apply']);
     assert.match(r2.stdout, /\(kept: still used by Factory Droid\)/);
-    assert.ok(fs.existsSync(d.p('.agents/skills/specreview-review/SKILL.md')));
+    assert.ok(fs.existsSync(d.p('.agents/skills/suiko-review/SKILL.md')));
   });
 });
 
@@ -605,12 +605,12 @@ describe('doctor lists the agent integrations', () => {
     const h = makeHome({ dirs: ['.codex/sessions', '.cursor', '.claude'] });
     await h.run(['install', '--apply', '--only', 'codex,cursor']);
     const mcp = readJson(h.p('.cursor/mcp.json'));
-    mcp.mcpServers.specreview.command = '/old/node';
+    mcp.mcpServers.suiko.command = '/old/node';
     fs.writeFileSync(h.p('.cursor/mcp.json'), JSON.stringify(mcp));
     const r = await h.run(['doctor'], { deps: { daemonStatus: async () => ({ running: false }) } });
-    assert.match(r.stdout, /^ok {4}Codex CLI: SpecReview configured$/m);
-    assert.match(r.stdout, /^WARN {2}Cursor: SpecReview configuration is incomplete or outdated \(run `specreview install --only cursor --apply`\)$/m);
-    assert.match(r.stdout, /^ok {4}Claude Code: detected, SpecReview not configured/m);
+    assert.match(r.stdout, /^ok {4}Codex CLI: Suiko configured$/m);
+    assert.match(r.stdout, /^WARN {2}Cursor: Suiko configuration is incomplete or outdated \(run `suiko install --only cursor --apply`\)$/m);
+    assert.match(r.stdout, /^ok {4}Claude Code: detected, Suiko not configured/m);
     assert.doesNotMatch(r.stdout, /Gemini CLI/);
     const none = makeHome();
     const r2 = await none.run(['doctor'], { deps: { daemonStatus: async () => ({ running: false }) } });

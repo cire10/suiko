@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview last`: finding a Claude Code transcript (by session id under ${CLAUDE_CONFIG_DIR}/projects/*/, else
+// `suiko last`: finding a Claude Code transcript (by session id under ${CLAUDE_CONFIG_DIR}/projects/*/, else
 // the newest transcript of the cwd's project directory) and extracting the last assistant message from its JSONL
 // (one content block per line sharing message.id, sidechains, tool results, meta and command lines skipped, the
 // active branch after a /rewind, a half-written last line).
@@ -70,7 +70,7 @@ describe('extractLastMessage', () => {
     const t = jsonl([
       user('Q'),
       asst('msg_1', text('The answer.')),
-      user('<command-name>/specreview-last</command-name>\n<command-message>specreview-last</command-message>\n<command-args></command-args>'),
+      user('<command-name>/suiko-last</command-name>\n<command-message>suiko-last</command-message>\n<command-args></command-args>'),
       user('<local-command-stdout>ok</local-command-stdout>'),
       { ...user('Base directory for this skill: x'), isMeta: true },
       asst('msg_2', toolUse('tu1')),
@@ -79,12 +79,12 @@ describe('extractLastMessage', () => {
     assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_1', text: 'The answer.' });
   });
 
-  test('a turn still running a tool call (Claude ran `specreview last` itself after a preamble) is skipped', () => {
+  test('a turn still running a tool call (Claude ran `suiko last` itself after a preamble) is skipped', () => {
     const t = jsonl([
       user('Explain the cache.'),
       asst('msg_ANSWER', text('# Cache\n\nLRU, 512 entries.')),
-      user('Open your last answer in SpecReview.'),
-      asst('msg_NOW', text("I'll open my previous answer in SpecReview.")),
+      user('Open your last answer in Suiko.'),
+      asst('msg_NOW', text("I'll open my previous answer in Suiko.")),
       asst('msg_NOW', toolUse('tu_now')),
     ]);
     assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_ANSWER', text: '# Cache\n\nLRU, 512 entries.' });
@@ -129,7 +129,7 @@ describe('extractLastMessage', () => {
     const a1 = asst('msg_A', text('Answer A.'), { parentUuid: u1.uuid });
     const u2 = user('Follow-up that was rewound', { parentUuid: a1.uuid });
     const b1 = asst('msg_B', text('Abandoned answer B.'), { parentUuid: u2.uuid });
-    const u3 = user('<command-name>/specreview-last</command-name>', { parentUuid: a1.uuid }); // forked from a1
+    const u3 = user('<command-name>/suiko-last</command-name>', { parentUuid: a1.uuid }); // forked from a1
     const t = jsonl([u1, a1, u2, b1, u3], { chain: false });
     assert.deepEqual(pick(extractLastMessage(t)), { id: 'msg_A', text: 'Answer A.' });
   });

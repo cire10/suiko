@@ -1,4 +1,4 @@
-// SpecReview guest, part 90: page error and failed-resource accounting.
+// Suiko guest, part 90: page error and failed-resource accounting.
 //
 // Installed synchronously when the bundle runs (before the document's own scripts), so early errors are counted:
 //   - uncaught script errors (window 'error' ErrorEvent) and unhandled promise rejections -> count / last;

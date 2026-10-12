@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview stop [--rotate]` (design 10.1, amendments 2.5): POST /api/shutdown to the running daemon.
+// `suiko stop [--rotate]` (design 10.1, amendments 2.5): POST /api/shutdown to the running daemon.
 // --rotate also deletes daemon.json, so the next start generates a new API token and content secret
 // (outstanding review URLs stop working; ports fall back to the defaults).
 
@@ -30,9 +30,9 @@ export async function parse({ values, positionals }) {
 export async function execute(rt, input) {
   const res = await (rt.deps.stopDaemon ?? stopDaemon)({ rotate: Boolean(input.rotate) });
   const lines = [];
-  if (!res.wasRunning) lines.push('specreview: the review server is not running');
-  else if (res.stopped) lines.push(`specreview: stopped the review server (pid ${res.pid})`);
-  else lines.push(`specreview: asked the review server (pid ${res.pid}) to stop, but it is still running`);
-  if (res.rotated) lines.push('specreview: token and content secret will be regenerated on the next start (old review URLs stop working)');
+  if (!res.wasRunning) lines.push('suiko: the review server is not running');
+  else if (res.stopped) lines.push(`suiko: stopped the review server (pid ${res.pid})`);
+  else lines.push(`suiko: asked the review server (pid ${res.pid}) to stop, but it is still running`);
+  if (res.rotated) lines.push('suiko: token and content secret will be regenerated on the next start (old review URLs stop working)');
   return { exit: res.wasRunning && !res.stopped ? EXIT.ERROR : EXIT.OK, text: lines.join('\n'), json: res };
 }

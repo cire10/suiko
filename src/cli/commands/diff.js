@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview diff <doc> [vA..vB] [--stat|--unified] [--json]` (design 9.2 / 9.6).
+// `suiko diff <doc> [vA..vB] [--stat|--unified] [--json]` (design 9.2 / 9.6).
 // Range forms: v1..v2, 1..live, v2 (= v2..head), ..v3, v2.. ; default = last reviewed..head (engine default).
 // --stat (default): per-hunk summary with thread links (engine changes() + formatDiffStat).
 // --unified: a git-compatible unified patch (engine unifiedDiff() when present, else built from the store's
@@ -7,7 +7,7 @@
 // A code review (design 4.12): the interdiff of two rounds per file. --stat prints one line per changed file (added,
 // dropped, renamed or changed between the rounds, with the threads its hunks are linked to; engine codeFiles);
 // --unified prints a unified patch per file labelled a/<path>@vA and b/<path>@vB. The working tree is not a round:
-// `live` is refused (record it with `specreview revise` first).
+// `live` is refused (record it with `suiko revise` first).
 
 import { UsageError } from '../../core/store/errors.js';
 import { isCode } from '../../core/store/snapshot.js';
@@ -76,7 +76,7 @@ export async function execute(rt, input) {
  */
 async function codeDiff(engine, ctx, doc, from, to, format) {
   if (from === 'live' || to === 'live') {
-    throw new UsageError(`diff: the working tree of a code review is not a round; record it first (\`specreview revise ${doc.id} --replies -\`), or run git diff`);
+    throw new UsageError(`diff: the working tree of a code review is not a round; record it first (\`suiko revise ${doc.id} --replies -\`), or run git diff`);
   }
   const range = { ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) };
   if (format === 'unified') {

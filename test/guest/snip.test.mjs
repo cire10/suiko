@@ -39,7 +39,7 @@ const WHITE = [255, 255, 255];
 /** @typedef {Awaited<ReturnType<typeof openDoc>>} Doc */
 
 /** @param {Doc} d */
-const snipState = (d) => d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.inspect().snip);
+const snipState = (d) => d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.inspect().snip);
 
 /**
  * Drags a box with the mouse (snip mode must be on), from (x0, y0) to (x1, y1) in page = iframe viewport coordinates.
@@ -285,7 +285,7 @@ describe('snip mode', () => {
 
       // Observe-only: rendering the crop never touched the author's DOM.
       assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__mutations), []);
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
       assert.deepEqual(d.pageErrors, []);
     } finally {
       await d.close();
@@ -572,7 +572,7 @@ describe('snip mode', () => {
       const snip = await snipState(d);
       assert.equal(snip.lastCrop.ok, false);
       assert.ok(snip.lastCrop.error && snip.lastCrop.error !== 'timeout', snip.lastCrop.error);
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
     } finally {
       await d.close();
     }

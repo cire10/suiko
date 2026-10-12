@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview reanchor <doc> <tid> (--lines A-B | --quote TEXT) [--json]` (design 9.2, agent-protocol 10).
-// `specreview reanchor <code-doc> <tid> [--file <path>] --lines A-B` (design 4.2): lines of the working file now
+// `suiko reanchor <doc> <tid> (--lines A-B | --quote TEXT) [--json]` (design 9.2, agent-protocol 10).
+// `suiko reanchor <code-doc> <tid> [--file <path>] --lines A-B` (design 4.2): lines of the working file now
 // (default: the file the thread is on).
 // Agent override of a thread's anchor: applied to head when the working copy is clean, otherwise staged until the
 // next revise. The engine receives { lines: [a, b] } (inclusive, 1-based) or { quote } (and { file } for code).

@@ -32,5 +32,5 @@ export { finalize } from './ops/final.js';
 // changes
 export { changes, sourceDiffOp, unifiedDiff, threadMiniDiff, domTargets } from './ops/changes.js';
 
-// code reviews (doc kind 'code'): `specreview review` / MCP specreview_review, and the daemon's D/files routes
+// code reviews (doc kind 'code'): `suiko review` / MCP suiko_review, and the daemon's D/files routes
 export { openCodeReview, codeFiles, codeFileDiff, codeFileSource } from '../code/index.js';

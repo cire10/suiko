@@ -117,7 +117,7 @@ import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js'
  * @property {string[]} resolvedThisRound
  * @property {boolean} firstPacket no earlier review was delivered to this agent (adds the protocol reminder)
  * @property {boolean} replyOnly approved with a final version that is head, but threads still need action: the agent
- *   answers them with `specreview reply` and must not edit (the working copy has to stay identical to the final)
+ *   answers them with `suiko reply` and must not edit (the working copy has to stay identical to the final)
  * @property {string} agent
  * @property {string} next
  */
@@ -347,13 +347,13 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
   if (anchor?.state === 'changed') note = '(outdated: text changed)';
   if (anchor?.state === 'orphaned' && code) {
     const file = anchor.file?.path ?? d?.file ?? null;
-    note = `(orphaned: reanchor with specreview reanchor ${snap.doc.id} ${t.id}${file ? ` --file ${file}` : ''} --lines A-B)`;
+    note = `(orphaned: reanchor with suiko reanchor ${snap.doc.id} ${t.id}${file ? ` --file ${file}` : ''} --lines A-B)`;
   } else if (anchor?.state === 'orphaned') {
     const lk = d?.lastKnown;
     const where = lk
       ? [lk.section.length ? `§${sectionPath(lk.section, snap.doc.title)}` : '', `v${lk.v}`, linesLabel(lk.lines)].filter(Boolean).join(' ')
       : `v${anchor.v}`;
-    note = `(orphaned: was ${quoteLabel(lk?.text ?? '', 60)} in ${where}; reanchor with specreview reanchor ${snap.doc.id} ${t.id} --lines A-B)`;
+    note = `(orphaned: was ${quoteLabel(lk?.text ?? '', 60)} in ${where}; reanchor with suiko reanchor ${snap.doc.id} ${t.id} --lines A-B)`;
   }
   const conv = conversation(t);
   const suggestion = t.suggestion ? { ...t.suggestion } : null;
@@ -390,7 +390,7 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
     suggestion,
     attachments: d?.crops ?? (t.attachments ?? []).map((a) => attachmentPath(a)),
     attachmentKind: d?.cropKind ?? attachmentKind(anchor),
-    apply: pendingSuggestion ? `specreview apply ${snap.doc.id} ${t.id}` : null,
+    apply: pendingSuggestion ? `suiko apply ${snap.doc.id} ${t.id}` : null,
     ...(code
       ? {
           file: d?.file ?? null,
@@ -520,15 +520,15 @@ function approvalOf(doc, latest) {
 function nextStep(doc, { approved, finalNow }, actionable) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (approved && actionable === 0) {
-    return finalNow ? `specreview final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
+    return finalNow ? `suiko final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
   }
   // Approved with a final version, but the same submission reopened a thread or answered a question. A revise would
   // make the working copy differ from the final version, so the threads get replies only; a status clears them.
   if (approved && finalNow) {
-    return `approved: answer each thread with specreview reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> specreview final ${doc.id} --decisions   (then stop waiting)`;
+    return `approved: answer each thread with suiko reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> suiko final ${doc.id} --decisions   (then stop waiting)`;
   }
-  if (actionable === 0) return `nothing to act on; specreview wait ${doc.id} (background)`;
-  return `edits -> specreview revise ${doc.id} --replies - -> specreview wait ${doc.id} (background)`;
+  if (actionable === 0) return `nothing to act on; suiko wait ${doc.id} (background)`;
+  return `edits -> suiko revise ${doc.id} --replies - -> suiko wait ${doc.id} (background)`;
 }
 
 /**
@@ -550,17 +550,17 @@ function snapshotNextStep(doc, ref, { approved, finalNow }, actionable, root = n
     return `targeted Edit-tool changes to the plan file${file ? ` ${file}` : ''} (never rewrite it) -> call ExitPlanMode again (the plan gate records the new version)`;
   }
   if (approved && actionable === 0) {
-    return finalNow ? `specreview final ${ref}   (then stop waiting)` : 'approved; stop waiting unless the reviewer asks for more';
+    return finalNow ? `suiko final ${ref}   (then stop waiting)` : 'approved; stop waiting unless the reviewer asks for more';
   }
   if (approved && finalNow) {
-    return `approved: answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined (no new version) -> specreview final ${ref}   (then stop waiting)`;
+    return `approved: answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined (no new version) -> suiko final ${ref}   (then stop waiting)`;
   }
-  if (actionable === 0) return `nothing to act on; specreview wait ${ref} (background)`;
+  if (actionable === 0) return `nothing to act on; suiko wait ${ref} (background)`;
   const again = resnapshotCommand(doc, root);
   if (again) {
     return /** @type {any} */ (doc).origin?.private === true
-      ? `edit the sources that produce the page -> ${again} --replies - (records v${doc.head + 1}) -> specreview wait ${ref} (background)`
-      : `answer each thread with specreview reply ${ref} <tid> -m <md> --status answered|declined -> specreview wait ${ref} (background)`;
+      ? `edit the sources that produce the page -> ${again} --replies - (records v${doc.head + 1}) -> suiko wait ${ref} (background)`
+      : `answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined -> suiko wait ${ref} (background)`;
   }
-  return `write the complete revised text to a file -> specreview revise ${ref} --source <file> --replies - -> specreview wait ${ref} (background)`;
+  return `write the complete revised text to a file -> suiko revise ${ref} --source <file> --replies - -> suiko wait ${ref} (background)`;
 }

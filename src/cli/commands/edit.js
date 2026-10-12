@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]`
-// `specreview edit <doc> --stdin`  with  [{"threads":["t1"],"old":"...","new":"...","all":false}, ...]
+// `suiko edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]`
+// `suiko edit <doc> --stdin`  with  [{"threads":["t1"],"old":"...","new":"...","all":false}, ...]
 // (design 9.4, amendments 5). Thread-tagged exact replace with Edit-tool semantics: `old` must occur exactly once
 // in the working copy unless all/--all. A batch goes to the engine's taggedEdits() when it has one (all or
 // nothing: one compare-and-swap of the working copy); otherwise the items are applied one by one with
@@ -29,7 +29,7 @@ export const spec = {
   },
   details: [
     '--stdin reads a JSON batch: [{"threads":["t1"],"old":"...","new":"...","all":false}]',
-    'Edits are staged (tagged to the threads) until the next `specreview revise`.',
+    'Edits are staged (tagged to the threads) until the next `suiko revise`.',
   ],
 };
 
@@ -52,7 +52,7 @@ export async function parse({ values, positionals }, rt) {
     return { doc: positionals[0], edits: /** @type {EditItem[]} */ (Array.isArray(parsed) ? parsed : [parsed]) };
   }
   const threads = parseThreadList(values.thread);
-  if (!threads.length) throw new UsageError(`edit: --thread is required (usage: specreview ${spec.usage})`);
+  if (!threads.length) throw new UsageError(`edit: --thread is required (usage: suiko ${spec.usage})`);
   if (values.old === undefined || values.old === '') throw new UsageError('edit: --old <text> is required and must not be empty');
   if (values.new === undefined) throw new UsageError('edit: --new <text> is required (use --new "" to delete)');
   return { doc: positionals[0], edits: [{ threads, old: values.old, new: values.new, all: Boolean(values.all) }] };
@@ -71,7 +71,7 @@ export async function execute(rt, input) {
     const text = formatWith(engine, 'formatEdit', res, () => edits.map((/** @type {any} */ e, /** @type {number} */ i) => editLine(e, i, edits.length)).join('\n'));
     return {
       exit: EXIT.OK,
-      text: `${text}\nre-read ${docId} before editing it again; record with \`specreview revise ${docId} --replies -\``,
+      text: `${text}\nre-read ${docId} before editing it again; record with \`suiko revise ${docId} --replies -\``,
       json: { doc: docId, applied: edits.map((/** @type {any} */ e, /** @type {number} */ i) => ({ index: i + 1, ...e })), failed: null },
     };
   }
@@ -95,23 +95,23 @@ export async function execute(rt, input) {
       applied.push({ index: i + 1, ...item });
       text.push(formatWith(engine, 'formatEdit', { ...res, threads: res.threads ?? e.threads }, () => editLine(item, i, input.edits.length)));
     } catch (err) {
-      if (input.edits.length === 1) throw err; // single edit: plain `specreview: <message>` error
+      if (input.edits.length === 1) throw err; // single edit: plain `suiko: <message>` error
       const error = /** @type {any} */ (err);
       failed = { index: i + 1, message: error.message, code: error.code ?? 'ERROR', exit: exitCodeOf(err) };
       const rest = input.edits.length - i - 1;
       stderr.push(
-        `specreview: edit ${i + 1} failed: ${error.message}` +
+        `suiko: edit ${i + 1} failed: ${error.message}` +
           (rest ? ` (${rest} later edit${rest === 1 ? '' : 's'} not attempted)` : '') +
           (applied.length ? `; edits 1-${applied.length} were applied` : '; nothing was changed'),
       );
       break;
     }
   }
-  if (applied.length) text.push(`re-read ${docId} before editing it again; record with \`specreview revise ${docId} --replies -\``);
+  if (applied.length) text.push(`re-read ${docId} before editing it again; record with \`suiko revise ${docId} --replies -\``);
   return {
     exit: failed ? failed.exit || EXIT.ERROR : EXIT.OK,
     text: text.join('\n'),
-    // `lines` (design 9.7 specreview_edit -> {lines}) is the range of a single applied edit
+    // `lines` (design 9.7 suiko_edit -> {lines}) is the range of a single applied edit
     json: { doc: docId, ...(input.edits.length === 1 && applied.length === 1 ? { lines: applied[0].lines } : {}), applied, failed },
     stderr,
   };

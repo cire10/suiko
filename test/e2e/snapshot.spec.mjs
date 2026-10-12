@@ -138,7 +138,7 @@ test('web page and piped-text snapshots: strict sandbox, no inline script, the H
   const pf = await ui.frame();
   await expect(pf.locator('body')).toContainText('Plain text.');
   expect(await pf.evaluate(() => [/** @type {any} */ (window).__INLINE_RAN, /** @type {any} */ (window).__ONERROR_RAN])).toEqual([undefined, undefined]);
-  expect(await pf.evaluate(() => typeof (/** @type {any} */ (window).__specreviewGuest))).toBe('object');
+  expect(await pf.evaluate(() => typeof (/** @type {any} */ (window).__suikoGuest))).toBe('object');
 
   await page.goto(r.url());
   await expect(page.locator('.doc-row', { hasText: 'Token Service' }).locator('.doc-path')).toHaveText('web page · docs.example.com');

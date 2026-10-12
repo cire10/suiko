@@ -56,7 +56,7 @@ export function hermeticEnv(tmp, extra = {}) {
     CODEX_HOME: path.join(home, '.codex'),
     COPILOT_HOME: path.join(home, '.copilot'),
     GEMINI_CLI_HOME: home,
-    SPECREVIEW_HOME: path.join(tmp, 'specreview-home'),
+    SPECREVIEW_HOME: path.join(tmp, 'suiko-home'),
   };
   for (const d of [bin, ...Object.values(dirs)]) fs.mkdirSync(d, { recursive: true });
   /** @type {Record<string, string>} */

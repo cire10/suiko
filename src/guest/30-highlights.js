@@ -1,4 +1,4 @@
-// SpecReview guest, part 30: text highlights.
+// Suiko guest, part 30: text highlights.
 //
 // Uses the CSS Custom Highlight API: one Highlight per name (sr-open, sr-resolved, sr-active, sr-draft, sr-ins,
 // sr-lock, sr-outdated) registered in CSS.highlights, styled by ::highlight() rules in ONE constructed stylesheet

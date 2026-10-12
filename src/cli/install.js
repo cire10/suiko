@@ -3,8 +3,8 @@
 //
 // planClaude({ scope, withHooks, withPlanGate, withMcp, ... }) / planAgentsMd({ target, ... }) compute a list of file
 // actions without touching the disk; applyPlan(plan) writes them (mkdir -p + atomic write). The `install` command
-// prints the plan (dry run, the default) or applies it with --apply. The multi-agent installer (`specreview install`
-// with no target, `specreview uninstall`) lives in src/cli/install/ and reuses planClaude, the hook helpers and
+// prints the plan (dry run, the default) or applies it with --apply. The multi-agent installer (`suiko install`
+// with no target, `suiko uninstall`) lives in src/cli/install/ and reuses planClaude, the hook helpers and
 // applyPlan.
 //
 // install claude:
@@ -12,11 +12,11 @@
 //     integrations/claude-code/commands/*.md to <base>/commands/, where <base> is $CLAUDE_CONFIG_DIR or ~/.claude
 //     (--user, default) or <project>/.claude (--project);
 //   - --with-hooks merges the hooks of integrations/claude-code/hooks/hooks.json into <base>/settings.json, with
-//     ABSOLUTE commands `"<process.execPath>" "<abs>/bin/specreview.js" hook <name>`; earlier specreview hook
+//     ABSOLUTE commands `"<process.execPath>" "<abs>/bin/suiko.js" hook <name>`; earlier suiko hook
 //     entries are replaced, every other setting is preserved;
 //   - --with-plan-gate also registers the plan-mode gate: PermissionRequest, matcher ExitPlanMode,
 //     `"<node>" "<abs bin>" plan-gate`, timeout 345600 s (the review may take days; the terminal dialog stays usable);
-//   - --with-mcp: --project merges {"mcpServers":{"specreview":{command, args}}} into <project>/.mcp.json;
+//   - --with-mcp: --project merges {"mcpServers":{"suiko":{command, args}}} into <project>/.mcp.json;
 //     --user prints the `claude mcp add --scope user ...` command (Claude Code's user config is not edited).
 // install agents-md: inserts integrations/agents-md/AGENTS.snippet.md into <project>/AGENTS.md, replacing an
 //   existing `<!-- specreview:begin ... <!-- specreview:end -->` block (idempotent) or appending it.
@@ -93,9 +93,10 @@ export function planGateCommand(o = {}) {
   return `${cliInvocation(o)} plan-gate`;
 }
 
-/** A hook command that runs SpecReview: `specreview hook <name>` or `... plan-gate`, PATH-relative or absolute. */
-const OUR_HOOK_RE = /(?:^|[\s"'/\\])specreview(?:\.js)?["']?\s+(?:hook\s+[a-z][a-z-]*|plan-gate)\b/;
-const PLAN_GATE_RE = /(?:^|[\s"'/\\])specreview(?:\.js)?["']?\s+plan-gate\b/;
+/** A hook command that runs Suiko: `suiko hook <name>` or `... plan-gate`, PATH-relative or absolute. */
+// specreview: the name before the rename to suiko, so hooks an earlier install wrote are recognised and replaced
+const OUR_HOOK_RE = /(?:^|[\s"'/\\])(?:suiko|specreview)(?:\.js)?["']?\s+(?:hook\s+[a-z][a-z-]*|plan-gate)\b/;
+const PLAN_GATE_RE = /(?:^|[\s"'/\\])(?:suiko|specreview)(?:\.js)?["']?\s+plan-gate\b/;
 
 /**
  * @param {any} hook a hook handler ({type, command, ...})
@@ -107,14 +108,14 @@ export function isOurHook(hook) {
 
 /**
  * @param {any} hook a hook handler ({type, command, ...})
- * @returns {boolean} whether it is SpecReview's plan-mode gate (`specreview plan-gate`)
+ * @returns {boolean} whether it is Suiko's plan-mode gate (`suiko plan-gate`)
  */
 export function isPlanGateHook(hook) {
   return PLAN_GATE_RE.test(String(hook?.command ?? ''));
 }
 
 /**
- * Which SpecReview hooks a Claude Code settings file already has: the regular hooks (pre-write, prompt) and the
+ * Which Suiko hooks a Claude Code settings file already has: the regular hooks (pre-write, prompt) and the
  * plan-mode gate. An unreadable or invalid file has none.
  * @param {string} file
  * @returns {{ hooks: boolean, planGate: boolean }}
@@ -160,21 +161,21 @@ export function isOnPath(name, pathEnv = process.env.PATH ?? '') {
 }
 
 /**
- * The two-line note telling an agent how to invoke the CLI when `specreview` is not on PATH.
- * @param {string} invocation e.g. "/path/node" "/path/bin/specreview.js"
+ * The two-line note telling an agent how to invoke the CLI when `suiko` is not on PATH.
+ * @param {string} invocation e.g. "/path/node" "/path/bin/suiko.js"
  * @returns {string}
  */
 export function invocationNote(invocation) {
   return (
-    `> **On this machine \`specreview\` is not on PATH.** Wherever these instructions (or SpecReview's own output) say\n` +
-    `> \`specreview <args>\`, run \`${invocation} <args>\` instead, e.g. \`${invocation} wait <doc>\`.\n`
+    `> **On this machine \`suiko\` is not on PATH.** Wherever these instructions (or Suiko's own output) say\n` +
+    `> \`suiko <args>\`, run \`${invocation} <args>\` instead, e.g. \`${invocation} wait <doc>\`.\n`
   );
 }
 
 /**
  * Inserts a note after the YAML front matter (or at the top) telling the agent how to invoke the CLI on this machine.
  * @param {string} text markdown file content
- * @param {string} invocation e.g. "/path/node" "/path/bin/specreview.js"
+ * @param {string} invocation e.g. "/path/node" "/path/bin/suiko.js"
  * @returns {string}
  */
 export function withInvocationNote(text, invocation) {
@@ -205,7 +206,7 @@ export function projectRoot(cwd) {
 }
 
 /**
- * The Claude Code command files SpecReview ships (integrations/claude-code/commands/*.md), sorted.
+ * The Claude Code command files Suiko ships (integrations/claude-code/commands/*.md), sorted.
  * @returns {string[]} file names
  */
 export function claudeCommandFiles() {
@@ -217,7 +218,7 @@ export function claudeCommandFiles() {
 }
 
 /**
- * Every file SpecReview copies into a Claude Code config dir, with its template text and localised content.
+ * Every file Suiko copies into a Claude Code config dir, with its template text and localised content.
  * @param {string} base <claude home> or <project>/.claude
  * @param {{ cliOnPath: boolean, invocation: string }} o
  * @returns {Array<{ target: string, source: string, template: string, content: string, dir: string }>}
@@ -255,18 +256,18 @@ export function planClaude(o) {
   /** @type {string[]} */
   const notes = [];
 
-  // Without `npm link`, `specreview` is not on PATH: tell the installed skill/commands how to invoke the CLI here.
-  const onPath = o.cliOnPath ?? isOnPath('specreview');
+  // Without `npm link`, `suiko` is not on PATH: tell the installed skill/commands how to invoke the CLI here.
+  const onPath = o.cliOnPath ?? isOnPath('suiko');
   const invocation = cliInvocation(o);
   for (const c of claudeCopies(base, { cliOnPath: onPath, invocation })) {
     files.push(copyAction(c.target, c.content, { source: c.source, template: c.template, manifest: o.manifest }));
   }
   if (!onPath) {
-    notes.push(`\`specreview\` is not on PATH, so the installed skill and commands tell Claude to run ${invocation} instead.` +
+    notes.push(`\`suiko\` is not on PATH, so the installed skill and commands tell Claude to run ${invocation} instead.` +
       ` Run \`npm link\` in ${PACKAGE_ROOT} (then re-run this install) to use the short command.`);
   }
 
-  // Hooks: the ones asked for, plus SpecReview hooks already in settings.json, which are re-pointed at this CLI so a
+  // Hooks: the ones asked for, plus Suiko hooks already in settings.json, which are re-pointed at this CLI so a
   // re-install (from another checkout, or after the old one moved) never leaves them running a stale path.
   const settingsPath = path.join(base, 'settings.json');
   const present = installedHooks(settingsPath);
@@ -275,7 +276,7 @@ export function planClaude(o) {
   if (withHooks || withPlanGate) {
     const entries = hookEntries({ execPath: o.execPath, binPath: o.binPath, planGate: withPlanGate, hooks: withHooks });
     const action = jsonFileAction(settingsPath, (current) => mergeHooks(current, entries));
-    const kept = (!o.withHooks && present.hooks) || (!o.withPlanGate && present.planGate) ? '; updates the SpecReview hooks already there' : '';
+    const kept = (!o.withHooks && present.hooks) || (!o.withPlanGate && present.planGate) ? '; updates the Suiko hooks already there' : '';
     action.note = `hooks: ${describeHookEntries(entries)} (other settings kept${kept})`;
     action.detail = JSON.stringify(entries, null, 2);
     files.push(action);
@@ -289,14 +290,14 @@ export function planClaude(o) {
       const mcpPath = path.join(project, '.mcp.json');
       const action = jsonFileAction(mcpPath, (current) => {
         const servers = current.mcpServers && typeof current.mcpServers === 'object' ? current.mcpServers : {};
-        return { ...current, mcpServers: { ...servers, specreview: { command, args } } };
+        return { ...current, mcpServers: { ...servers, suiko: { command, args } } };
       });
-      action.note = 'mcpServers.specreview (other servers kept)';
+      action.note = 'mcpServers.suiko (other servers kept)';
       files.push(action);
     } else {
-      notes.push(`MCP: run  claude mcp add --scope user specreview -- ${shellQuote(command)} ${args.map(shellQuote).join(' ')}`);
+      notes.push(`MCP: run  claude mcp add --scope user suiko -- ${shellQuote(command)} ${args.map(shellQuote).join(' ')}`);
     }
-    notes.push('In Claude Code the CLI (`specreview wait` in the background) is the primary loop; MCP is optional.');
+    notes.push('In Claude Code the CLI (`suiko wait` in the background) is the primary loop; MCP is optional.');
   }
   return { files, notes };
 }
@@ -332,7 +333,7 @@ export function describeHookEntries(entries) {
   for (const [event, groups] of Object.entries(entries)) {
     for (const g of groups) {
       for (const h of g.hooks ?? []) {
-        const what = String(h.command ?? '').replace(/^.*specreview(?:\.js)?["']?\s+/, '');
+        const what = String(h.command ?? '').replace(/^.*(?:suiko|specreview)(?:\.js)?["']?\s+/, '');
         out.push(`${event}${g.matcher ? `(${g.matcher})` : ''} -> ${what}`);
       }
     }
@@ -352,7 +353,7 @@ export function planAgentsMd(o) {
   const current = fs.existsSync(target) ? readText(target) : null;
   const content = insertSnippet(current, snippet);
   const action = fileAction(target, content, AGENTS_SNIPPET);
-  action.note = current === null ? 'new file with the SpecReview protocol' : current.includes(BEGIN_MARKER) ? 'replaces the existing specreview block' : 'appends the SpecReview protocol block';
+  action.note = current === null ? 'new file with the Suiko protocol' : current.includes(BEGIN_MARKER) ? 'replaces the existing suiko block' : 'appends the Suiko protocol block';
   return { files: [action], notes: [] };
 }
 
@@ -377,7 +378,7 @@ export function insertSnippet(current, snippet) {
 
 /**
  * Hook entries with absolute commands, shaped like integrations/claude-code/hooks/hooks.json: every template
- * command that starts with `specreview` runs "<node>" "<abs bin>" instead. `planGate` adds (or keeps) the
+ * command that starts with `suiko` runs "<node>" "<abs bin>" instead. `planGate` adds (or keeps) the
  * PermissionRequest/ExitPlanMode gate; without it a gate in the template is left out. `hooks: false` keeps only the
  * gate.
  * @param {{ execPath?: string, binPath?: string, planGate?: boolean, hooks?: boolean }} [o]
@@ -392,8 +393,8 @@ export function hookEntries(o = {}) {
     template = undefined;
   }
   template ??= {
-    PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'specreview hook pre-write', timeout: 5 }] }],
-    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'specreview hook prompt', timeout: 5 }] }],
+    PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'suiko hook pre-write', timeout: 5 }] }],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'suiko hook prompt', timeout: 5 }] }],
   };
   const invocation = cliInvocation(o);
   /** @type {Record<string, any[]>} */
@@ -404,7 +405,7 @@ export function hookEntries(o = {}) {
     for (const g of Array.isArray(groups) ? groups : []) {
       const hooks = [];
       for (const h of Array.isArray(g.hooks) ? g.hooks : []) {
-        const command = String(h.command ?? '').replace(/^specreview(?=\s)/, invocation);
+        const command = String(h.command ?? '').replace(/^suiko(?=\s)/, invocation);
         const gate = PLAN_GATE_RE.test(String(h.command ?? '')) || PLAN_GATE_RE.test(command);
         if (gate ? !o.planGate : o.hooks === false) continue;
         if (gate) hasGate = true;
@@ -424,8 +425,8 @@ export function hookEntries(o = {}) {
 }
 
 /**
- * Merges hook entries into a settings object: removes earlier specreview hooks (any command that runs
- * `specreview ... hook <name>` or `... plan-gate`) from the events being written, drops groups left empty, then
+ * Merges hook entries into a settings object: removes earlier suiko hooks (any command that runs
+ * `suiko ... hook <name>` or `... plan-gate`) from the events being written, drops groups left empty, then
  * appends ours. Other keys and events are kept.
  * @param {Record<string, any>} settings
  * @param {Record<string, any[]>} entries
@@ -441,7 +442,7 @@ export function mergeHooks(settings, entries) {
 }
 
 /**
- * Removes every specreview hook from a settings object (uninstall): emptied groups and events go too, and the
+ * Removes every suiko hook from a settings object (uninstall): emptied groups and events go too, and the
  * `hooks` key when nothing is left in it.
  * @param {Record<string, any>} settings
  * @returns {Record<string, any>}

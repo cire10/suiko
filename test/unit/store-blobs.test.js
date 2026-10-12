@@ -78,18 +78,18 @@ describe('code docs in the store', () => {
     const { doc } = await ctx.store.createSnapshotDoc({ kind: 'code', title: 'Review', origin: ORIGIN, code: SPEC });
     assert.throws(() => ctx.store.workingPath(doc), RefusedError);
     await assert.rejects(ctx.store.readWorking(doc), NotFoundError, 'no version yet');
-    const m = await ctx.store.commitVersion(doc, { source: 'specreview code review\n', manifest: { capturedBy: 'open', code: /** @type {any} */ ({ files: [] }) } });
+    const m = await ctx.store.commitVersion(doc, { source: 'suiko code review\n', manifest: { capturedBy: 'open', code: /** @type {any} */ ({ files: [] }) } });
     assert.equal(m.file, '0001.diff');
     assert.ok(fs.existsSync(path.join(ws.root, '.specreview', 'docs', doc.id, 'versions', '0001.diff')));
     const fresh = await ctx.store.requireDoc(doc.id);
-    assert.equal((await ctx.store.readWorking(fresh)).text, 'specreview code review\n');
+    assert.equal((await ctx.store.readWorking(fresh)).text, 'suiko code review\n');
     await assert.rejects(ctx.store.writeWorking(fresh, 'x', { expectSha256: m.sha256 }), (err) => err instanceof RefusedError && /edit the files with your own tools/.test(err.message));
   });
 
   test('the text format renders an empty RenderResult', async () => {
     const ctx = await engineCtx(ws.root);
     const { doc } = await ctx.store.createSnapshotDoc({ kind: 'code', title: 'Review', origin: ORIGIN, code: SPEC });
-    await ctx.store.commitVersion(doc, { source: 'diff --specreview a/x b/x\n<script>alert(1)</script>\n', manifest: { capturedBy: 'open' } });
+    await ctx.store.commitVersion(doc, { source: 'diff --suiko a/x b/x\n<script>alert(1)</script>\n', manifest: { capturedBy: 'open' } });
     for (const r of [await renderSource({ format: 'text', source: '<h1>x</h1>' }), await getRender(ctx.store, await ctx.store.requireDoc(doc.id), 1), await ctx.render(doc, 'live')]) {
       assert.equal(r.format, 'text');
       assert.equal(r.html, '');

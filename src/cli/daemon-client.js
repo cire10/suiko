@@ -3,12 +3,12 @@
 //
 // ensureDaemon():
 //   1. Read <SPECREVIEW_HOME>/daemon.json and GET http://127.0.0.1:<uiPort>/api/health (500 ms timeout).
-//   2. Healthy specreview daemon with our package version and code (`build`, core/util/build.js: the package folder
+//   2. Healthy suiko daemon with our package version and code (`build`, core/util/build.js: the package folder
 //      and its code files) -> reuse it (fast path, no lock). Every checkout reports the same version, so a daemon
 //      started from another checkout, or before the code changed, is told apart by its build.
 //   3. Otherwise, under a home-level start lock (so concurrent CLIs spawn at most one daemon): re-check; if a
 //      daemon of another version or build answers, POST /api/shutdown (Bearer token + same-origin Origin) and wait for it to
-//      exit; then spawn `process.execPath bin/specreview.js serve --foreground` detached with stdout/stderr
+//      exit; then spawn `process.execPath bin/suiko.js serve --foreground` detached with stdout/stderr
 //      appended to daemon.log, unref() it, and poll daemon.json + /api/health for up to 5 s.
 //   Token, secret and ports persist in daemon.json across restarts (the daemon reuses them); `stop --rotate`
 //   deletes daemon.json after stopping so the next start generates a new token and secret.
@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SpecReviewError } from '../core/store/errors.js';
+import { SuikoError } from '../core/store/errors.js';
 import { daemonLogPath, ensureHome, homeDir, homePath, readDaemonInfo, removeDaemonInfo } from '../core/store/home.js';
 import { withLock } from '../core/store/lock.js';
 import { codeIdentity } from '../core/util/build.js';
@@ -30,10 +30,10 @@ import { APP_NAME, EXIT } from '../shared/protocol.js';
 
 const log = createLogger('daemon-client');
 
-/** Absolute path of the package root (…/html_documentation_annotator). */
+/** Absolute path of the package root (…/suiko). */
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** Absolute path of the CLI entry point. */
-export const BIN_PATH = path.join(PACKAGE_ROOT, 'bin', 'specreview.js');
+export const BIN_PATH = path.join(PACKAGE_ROOT, 'bin', 'suiko.js');
 
 /** @type {string | null} */
 let cachedVersion = null;
@@ -122,7 +122,7 @@ export function codeOf(health, info) {
 }
 
 /**
- * The running daemon, if daemon.json points at a healthy specreview daemon.
+ * The running daemon, if daemon.json points at a healthy suiko daemon.
  * @param {number} [timeoutMs]
  * @returns {Promise<{ info: DaemonInfo, health: Health } | null>}
  */
@@ -299,19 +299,19 @@ async function spawnDaemon(opts) {
 
   const deadline = Date.now() + (opts.startTimeoutMs ?? 5000);
   while (Date.now() < deadline) {
-    if (spawnError) throw new SpecReviewError(`could not start the review server: ${/** @type {Error} */ (spawnError).message}`);
+    if (spawnError) throw new SuikoError(`could not start the review server: ${/** @type {Error} */ (spawnError).message}`);
     const live = await liveDaemon(300);
     if (live) return live;
     if (exited) {
       const e = /** @type {{ code: number | null, signal: string | null }} */ (exited);
-      throw new SpecReviewError(
+      throw new SuikoError(
         `the review server exited during startup (${e.signal ?? `code ${e.code}`})${logTail(logFile)}`,
         { exit: EXIT.ERROR },
       );
     }
     await delay(100);
   }
-  throw new SpecReviewError(
+  throw new SuikoError(
     `the review server did not become healthy within ${Math.round((opts.startTimeoutMs ?? 5000) / 1000)} s (see ${logFile})${logTail(logFile)}`,
     { exit: EXIT.ERROR },
   );

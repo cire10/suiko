@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview open <file|dir...> [--title T] [--browser pane|system|none] [--workspace <dir>] [--json]`
-// `specreview open - [--title T] [--name N]` (design 3.2 / 9.2, amendments 5).
+// `suiko open <file|dir...> [--title T] [--browser pane|system|none] [--workspace <dir>] [--json]`
+// `suiko open - [--title T] [--name N]` (design 3.2 / 9.2, amendments 5).
 //
 // A directory expands to its .md/.markdown/.html/.htm files, recursively (sorted; dot-directories, node_modules,
 // paths isDeniedPath refuses, and symlinks whose target is outside the directory or in such a path are skipped; at
@@ -92,7 +92,7 @@ export async function parse({ values, positionals }, rt) {
   if (stdin && positionals.length > 1) throw new UsageError("open: '-' (read stdin) cannot be combined with other paths");
   const name = /** @type {string | undefined} */ (values.name);
   if (name !== undefined) {
-    if (!stdin) throw new UsageError('open: --name applies to piped text (`specreview open - --name N`)');
+    if (!stdin) throw new UsageError('open: --name applies to piped text (`suiko open - --name N`)');
     if (!name.trim() || name.length > 200 || /[\0-\x1f]/.test(name)) throw new UsageError('open: --name must be a short single-line name');
   }
   if (values.title !== undefined && positionals.length > 1) throw new UsageError('open: --title applies to a single file');
@@ -147,7 +147,7 @@ export async function execute(rt, input) {
       try {
         await rt.openBrowser(url);
       } catch (err) {
-        stderr.push(`specreview: could not open the system browser: ${/** @type {Error} */ (err).message}`);
+        stderr.push(`suiko: could not open the system browser: ${/** @type {Error} */ (err).message}`);
         shown = 'failed';
       }
     }
@@ -171,8 +171,8 @@ export async function execute(rt, input) {
   }
   if (daemonError) {
     stderr.push(
-      `specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} ` +
-        '(the doc is tracked; run `specreview doctor`)',
+      `suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} ` +
+        '(the doc is tracked; run `suiko doctor`)',
     );
   }
   const json = docsJson.length === 1 ? docsJson[0] : { docs: docsJson };
@@ -371,13 +371,13 @@ async function folderResult(rt, tracked, expanded, browser) {
   const here = await discoveredRoot(rt.cwd);
   for (const root of [...new Set(tracked.map((t) => realpathOr(t.root)))]) {
     const ws = here === root ? '' : ` --workspace ${shellArg(path.relative(realpathOr(rt.cwd), root) || '.')}`;
-    waits.push(`\`specreview wait --all${ws}\``);
+    waits.push(`\`suiko wait --all${ws}\``);
   }
   const dirty = tracked.filter((t) => t.workingDirty);
   if (dirty.length) {
     // `wait --all` refuses while a working copy has unrecorded edits
     const refs = await Promise.all(dirty.map((t) => docRef(rt, t)));
-    text.push(`next: record the unrecorded edits first (${refs.map((r) => `\`specreview revise ${r} --replies -\``).join(', ')}, or ask the reviewer to click Record as my revision), then run ${waits.join(' and ')} in the background`);
+    text.push(`next: record the unrecorded edits first (${refs.map((r) => `\`suiko revise ${r} --replies -\``).join(', ')}, or ask the reviewer to click Record as my revision), then run ${waits.join(' and ')} in the background`);
   } else {
     text.push(`next: ${shownPrefix(shown)}run ${waits.join(' and ')} in the background`);
   }
@@ -385,7 +385,7 @@ async function folderResult(rt, tracked, expanded, browser) {
     text.push(`created ${path.join(root, '.specreview')}/ (commit it with the specs)`);
   }
   if (daemonError) {
-    stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the docs are tracked; run \`specreview doctor\`)`);
+    stderr.push(`suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the docs are tracked; run \`suiko doctor\`)`);
   }
   const docs = tracked.map((t) => ({
     doc: t.doc.id,
@@ -414,7 +414,7 @@ async function folderResult(rt, tracked, expanded, browser) {
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 async function openStdin(rt, input, browser) {
-  if (/** @type {any} */ (rt.stdin).isTTY) throw new UsageError('open -: pipe the text in, e.g. `pbpaste | specreview open -`');
+  if (/** @type {any} */ (rt.stdin).isTTY) throw new UsageError('open -: pipe the text in, e.g. `pbpaste | suiko open -`');
   /** @type {Buffer} */
   let bytes;
   try {
@@ -445,9 +445,9 @@ async function openStdin(rt, input, browser) {
   const shown = url ? await showUrl(rt, url, browser, stderr) : 'none';
   const lines = [snapshotLine(t), url ? `review UI: ${url}` : `review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`];
   lines.push(...externalsLines(t.externalHosts));
-  lines.push(`next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background`);
+  lines.push(`next: ${shownPrefix(shown)}run \`suiko wait ${t.ref}\` in the background`);
   lines.push(...scratchNote(ws));
-  if (daemonError) stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the doc is tracked; run \`specreview doctor\`)`);
+  if (daemonError) stderr.push(`suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the doc is tracked; run \`suiko doctor\`)`);
   return {
     exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK,
     text: lines.join('\n'),
@@ -552,25 +552,25 @@ function describe(t, url, daemonError, browser, ref) {
   const { doc } = t;
   const out = [];
   if (t.created) {
-    out.push(`specreview: tracking ${doc.path} as "${doc.id}" (${doc.format}, ${lineCount(t.lines)}) · recorded v${t.version}`);
+    out.push(`suiko: tracking ${doc.path} as "${doc.id}" (${doc.format}, ${lineCount(t.lines)}) · recorded v${t.version}`);
   } else {
     const dirty = t.workingDirty ? ` · working copy differs from v${doc.head ?? t.version} (unrecorded)` : '';
-    out.push(`specreview: ${doc.path} is already tracked as "${doc.id}" (head v${doc.head ?? t.version})${dirty}`);
+    out.push(`suiko: ${doc.path} is already tracked as "${doc.id}" (head v${doc.head ?? t.version})${dirty}`);
   }
   out.push(url ? `review UI: ${url}` : `review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
   out.push(...externalsLines(t.externalHosts));
   if (t.workingDirty) {
     out.push(
-      `next: record the unrecorded edits first (\`specreview revise ${ref} --replies -\`, or ask the reviewer to click Record as my revision), then run \`specreview wait ${ref}\` in the background`,
+      `next: record the unrecorded edits first (\`suiko revise ${ref} --replies -\`, or ask the reviewer to click Record as my revision), then run \`suiko wait ${ref}\` in the background`,
     );
   } else if (browser === 'system') {
-    out.push(`next: the URL was opened in the system browser; run \`specreview wait ${ref}\` in the background`);
+    out.push(`next: the URL was opened in the system browser; run \`suiko wait ${ref}\` in the background`);
   } else if (browser === 'none') {
-    out.push(`next: run \`specreview wait ${ref}\` in the background`);
+    out.push(`next: run \`suiko wait ${ref}\` in the background`);
   } else if (browser === 'failed') {
-    out.push(`next: the system browser could not be opened; give the user the URL, then run \`specreview wait ${ref}\` in the background`);
+    out.push(`next: the system browser could not be opened; give the user the URL, then run \`suiko wait ${ref}\` in the background`);
   } else {
-    out.push(`next: open the URL (browser pane), then run \`specreview wait ${ref}\` in the background`);
+    out.push(`next: open the URL (browser pane), then run \`suiko wait ${ref}\` in the background`);
   }
   if (t.storeCreated) {
     out.push(

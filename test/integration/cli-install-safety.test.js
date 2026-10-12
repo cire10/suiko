@@ -1,7 +1,7 @@
 // @ts-check
-// Safety cases of the multi-agent installer (`specreview install` / `uninstall` / `doctor`), each against a temp HOME
+// Safety cases of the multi-agent installer (`suiko install` / `uninstall` / `doctor`), each against a temp HOME
 // (HOME, PATH and SPECREVIEW_HOME are passed explicitly; nothing reads or writes the real home directory):
-//   - Codex config.toml: tables Codex adds inside SpecReview's markers survive reinstall and uninstall; a specreview
+//   - Codex config.toml: tables Codex adds inside Suiko's markers survive reinstall and uninstall; a suiko
 //     server defined under [mcp_servers] (inline table, dotted key) or re-serialised without the begin marker is left
 //     alone; unparseable TOML is refused; every result parses with Python's tomllib when it is available;
 //   - Markdown markers that are not one well-formed pair are refused (no second block, no lost text);
@@ -108,13 +108,13 @@ describe('Codex config.toml', () => {
 
     const r = await h.run(['install', '--only', 'codex', '--apply'], { deps: { execPath: '/new/node' } });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /moves \[projects\."\/home\/me\/a"\], \[projects\."\/home\/me\/b"\], \[mcp_servers\.foo\] \(found inside the markers, not SpecReview's\) below them/);
+    assert.match(r.stdout, /moves \[projects\."\/home\/me\/a"\], \[projects\."\/home\/me\/b"\], \[mcp_servers\.foo\] \(found inside the markers, not Suiko's\) below them/);
     const after1 = read(toml);
     const doc = tomlParse(after1);
     if (doc) {
       assert.deepEqual(doc.projects, { '/home/me/a': { trust_level: 'trusted' }, '/home/me/b': { trust_level: 'trusted' } });
       assert.equal(doc.mcp_servers.foo.command, 'foo');
-      assert.equal(doc.mcp_servers.specreview.command, '/new/node');
+      assert.equal(doc.mcp_servers.suiko.command, '/new/node');
       assert.equal(doc.model, 'o3');
     }
     assert.match(after1, /# specreview:end\n\n\[projects\."\/home\/me\/a"\]\ntrust_level = "trusted"\n/, 'Codex\'s tables now follow the block');
@@ -127,7 +127,7 @@ describe('Codex config.toml', () => {
     const un = await h.run(['uninstall', '--only', 'codex', '--apply']);
     assert.equal(un.code, 0, un.stderr);
     const left = read(toml);
-    assert.doesNotMatch(left, /specreview/);
+    assert.doesNotMatch(left, /suiko/);
     const doc2 = tomlParse(left);
     if (doc2) {
       assert.deepEqual(Object.keys(doc2.projects).sort(), ['/home/me/a', '/home/me/b', '/home/me/c']);
@@ -139,26 +139,26 @@ describe('Codex config.toml', () => {
   });
 
   test('without the end marker, only our table is replaced or removed; what follows it is kept', async () => {
-    const h = makeHome({ files: { '.codex/config.toml': 'a = 1\n\n# specreview:begin\n[mcp_servers.specreview]\ncommand = "old"\n\n# trusted\n[projects."/x"]\ntrust_level = "trusted"\n' } });
+    const h = makeHome({ files: { '.codex/config.toml': 'a = 1\n\n# specreview:begin\n[mcp_servers.suiko]\ncommand = "old"\n\n# trusted\n[projects."/x"]\ntrust_level = "trusted"\n' } });
     const r = await h.run(['install', '--only', 'codex', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     const text = read(h.p('.codex/config.toml'));
-    assert.match(text, /^a = 1\n\n# specreview:begin \(managed[^\n]*\n\[mcp_servers\.specreview\]\ncommand = "[^"]+"\nargs = [^\n]+\ntool_timeout_sec = 660\n# specreview:end\n\n# trusted\n\[projects\."\/x"\]\ntrust_level = "trusted"\n$/);
+    assert.match(text, /^a = 1\n\n# specreview:begin \(managed[^\n]*\n\[mcp_servers\.suiko\]\ncommand = "[^"]+"\nargs = [^\n]+\ntool_timeout_sec = 660\n# specreview:end\n\n# trusted\n\[projects\."\/x"\]\ntrust_level = "trusted"\n$/);
     tomlParse(text);
   });
 
-  test('a specreview server under [mcp_servers] (inline table, dotted key, quoted key) is left alone, file unchanged', async () => {
+  test('a suiko server under [mcp_servers] (inline table, dotted key, quoted key) is left alone, file unchanged', async () => {
     for (const body of [
-      '[mcp_servers]\nspecreview = { command = "specreview", args = ["mcp"] }\n',
-      '[mcp_servers]\nspecreview.command = "x"\nspecreview.args = ["mcp"]\n',
-      '[mcp_servers]\n"specreview" = { command = "x" }\n',
-      'mcp_servers.specreview.command = "x"\n',
-      '[mcp_servers.specreview.env]\nA = "1"\n',
+      '[mcp_servers]\nsuiko = { command = "suiko", args = ["mcp"] }\n',
+      '[mcp_servers]\nsuiko.command = "x"\nsuiko.args = ["mcp"]\n',
+      '[mcp_servers]\n"suiko" = { command = "x" }\n',
+      'mcp_servers.suiko.command = "x"\n',
+      '[mcp_servers.suiko.env]\nA = "1"\n',
     ]) {
       const h = makeHome({ files: { '.codex/config.toml': body } });
       const r = await h.run(['install', '--only', 'codex', '--apply']);
       assert.equal(r.code, 0, r.stderr);
-      assert.match(r.stdout, /already defines the specreview MCP server outside SpecReview's managed block; left as is/, body);
+      assert.match(r.stdout, /already defines the suiko MCP server outside Suiko's managed block; left as is/, body);
       assert.equal(read(h.p('.codex/config.toml')), body);
       tomlParse(body);
     }
@@ -177,14 +177,14 @@ describe('Codex config.toml', () => {
     fs.writeFileSync(toml, rewritten);
     const r = await h.run(['install', '--only', 'codex', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /already defines the specreview MCP server outside SpecReview's managed block; left as is\. \(A leftover "# specreview:end" line suggests Codex rewrote \[mcp_servers\]/);
+    assert.match(r.stdout, /already defines the suiko MCP server outside Suiko's managed block; left as is\. \(A leftover "# specreview:end" line suggests Codex rewrote \[mcp_servers\]/);
     assert.equal(read(toml), rewritten);
     const un = await h.run(['uninstall', '--only', 'codex', '--apply']);
     assert.equal(un.code, 0, un.stderr);
-    assert.match(un.stdout, /defines the specreview MCP server outside SpecReview's markers .* so it is not removed; run `codex mcp remove specreview`/);
+    assert.match(un.stdout, /defines the suiko MCP server outside Suiko's markers .* so it is not removed; run `codex mcp remove suiko`/);
     const left = read(toml);
     assert.doesNotMatch(left, /# specreview:end/);
-    assert.match(left, /\[mcp_servers\.specreview\]/, 'not ours any more: kept');
+    assert.match(left, /\[mcp_servers\.suiko\]/, 'not ours any more: kept');
     tomlParse(left);
   });
 
@@ -237,7 +237,7 @@ describe('symlinked config files', () => {
       assert.ok(fs.lstatSync(`${h.p(link)}.specreview-backup`).isFile(), `${link} backup is a plain copy`);
     }
     assert.ok(readJson(h.p('dotfiles/settings.json')).hooks.PreToolUse, 'the target got the hooks');
-    assert.match(read(h.p('dotfiles/config.toml')), /\[mcp_servers\.specreview\]/);
+    assert.match(read(h.p('dotfiles/config.toml')), /\[mcp_servers\.suiko\]/);
     assert.match(read(h.p('dotfiles/AGENTS.md')), /^# Rules\n\n<!-- specreview:begin/);
     const un = await h.run(['uninstall', '--only', 'claude,codex', '--apply']);
     assert.equal(un.code, 0, un.stderr);
@@ -310,7 +310,7 @@ describe('project scope', () => {
     assert.equal(fs.existsSync(path.join(h.project, 'AGENTS.md')), false);
     assert.equal(r.stdout.match(/This project has CLAUDE\.md and no AGENTS\.md\. OpenCode and Amp read CLAUDE\.md only while AGENTS\.md does not exist/g)?.length, 1);
     assert.equal(r.stdout.match(/Did not create .*AGENTS\.md: this project has only CLAUDE\.md/g)?.length, 3);
-    assert.ok(fs.existsSync(path.join(h.project, '.agents/skills/specreview-review/SKILL.md')), 'the skill still carries the protocol');
+    assert.ok(fs.existsSync(path.join(h.project, '.agents/skills/suiko-review/SKILL.md')), 'the skill still carries the protocol');
     // Once the team has an AGENTS.md, the block goes in.
     fs.writeFileSync(path.join(h.project, 'AGENTS.md'), '# Team rules\n');
     await h.run(['install', '--project', '--only', 'codex,opencode,amp', '--apply']);
@@ -341,7 +341,7 @@ describe('write failures', () => {
     fs.writeFileSync(h.p('.config/opencode/commands'), 'a file where a directory should be\n');
     const r = await h.run(['install', '--apply']);
     assert.equal(r.code, 1);
-    const cmd = h.p('.config/opencode/commands/specreview-review.md');
+    const cmd = h.p('.config/opencode/commands/suiko-review.md');
     assert.match(r.stdout, new RegExp(`NOT written: ${esc(cmd)}`));
     assert.match(r.stdout, new RegExp(`FAILED ${esc(cmd)}: could not write it: `));
     assert.match(r.stdout, /1 file could not be written \(see FAILED above\); the others were\./);
@@ -369,46 +369,46 @@ describe('doctor and the Claude Code plugin', () => {
     const h = makeHome({ dirs: ['.codex/sessions', '.cursor'] });
     await h.run(['install', '--apply']);
     const r = await h.run(['doctor'], doctorDeps);
-    assert.match(r.stdout, /^ok {4}Codex CLI: SpecReview configured$/m);
-    assert.match(r.stdout, /^ok {4}Cursor: SpecReview configured$/m);
+    assert.match(r.stdout, /^ok {4}Codex CLI: Suiko configured$/m);
+    assert.match(r.stdout, /^ok {4}Cursor: Suiko configured$/m);
     assert.doesNotMatch(r.stdout, /Copilot|Amp|Droid/);
     // Droid, detected, is configured by the shared skill alone.
     fs.mkdirSync(h.p('.factory'));
-    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Factory Droid: SpecReview configured$/m);
+    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Factory Droid: Suiko configured$/m);
   });
 
   test('plugin installed next to an earlier settings install: install and doctor warn that the hooks run twice', async () => {
     const h = makeHome({ dirs: ['.claude'] });
     await h.run(['install', '--only', 'claude', '--apply']);
     fs.mkdirSync(h.p('.claude/plugins'));
-    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'specreview@local': [{ scope: 'user', installPath: '/x' }] } }));
+    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'suiko@local': [{ scope: 'user', installPath: '/x' }] } }));
     const { j } = await h.json(['install', '--only', 'claude']);
     const claude = j.agents.find((/** @type {any} */ a) => a.id === 'claude');
     assert.equal(claude.status, 'skipped');
-    assert.match(claude.reason, /WARNING: ~\/\.claude\/settings\.json also has 2 SpecReview hooks from an earlier `specreview install`, so they run twice next to the plugin's \(specreview@local\)\. Remove the settings install with `specreview uninstall --only claude --apply`/);
+    assert.match(claude.reason, /WARNING: ~\/\.claude\/settings\.json also has 2 Suiko hooks from an earlier `suiko install`, so they run twice next to the plugin's \(suiko@local\)\. Remove the settings install with `suiko uninstall --only claude --apply`/);
     const doc = await h.run(['doctor'], doctorDeps);
-    assert.match(doc.stdout, /^WARN {2}Claude Code: SpecReview plugin installed \(specreview@local\), and ~\/\.claude\/settings\.json also has 2 SpecReview hooks/m);
+    assert.match(doc.stdout, /^WARN {2}Claude Code: Suiko plugin installed \(suiko@local\), and ~\/\.claude\/settings\.json also has 2 Suiko hooks/m);
     const un = await h.run(['uninstall', '--only', 'claude', '--apply']);
     assert.equal(un.code, 0, un.stderr);
-    assert.match(un.stdout, /The SpecReview plugin is still installed \(specreview@local\)/);
-    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: SpecReview plugin installed \(specreview@local\)$/m);
+    assert.match(un.stdout, /The Suiko plugin is still installed \(suiko@local\)/);
+    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: Suiko plugin installed \(suiko@local\)$/m);
   });
 
   test('a plan gate in settings.json next to the plugin is not a double install: the plugin has no gate', async () => {
     const h = makeHome({ dirs: ['.claude'] });
     assert.equal((await h.run(['install', 'claude', '--with-plan-gate', '--apply'])).code, 0);
     fs.mkdirSync(h.p('.claude/plugins'));
-    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'specreview@local': [{ scope: 'user', installPath: '/x' }] } }));
+    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'suiko@local': [{ scope: 'user', installPath: '/x' }] } }));
     const { j } = await h.json(['install', '--only', 'claude']);
     assert.doesNotMatch(j.agents.find((/** @type {any} */ a) => a.id === 'claude').reason, /WARNING/);
-    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: SpecReview plugin installed \(specreview@local\)$/m);
+    assert.match((await h.run(['doctor'], doctorDeps)).stdout, /^ok {4}Claude Code: Suiko plugin installed \(suiko@local\)$/m);
   });
 
   test('a plugin installed for another project does not block the install; one for this project does, with --scope', async () => {
     const h = makeHome({ dirs: ['.claude'] });
     const write = (/** @type {any[]} */ entries) => {
       fs.mkdirSync(h.p('.claude/plugins'), { recursive: true });
-      fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'specreview@specreview': entries } }));
+      fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'suiko@suiko': entries } }));
     };
     write([{ scope: 'project', projectPath: '/somewhere/else/repo-a', installPath: '/x' }]);
     assert.equal((await h.json(['install', '--only', 'claude'])).j.agents[0].status, 'planned');
@@ -417,7 +417,7 @@ describe('doctor and the Claude Code plugin', () => {
     fs.mkdirSync(sub);
     const { j } = await h.json(['install', '--only', 'claude'], { cwd: sub });
     assert.equal(j.agents[0].status, 'skipped');
-    assert.match(j.agents[0].reason, /run `claude plugin uninstall specreview@specreview --scope project`/);
+    assert.match(j.agents[0].reason, /run `claude plugin uninstall suiko@suiko --scope project`/);
     write([{ scope: 'local', projectPath: h.project, installPath: '/x' }]);
     assert.match((await h.json(['install', '--only', 'claude'])).j.agents[0].reason, /--scope local`/);
   });
@@ -442,17 +442,17 @@ describe('agent config details', () => {
     fs.symlinkSync(process.execPath, stable);
     const r = await h.run(['install', '--only', 'claude,cursor', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(readJson(h.p('.cursor/mcp.json')).mcpServers.specreview, { type: 'stdio', command: stable, args: [BIN_PATH, 'mcp'] });
+    assert.deepEqual(readJson(h.p('.cursor/mcp.json')).mcpServers.suiko, { type: 'stdio', command: stable, args: [BIN_PATH, 'mcp'] });
     assert.equal(readJson(h.p('.claude/settings.json')).hooks.PreToolUse[0].hooks[0].command, `"${stable}" "${BIN_PATH}" hook pre-write`);
     // A `node` on PATH that is another node is not used; SPECREVIEW_NODE (install.sh) is, when it is this node.
     const other = makeHome({ dirs: ['.cursor'], bins: ['node'] });
     await other.run(['install', '--only', 'cursor', '--apply']);
-    assert.equal(readJson(other.p('.cursor/mcp.json')).mcpServers.specreview.command, process.execPath);
+    assert.equal(readJson(other.p('.cursor/mcp.json')).mcpServers.suiko.command, process.execPath);
     const viaEnv = makeHome({ dirs: ['.cursor'] });
     const link = path.join(tempDir('nodelink'), 'node');
     cleanup.push(path.dirname(link));
     fs.symlinkSync(process.execPath, link);
     await viaEnv.run(['install', '--only', 'cursor', '--apply'], { env: { SPECREVIEW_NODE: link } });
-    assert.equal(readJson(viaEnv.p('.cursor/mcp.json')).mcpServers.specreview.command, link);
+    assert.equal(readJson(viaEnv.p('.cursor/mcp.json')).mcpServers.suiko.command, link);
   });
 });

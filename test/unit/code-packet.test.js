@@ -159,9 +159,9 @@ describe('code packet', () => {
       r.git('add', 'a.js');
       const ctx = await r.ctx();
       const expect = /** @type {Array<[object, RegExp]>} */ ([
-        [{ mode: 'uncommitted' }, /NEXT: edit the files -> specreview revise cr-uncommitted --replies - \(records round v2 from your working tree\)/],
-        [{ mode: 'staged' }, /NEXT: edit the files -> git add <files> -> specreview revise cr-staged --replies -/],
-        [{ mode: 'branch', base: 'main' }, /NEXT: edit -> commit -> specreview revise cr-feat --replies -/],
+        [{ mode: 'uncommitted' }, /NEXT: edit the files -> suiko revise cr-uncommitted --replies - \(records round v2 from your working tree\)/],
+        [{ mode: 'staged' }, /NEXT: edit the files -> git add <files> -> suiko revise cr-staged --replies -/],
+        [{ mode: 'branch', base: 'main' }, /NEXT: edit -> commit -> suiko revise cr-feat --replies -/],
       ]);
       for (const [input, re] of expect) {
         const { doc } = await ops.openCodeReview(ctx, { input });

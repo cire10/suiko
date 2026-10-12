@@ -24,7 +24,7 @@ const fake = createFakeCapture(path.join(TMP, 'fake'));
 
 /** Temp snip directories in os.tmpdir(). */
 function leftovers() {
-  return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('specreview-snip-'));
+  return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('suiko-snip-'));
 }
 
 describe('captureScreenRegion with a fake picker', () => {

@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview ask <doc> (--quote TEXT | --lines A-B) -m <question> [--json]` (design 9.2).
-// `specreview ask <code-doc> [--file <path> [--lines A-B]] -m <question>` (design 4.2): in a code review the lines
+// `suiko ask <doc> (--quote TEXT | --lines A-B) -m <question> [--json]` (design 9.2).
+// `suiko ask <code-doc> [--file <path> [--lines A-B]] -m <question>` (design 4.2): in a code review the lines
 // are lines of the working file now (mapped onto the head round); --file alone asks about the whole file, neither
 // about the whole review.
 // Creates an `agent-question` thread (status needs_input) anchored on head; the reviewer's answer arrives in a

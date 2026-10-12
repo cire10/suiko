@@ -1,4 +1,4 @@
-// SpecReview guest, part 60: pick mode (element, cell, mermaid node and region captures).
+// Suiko guest, part 60: pick mode (element, cell, mermaid node and region captures).
 //
 // setTool {tool:'pick'} lays a transparent "glass" (cursor: crosshair) over the viewport inside the overlay, so the
 // page never receives the pick clicks. Under the pointer the guest finds the page element with

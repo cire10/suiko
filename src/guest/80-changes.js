@@ -1,4 +1,4 @@
-// SpecReview guest, part 80: the rendered Changes overlay (design 8.6, amendments 4.1/4.5).
+// Suiko guest, part 80: the rendered Changes overlay (design 8.6, amendments 4.1/4.5).
 //
 // Input: a Changes payload { hunks: [{ id, op: 'add'|'del'|'mod', old, new, srids, words: [{srid, quote, prefix,
 // suffix}], deleted: {text, html, lines}|null, insertBefore: {srid}|null, threads?: string[], other?: string|{why},

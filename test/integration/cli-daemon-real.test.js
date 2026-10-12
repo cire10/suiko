@@ -1,5 +1,5 @@
 // @ts-check
-// WP4 against the REAL daemon (src/daemon/main.js, WP5): `specreview open` (a real process) starts the daemon via
+// WP4 against the REAL daemon (src/daemon/main.js, WP5): `suiko open` (a real process) starts the daemon via
 // ensureDaemon() (detached `serve --foreground`, health poll), the printed review URL is served, the daemon reports
 // our package version, a second `open` reuses it, `doctor` sees it, and `stop` / `stop --rotate` shut it down.
 // Uses a temp SPECREVIEW_HOME and a free port pair in 5800-5899 (never the defaults). Skipped when the daemon or
@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const BIN = path.join(ROOT, 'bin', 'specreview.js');
+const BIN = path.join(ROOT, 'bin', 'suiko.js');
 const READY = ['src/daemon/main.js', 'src/core/review/ops.js'].every((f) => fs.existsSync(path.join(ROOT, f)));
 
 const HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-real-daemon-')));
@@ -115,7 +115,7 @@ describe('real daemon lifecycle through the CLI', { skip: READY ? false : 'daemo
     assert.equal((fs.statSync(path.join(HOME, 'daemon.json')).mode & 0o777).toString(8), '600');
 
     const health = JSON.parse((await get(`http://127.0.0.1:${port}/api/health`)).body);
-    assert.equal(health.name, 'specreview');
+    assert.equal(health.name, 'specreview', 'the protocol name stays specreview after the rename to suiko, so CLIs and daemons of both names recognise each other');
     assert.equal(health.version, client.packageVersion(), 'the daemon runs our version');
     const page = await get(url[1]);
     assert.equal(page.status, 200);
@@ -133,13 +133,13 @@ describe('real daemon lifecycle through the CLI', { skip: READY ? false : 'daemo
 
     const stop = await run(['stop'], env);
     assert.equal(stop.code, 0, stop.stderr);
-    assert.equal(stop.stdout, `specreview: stopped the review server (pid ${info.pid})\n`);
+    assert.equal(stop.stdout, `suiko: stopped the review server (pid ${info.pid})\n`);
     assert.equal(await client.getHealth(port, 300), null);
     assert.ok(fs.existsSync(path.join(HOME, 'daemon.json')), 'token and secret persist across restarts');
 
     const restarted = await run(['serve'], env);
     assert.equal(restarted.code, 0, restarted.stderr);
-    assert.match(restarted.stdout, new RegExp(`^specreview: review server running at http://127\\.0\\.0\\.1:${port} `));
+    assert.match(restarted.stdout, new RegExp(`^suiko: review server running at http://127\\.0\\.0\\.1:${port} `));
     assert.equal(JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8')).token, info.token, 'same token after a restart');
 
     const rotate = await run(['stop', '--rotate'], env);
@@ -147,6 +147,6 @@ describe('real daemon lifecycle through the CLI', { skip: READY ? false : 'daemo
     assert.match(rotate.stdout, /token and content secret will be regenerated on the next start/);
     assert.equal(fs.existsSync(path.join(HOME, 'daemon.json')), false);
     const none = await run(['stop'], env);
-    assert.equal(none.stdout, 'specreview: the review server is not running\n');
+    assert.equal(none.stdout, 'suiko: the review server is not running\n');
   });
 });

@@ -60,15 +60,15 @@ describe('install claude', () => {
         hooks: {
           PreToolUse: [
             { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] },
-            { matcher: 'Write', hooks: [{ type: 'command', command: 'specreview hook pre-write', timeout: 5 }] },
+            { matcher: 'Write', hooks: [{ type: 'command', command: 'suiko hook pre-write', timeout: 5 }] },
           ],
           Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }],
         },
       }),
     );
-    // A `specreview` executable on PATH: the skill is copied verbatim (see the 'not on PATH' suite for the other case).
+    // A `suiko` executable on PATH: the skill is copied verbatim (see the 'not on PATH' suite for the other case).
     const binDir = tempDir('sr-fakebin-');
-    fs.writeFileSync(path.join(binDir, 'specreview'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(binDir, 'suiko'), '#!/bin/sh\n', { mode: 0o755 });
     const r = await runCli(['install', 'claude', '--project', '--with-hooks', '--apply'], {
       cwd: path.join(project, 'src'), claudeHome, env: { SPECREVIEW_HOME: HOME, PATH: binDir },
     });
@@ -102,7 +102,7 @@ describe('install claude', () => {
     const r = await run(['install', 'claude', '--with-mcp', '--apply']);
     assert.equal(r.code, 0, r.stderr);
     assert.ok(fs.existsSync(path.join(claudeHome, 'skills', 'spec-review', 'SKILL.md')));
-    assert.match(r.stdout, new RegExp(`claude mcp add --scope user specreview -- "${process.execPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" ".*bin/specreview\\.js" "mcp"`));
+    assert.match(r.stdout, new RegExp(`claude mcp add --scope user suiko -- "${process.execPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" ".*bin/suiko\\.js" "mcp"`));
   });
 
   test('--project --with-mcp merges .mcp.json', async () => {
@@ -111,7 +111,7 @@ describe('install claude', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(readJson(path.join(project, '.mcp.json')).mcpServers, {
       other: { command: 'x' },
-      specreview: { command: process.execPath, args: [BIN_PATH, 'mcp'] },
+      suiko: { command: process.execPath, args: [BIN_PATH, 'mcp'] },
     });
   });
 
@@ -151,10 +151,10 @@ describe('install claude', () => {
     }
   });
 
-  test('re-running `install claude` without hook flags re-points the SpecReview hooks already there (none added)', async () => {
+  test('re-running `install claude` without hook flags re-points the Suiko hooks already there (none added)', async () => {
     const home = tempDir('claude-repoint');
     try {
-      const stale = (/** @type {string} */ what) => `"/old/node" "/old/checkout/bin/specreview.js" ${what}`;
+      const stale = (/** @type {string} */ what) => `"/old/node" "/old/checkout/bin/suiko.js" ${what}`;
       const settings = {
         hooks: {
           PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: stale('hook pre-write'), timeout: 5 }] }],
@@ -166,7 +166,7 @@ describe('install claude', () => {
       fs.writeFileSync(path.join(home, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
       const opts = { cwd: path.join(project, 'src'), claudeHome: home, env: { SPECREVIEW_HOME: HOME } };
       const dry = await runCli(['install', 'claude'], opts);
-      assert.match(dry.stdout, /settings\.json {2}\(hooks: .*plan-gate \(other settings kept; updates the SpecReview hooks already there\)\)/);
+      assert.match(dry.stdout, /settings\.json {2}\(hooks: .*plan-gate \(other settings kept; updates the Suiko hooks already there\)\)/);
       assert.equal((await runCli(['install', 'claude', '--apply'], opts)).code, 0);
       const s = readJson(path.join(home, 'settings.json'));
       assert.deepEqual(s.hooks.PreToolUse, [{ matcher: 'Write', hooks: [{ type: 'command', command: hookCommand('pre-write'), timeout: 5 }] }]);
@@ -181,7 +181,7 @@ describe('install claude', () => {
       assert.deepEqual(Object.keys(readJson(path.join(home, 'settings.json')).hooks), ['PermissionRequest']);
       assert.equal(readJson(path.join(home, 'settings.json')).hooks.PermissionRequest[0].hooks[0].command, planGateCommand());
 
-      // No SpecReview hooks: settings.json is not touched.
+      // No Suiko hooks: settings.json is not touched.
       const none = tempDir('claude-nohooks');
       try {
         fs.writeFileSync(path.join(none, 'settings.json'), '{"model": "opus"}\n');
@@ -221,8 +221,8 @@ describe('install claude', () => {
     assert.equal((await run(['install', 'agents-md', '--with-hooks'])).code, 1);
   });
 
-  test('mergeHooks drops emptied groups and replaces earlier absolute specreview hooks', () => {
-    const old = { hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: '"/old/node" "/old/bin/specreview.js" hook prompt' }] }] } };
+  test('mergeHooks drops emptied groups and replaces earlier absolute suiko hooks', () => {
+    const old = { hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: '"/old/node" "/old/bin/suiko.js" hook prompt' }] }] } };
     const merged = mergeHooks(old, { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'NEW' }] }] });
     assert.deepEqual(merged.hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: 'NEW' }] }]);
   });
@@ -236,7 +236,7 @@ describe('install agents-md', () => {
     fs.writeFileSync(target, '# Project rules\n\nBe nice.\n');
     const dry = await run(['install', 'agents-md']);
     assert.equal(dry.code, 0, dry.stderr);
-    assert.match(dry.stdout, /would update .*AGENTS\.md {2}\(appends the SpecReview protocol block\)/);
+    assert.match(dry.stdout, /would update .*AGENTS\.md {2}\(appends the Suiko protocol block\)/);
     assert.equal(fs.readFileSync(target, 'utf8'), '# Project rules\n\nBe nice.\n');
 
     const r = await run(['install', 'agents-md', '--apply']);
@@ -270,20 +270,20 @@ describe('install claude: CLI not on PATH', () => {
   test('the installed SKILL.md and /review-spec carry the absolute invocation; reference.md is copied verbatim', async () => {
     const { planClaude } = await import('../../src/cli/install.js');
     const base = tempDir('sr-claude-nopath-');
-    const plan = planClaude({ scope: 'user', cwd: base, claudeHome: base, execPath: '/opt/node', binPath: '/x/bin/specreview.js', cliOnPath: false });
+    const plan = planClaude({ scope: 'user', cwd: base, claudeHome: base, execPath: '/opt/node', binPath: '/x/bin/suiko.js', cliOnPath: false });
     const skill = plan.files.find((f) => f.path.endsWith(path.join('spec-review', 'SKILL.md')));
     const ref = plan.files.find((f) => f.path.endsWith(path.join('spec-review', 'reference.md')));
     const cmd = plan.files.find((f) => f.path.endsWith('review-spec.md'));
     assert.ok(skill && ref && cmd);
-    assert.match(skill.content, /^---\n[\s\S]*?\n---\n\n> \*\*On this machine `specreview` is not on PATH\.\*\*/);
-    assert.ok(skill.content.includes('`"/opt/node" "/x/bin/specreview.js" wait <doc>`'));
+    assert.match(skill.content, /^---\n[\s\S]*?\n---\n\n> \*\*On this machine `suiko` is not on PATH\.\*\*/);
+    assert.ok(skill.content.includes('`"/opt/node" "/x/bin/suiko.js" wait <doc>`'));
     assert.ok(cmd.content.startsWith('---\n'), 'front matter stays first');
-    assert.ok(cmd.content.includes('"/opt/node" "/x/bin/specreview.js"'));
+    assert.ok(cmd.content.includes('"/opt/node" "/x/bin/suiko.js"'));
     assert.ok(!ref.content.includes('not on PATH'));
     assert.ok(plan.notes.some((n) => n.includes('npm link')));
   });
 
-  test('nothing is rewritten when specreview is on PATH', async () => {
+  test('nothing is rewritten when suiko is on PATH', async () => {
     const { planClaude } = await import('../../src/cli/install.js');
     const base = tempDir('sr-claude-onpath-');
     const plan = planClaude({ scope: 'user', cwd: base, claudeHome: base, cliOnPath: true });

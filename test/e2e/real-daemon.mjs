@@ -2,7 +2,7 @@
 // The REAL daemon (WP5) and review engine (WP3) for UI e2e tests, in-process.
 //
 // `startRealDaemon()` builds a throwaway workspace (copies of test/fixtures/docs under <tmp>/ws/docs), points
-// SPECREVIEW_HOME at <tmp>/home, opens the docs through the engine (`specreview open`), and starts the daemon on
+// SPECREVIEW_HOME at <tmp>/home, opens the docs through the engine (`suiko open`), and starts the daemon on
 // random ports (never 4777/4778; nothing is logged to disk). The returned handle drives the agent side through the
 // same engine ops the CLI uses (feedback = delivery, revise, ask), so the UI is exercised against the real routes,
 // payloads and SSE stream.
@@ -10,9 +10,9 @@
 //   const real = await startRealDaemon();
 //   await page.goto(real.url('kitchen-sink'));
 //   ...
-//   await real.agentFeedback('kitchen-sink');                 // `specreview feedback`: delivers submitted reviews
+//   await real.agentFeedback('kitchen-sink');                 // `suiko feedback`: delivers submitted reviews
 //   real.write('docs/kitchen-sink.md', text);                 // the agent edits the file
-//   await real.revise('kitchen-sink', { summary, threads });  // `specreview revise`
+//   await real.revise('kitchen-sink', { summary, threads });  // `suiko revise`
 //   await real.close();
 
 import fs from 'node:fs';
@@ -90,11 +90,11 @@ export async function startRealDaemon(opts = {}) {
     write: (rel, text) => fs.writeFileSync(path.join(root, rel), text),
     /** DocState as the engine sees it. @param {string} name */
     state: (name) => ops.docState(ctx, idOf(name)),
-    /** The agent fetches feedback (`specreview feedback`): delivers every submitted review. @param {string} name */
+    /** The agent fetches feedback (`suiko feedback`): delivers every submitted review. @param {string} name */
     agentFeedback: (name) => ops.feedback(ctx, idOf(name)),
-    /** `specreview revise` with a ReviseInput. @param {string} name @param {any} input */
+    /** `suiko revise` with a ReviseInput. @param {string} name @param {any} input */
     revise: (name, input) => ops.revise(ctx, idOf(name), input),
-    /** `specreview ask`. @param {string} name @param {any} input */
+    /** `suiko ask`. @param {string} name @param {any} input */
     ask: (name, input) => ops.ask(ctx, idOf(name), input),
     async close() {
       await daemon.close('test');
@@ -105,7 +105,7 @@ export async function startRealDaemon(opts = {}) {
 
 /**
  * The REAL daemon serving a code review of a scripted git repository (test/helpers/git-repo.js), with the agent side
- * driven through the real CLI as child processes (`bin/specreview.js` with the repo's hermetic env): `review`,
+ * driven through the real CLI as child processes (`bin/suiko.js` with the repo's hermetic env): `review`,
  * `wait`, `apply`, `revise` reach this in-process daemon through its daemon.json in the repo's SPECREVIEW_HOME.
  *
  *   const repo = await designRepo();
@@ -120,7 +120,7 @@ export async function startRealDaemon(opts = {}) {
 export async function startRealCodeDaemon(repo, opts = {}) {
   const { spawn } = await import('node:child_process');
   const { startDaemon } = await import('../../src/daemon/main.js');
-  const bin = path.resolve(HERE, '..', '..', 'bin', 'specreview.js');
+  const bin = path.resolve(HERE, '..', '..', 'bin', 'suiko.js');
   const daemon = await startDaemon({ uiPort: 0, contentPort: 0, home: repo.home, logFile: false, idleMs: 0, timing: { codePollMs: opts.codePollMs ?? 250 } });
   const env = { ...repo.env, SPECREVIEW_HOME: repo.home, SPECREVIEW_AGENT: opts.agent ?? 'claude' };
   /** @type {Set<import('node:child_process').ChildProcess>} */

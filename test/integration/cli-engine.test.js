@@ -1,6 +1,6 @@
 // @ts-check
 // WP4 against the REAL review engine (src/core/review, WP3) and store (WP1): the CLI (main() in-process, plus real
-// `bin/specreview.js` processes for wait supersede/interrupt), the hooks and the MCP server drive one review loop
+// `bin/suiko.js` processes for wait supersede/interrupt), the hooks and the MCP server drive one review loop
 // on test/fixtures/docs/kitchen-sink.md. The reviewer's side (drafts, submit) is played through the engine ops,
 // like the daemon would. The daemon itself is stubbed (ensureDaemon); test/integration/cli-daemon-client.test.js
 // covers the daemon lifecycle. Skipped when the engine is not installed.
@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BIN = path.resolve(HERE, '../../bin/specreview.js');
+const BIN = path.resolve(HERE, '../../bin/suiko.js');
 const ENGINE = path.resolve(HERE, '../../src/core/review/ops.js');
 const HAS_ENGINE = fs.existsSync(ENGINE);
 const DOC = 'kitchen-sink';
@@ -82,7 +82,7 @@ function reviewFile(id) {
 }
 
 /**
- * Spawns `specreview <args>` as a real process in the workspace.
+ * Spawns `suiko <args>` as a real process in the workspace.
  * @param {string[]} args
  */
 function spawnCli(args) {
@@ -126,10 +126,10 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     const r = await cli(['open', 'docs/kitchen-sink.md']);
     assert.equal(r.code, 0, r.stderr);
     const lines = r.stdout.split('\n');
-    assert.match(lines[0], /^specreview: tracking docs\/kitchen-sink\.md as "kitchen-sink" \(markdown, \d+ lines\) · recorded v1$/);
+    assert.match(lines[0], /^suiko: tracking docs\/kitchen-sink\.md as "kitchen-sink" \(markdown, \d+ lines\) · recorded v1$/);
     assert.equal(lines[1], `review UI: http://127.0.0.1:5871/d/${ctx.wsId}/kitchen-sink?k=tok`);
     assert.doesNotMatch(r.stdout, /external hosts/, 'a plain <a href> is not loaded live');
-    assert.match(r.stdout, /^next: run `specreview wait kitchen-sink` in the background$/m);
+    assert.match(r.stdout, /^next: run `suiko wait kitchen-sink` in the background$/m);
     const again = await cli(['open', 'docs/kitchen-sink.md', '--json']);
     assert.equal(again.code, 0, again.stderr);
     const j = JSON.parse(again.stdout);
@@ -142,7 +142,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
   test('wait with nothing submitted times out (exit 2) and removes its waiter', async () => {
     const r = await cli(['wait', DOC, '--timeout', '300ms']);
     assert.equal(r.code, 2);
-    assert.match(r.stderr, /^specreview: waiting for a review of kitchen-sink v1 \(as claude\)\. Safe to interrupt; nothing is lost\.$/m);
+    assert.match(r.stderr, /^suiko: waiting for a review of kitchen-sink v1 \(as claude\)\. Safe to interrupt; nothing is lost\.$/m);
     assert.deepEqual(await ctx.store.listWaiters(DOC, { liveOnly: false }), []);
   });
 
@@ -152,7 +152,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.deepEqual(JSON.parse(st.stdout).docs[0].undelivered, ['rv1']);
 
     const note = await hook('prompt', { hook_event_name: 'UserPromptSubmit', cwd: ws.root, prompt: 'done' });
-    assert.match(note.hookSpecificOutput.additionalContext, /^specreview: review rv1 on kitchen-sink \(2 threads, CHANGES REQUESTED\) was submitted at \d\d:\d\d and not delivered\. Run `specreview feedback kitchen-sink`/);
+    assert.match(note.hookSpecificOutput.additionalContext, /^suiko: review rv1 on kitchen-sink \(2 threads, CHANGES REQUESTED\) was submitted at \d\d:\d\d and not delivered\. Run `suiko feedback kitchen-sink`/);
 
     // a stdout that records the delivery state at the moment each chunk is written
     const sink = memorySink();
@@ -210,11 +210,11 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.match(e.stdout, /^edited L\d+ for t1 · tagged \(not recorded yet\)\nedited L\d+ for t1 · tagged \(not recorded yet\)$/m);
     const dup = await cli(['edit', DOC, '--thread', 't1', '--old', 'the', '--new', 'THE']);
     assert.equal(dup.code, 3, 'old_string not unique -> refused');
-    assert.match(dup.stderr, /^specreview: /);
+    assert.match(dup.stderr, /^suiko: /);
 
     const deny = await hook('pre-write', { tool_name: 'Write', cwd: ws.root, tool_input: { file_path: 'docs/kitchen-sink.md', content: '# A brand new spec\n' } });
     assert.equal(deny.hookSpecificOutput.permissionDecision, 'deny');
-    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /^docs\/kitchen-sink\.md is under SpecReview \(v1, 2 open threads\)/);
+    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /^docs\/kitchen-sink\.md is under Suiko \(v1, 2 open threads\)/);
     const current = ws.read('docs/kitchen-sink.md');
     assert.equal(await hook('pre-write', { tool_name: 'Write', cwd: ws.root, tool_input: { file_path: 'docs/kitchen-sink.md', content: `${current}\nOne more line.\n` } }), null);
 
@@ -230,7 +230,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     });
     const dry = await cli(['revise', DOC, '--replies', '-', '--dry-run'], { input: replies });
     assert.equal(dry.code, 0, dry.stderr);
-    assert.match(dry.stdout, /^specreview: dry run - would record v2 for kitchen-sink/);
+    assert.match(dry.stdout, /^suiko: dry run - would record v2 for kitchen-sink/);
     assert.equal((await ctx.store.getDoc(DOC)).head, 1);
     const r = await cli(['revise', DOC, '--replies', '-', '--json'], { input: replies });
     assert.equal(r.code, 0, r.stderr);
@@ -288,12 +288,12 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     ws.write('docs/kitchen-sink.md', before.slice(0, start) + before.slice(end));
     const r = await cli(['revise', DOC, '-m', 'cleanup']);
     assert.equal(r.code, 3);
-    assert.match(r.stdout, /^specreview: REFUSED - nothing recorded/);
+    assert.match(r.stdout, /^suiko: REFUSED - nothing recorded/);
     assert.equal((await ctx.store.getDoc(DOC)).head, 2);
     const wait = await cli(['wait', DOC, '--timeout', '1s']);
     assert.equal(wait.code, 3, 'dirty working copy');
     assert.match(wait.stderr, /has unrecorded edits/);
-    const hunk = /fix: specreview revert kitchen-sink --hunk (h\d+)/.exec(r.stdout)?.[1] ?? 'h1';
+    const hunk = /fix: suiko revert kitchen-sink --hunk (h\d+)/.exec(r.stdout)?.[1] ?? 'h1';
     const rev = await cli(['revert', DOC, '--hunk', hunk]);
     assert.equal(rev.code, 0, rev.stderr);
     assert.equal(ws.read('docs/kitchen-sink.md'), before);
@@ -327,28 +327,28 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     /** @param {string} name @param {any} args */
     const call = async (name, args) => (await request('tools/call', { name, arguments: args })).result;
     try {
-      const status = await call('specreview_status', {});
+      const status = await call('suiko_status', {});
       assert.equal(status.isError, undefined, status.content[0].text);
       assert.equal(status.structuredContent.docs[0].doc, DOC);
-      const threads = await call('specreview_threads', { doc: DOC, status: 'all' });
+      const threads = await call('suiko_threads', { doc: DOC, status: 'all' });
       assert.ok(threads.structuredContent.threads.length >= 3);
-      const fb = await call('specreview_feedback', { doc: DOC, peek: true });
+      const fb = await call('suiko_feedback', { doc: DOC, peek: true });
       assert.equal(fb.isError, undefined, fb.content[0].text);
       assert.match(fb.content[0].text, /^SPECREVIEW FEEDBACK · kitchen-sink/);
       assert.equal(fb.structuredContent.doc, DOC);
       assert.equal(fb.structuredContent.schema, 1);
-      const show = await call('specreview_show', { doc: DOC, thread_id: 't1' });
+      const show = await call('suiko_show', { doc: DOC, thread_id: 't1' });
       assert.match(show.content[0].text, /^\[t1\] /);
-      const nf = await call('specreview_show', { doc: DOC, thread_id: 't404' });
+      const nf = await call('suiko_show', { doc: DOC, thread_id: 't404' });
       assert.equal(nf.isError, true);
       const rv = await reviewerSubmits({ quote: 'Remove the legacy session store.' });
-      const delivered = await call('specreview_wait', { doc: DOC, timeout_sec: 5 });
+      const delivered = await call('suiko_wait', { doc: DOC, timeout_sec: 5 });
       assert.equal(delivered.isError, undefined, delivered.content[0].text);
       assert.match(delivered.content[0].text, new RegExp(`^SPECREVIEW FEEDBACK · kitchen-sink · review ${rv.id} on v2 · CHANGES REQUESTED$`, 'm'));
       assert.equal(delivered.structuredContent.doc, DOC);
       assert.deepEqual(delivered.structuredContent.reviews.map((/** @type {any} */ r) => r.id), [rv.id]);
       assert.ok(JSON.parse(fs.readFileSync(reviewFile(rv.id), 'utf8')).deliveredTo.claude);
-      const wait = await call('specreview_wait', { doc: DOC, timeout_sec: 1 });
+      const wait = await call('suiko_wait', { doc: DOC, timeout_sec: 1 });
       assert.deepEqual(wait.structuredContent, { status: 'waiting', hint: 'call again' });
     } finally {
       await server.close();
@@ -376,7 +376,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     const newer = spawnCli(['wait', DOC]);
     const o = /** @type {any} */ (await older.done);
     assert.equal(o.code, 6, o.stderr);
-    assert.match(o.stderr, /^specreview: superseded by pid \d+ \(a newer wait is listening\); ignore this\.$/m);
+    assert.match(o.stderr, /^suiko: superseded by pid \d+ \(a newer wait is listening\); ignore this\.$/m);
     assert.equal(o.stdout, '');
     await until(async () => (await ctx.store.listWaiters(DOC)).some((/** @type {any} */ w) => w.pid === newer.child.pid));
     newer.child.kill('SIGINT');
@@ -402,7 +402,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
       const r = await cli(['open', 'docs/ext.md', '--browser', 'none']);
       assert.equal(r.code, 0, `run ${run}: ${r.stderr}`);
       assert.match(r.stdout, /^external hosts loaded live by the doc: cdn\.example\.org \(set render\.network to "block"/m);
-      assert.match(r.stdout, /^next: run `specreview wait ext` in the background$/m);
+      assert.match(r.stdout, /^next: run `suiko wait ext` in the background$/m);
     }
   });
 });

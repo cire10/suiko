@@ -1,8 +1,8 @@
 // @ts-check
-// Claude Code hook entry points (design 9.9, amendments 2.4 + 5): `specreview hook pre-write` (PreToolUse, matcher
-// Write) and `specreview hook prompt` (UserPromptSubmit).
+// Claude Code hook entry points (design 9.9, amendments 2.4 + 5): `suiko hook pre-write` (PreToolUse, matcher
+// Write) and `suiko hook prompt` (UserPromptSubmit).
 //
-// Hard constraints: this module imports only node:* builtins (bin/specreview.js loads it before anything else),
+// Hard constraints: this module imports only node:* builtins (bin/suiko.js loads it before anything else),
 // reads JSON files only (no store library, no recovery, no locks), never throws, prints nothing on error, always
 // exits 0 and finishes well under 150 ms. It walks up from the file (pre-write) or the session cwd (prompt) with
 // statSync looking for a `.specreview` directory and returns at once when there is none.
@@ -18,8 +18,8 @@
 //   'claude' (the same rule as the engine's undeliveredReviews(reviews, agent)).
 //   Output is capped at 1,000 characters. When the cwd has no workspace at or above it (no git: `.specreview/`
 //   lives next to the specs, e.g. in notes/specs/), the registered workspaces (<SPECREVIEW_HOME>/workspaces.json,
-//   written by the user's own `specreview open`) whose root is inside the cwd are checked instead, nearest first
-//   (at most MAX_RELATED), and their notes name the workspace: `specreview feedback <id> --workspace <dir>`.
+//   written by the user's own `suiko open`) whose root is inside the cwd are checked instead, nearest first
+//   (at most MAX_RELATED), and their notes name the workspace: `suiko feedback <id> --workspace <dir>`.
 // Untrusted input: `.specreview/` is committed, so a cloned repo can hold any JSON. Only schema-valid tokens reach
 //   the agent's context: doc ids must match DOC_ID_RE (the store's rule), doc.head must be a safe integer >= 0,
 //   review ids come from the rvN.json file name (never the JSON body), verdicts are mapped through VERDICT_TEXT
@@ -32,7 +32,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DOC_KINDS } from '../shared/protocol.js';
+
+/** shared/protocol.js DOC_KINDS, copied: this module imports only node:* builtins (a test keeps the two equal). */
+export const HOOK_DOC_KINDS = Object.freeze(['file', 'snapshot', 'code']);
 
 const STORE_DIR = '.specreview';
 const WAITER_LIVE_MS = 30000;
@@ -139,9 +141,9 @@ export function preWrite(input, o) {
   const facts = [`v${doc.head}`, `${openThreads} open thread${openThreads === 1 ? '' : 's'}`];
   if (locks.length) facts.push(`${locks.join(', ')} locked`);
   const reason =
-    `${rel} is under SpecReview (${facts.join(', ')}); this Write would replace ${Math.round(ratio * 100)}% of its lines. ` +
-    'Use Edit for targeted changes (or specreview apply/edit). If the user explicitly asked for a full rewrite, use ' +
-    '`specreview revise --allow-rewrite` after writing with Edit.';
+    `${rel} is under Suiko (${facts.join(', ')}); this Write would replace ${Math.round(ratio * 100)}% of its lines. ` +
+    'Use Edit for targeted changes (or suiko apply/edit). If the user explicitly asked for a full rewrite, use ' +
+    '`suiko revise --allow-rewrite` after writing with Edit.';
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -210,14 +212,14 @@ export function prompt(input, o) {
  */
 function storeNotes(store, agent, o) {
   const wsId = crypto.createHash('sha256').update(realpath(store.root)).digest('hex').slice(0, 8);
-  const waitersBase = path.join(specreviewHome(o.env), 'ws', wsId, 'waiters');
+  const waitersBase = path.join(suikoHome(o.env), 'ws', wsId, 'waiters');
   const listeningAll = hasLiveWaiter(path.join(waitersBase, '_all'), agent);
 
   /** @type {string[]} */
   const notes = [];
   for (const doc of listDocs(store.storeDir)) {
     if (doc.state === 'closed') continue;
-    // plan snapshots are answered through the plan gate (ExitPlanMode), never by `specreview feedback`
+    // plan snapshots are answered through the plan gate (ExitPlanMode), never by `suiko feedback`
     if (doc.kind === 'snapshot' && doc.origin?.type === 'plan') continue;
     const reviewsDir = path.join(store.storeDir, 'docs', doc.id, 'reviews');
     // the id is the file name (rvN), never the JSON body's own `id` field
@@ -250,9 +252,9 @@ function undeliveredNote(doc, reviews, flag) {
   const last = reviews[reviews.length - 1];
   const many = reviews.length > 1;
   return (
-    `specreview: review${many ? 's' : ''} ${reviews.map((r) => r.id).join(', ')} on ${doc.id} (${reviewFacts(reviews)}) ` +
+    `suiko: review${many ? 's' : ''} ${reviews.map((r) => r.id).join(', ')} on ${doc.id} (${reviewFacts(reviews)}) ` +
     `${many ? 'were' : 'was'} submitted ${many ? 'last ' : ''}at ${clock(last.submittedAt)} and not delivered. ` +
-    `Run \`specreview feedback ${doc.id}${flag}\` and address it per the spec-review skill.`
+    `Run \`suiko feedback ${doc.id}${flag}\` and address it per the spec-review skill.`
   );
 }
 
@@ -267,9 +269,9 @@ function unackedNote(doc, reviews, agent, flag) {
   const last = reviews[reviews.length - 1];
   const many = reviews.length > 1;
   return (
-    `specreview: review${many ? 's' : ''} ${reviews.map((r) => r.id).join(', ')} on ${doc.id} (${reviewFacts(reviews)}) ` +
+    `suiko: review${many ? 's' : ''} ${reviews.map((r) => r.id).join(', ')} on ${doc.id} (${reviewFacts(reviews)}) ` +
     `${many ? 'were' : 'was'} delivered to ${agent} at ${clock(own(last.deliveredTo, agent))} but not acted on yet. ` +
-    `If the feedback packet was lost, run \`specreview feedback ${doc.id}${flag}\`, then address it per the spec-review skill.`
+    `If the feedback packet was lost, run \`suiko feedback ${doc.id}${flag}\`, then address it per the spec-review skill.`
   );
 }
 
@@ -334,7 +336,7 @@ function hasLiveWaiter(dir, agent) {
  */
 export function findStore(startDir, env) {
   const userHome = path.resolve(os.homedir());
-  const runtimeHome = specreviewHome(env);
+  const runtimeHome = suikoHome(env);
   for (let dir = path.resolve(startDir); ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, STORE_DIR);
     const st = fs.statSync(candidate, { throwIfNoEntry: false });
@@ -349,7 +351,7 @@ export function findStore(startDir, env) {
  * Registered workspaces (<SPECREVIEW_HOME>/workspaces.json) whose root lies strictly inside `cwd` and still has a
  * `.specreview` directory, nearest first, at most MAX_RELATED. Nothing for the user's home or the filesystem root
  * (never workspace roots; the same rule as the CLI's relatedWorkspaceRoots). Each gets the `--workspace <dir>` flag
- * (relative to the cwd, shell-quoted when needed) that makes `specreview feedback <id>` unambiguous from the cwd.
+ * (relative to the cwd, shell-quoted when needed) that makes `suiko feedback <id>` unambiguous from the cwd.
  * @param {string} cwd
  * @param {Record<string, string | undefined>} env
  * @returns {Array<{ root: string, storeDir: string, flag: string }>}
@@ -357,9 +359,9 @@ export function findStore(startDir, env) {
 export function registeredBelow(cwd, env) {
   const here = realpath(cwd);
   if (path.parse(here).root === here || here === realpath(os.homedir())) return [];
-  const reg = readJsonFile(path.join(specreviewHome(env), 'workspaces.json'));
+  const reg = readJsonFile(path.join(suikoHome(env), 'workspaces.json'));
   const entries = isRecord(reg) && isRecord(reg.workspaces) ? Object.values(reg.workspaces) : [];
-  const runtimeHome = specreviewHome(env);
+  const runtimeHome = suikoHome(env);
   /** @type {Array<{ root: string, storeDir: string, flag: string, depth: number }>} */
   const out = [];
   for (const e of entries) {
@@ -391,14 +393,14 @@ function shellArg(s) {
  * @param {Record<string, string | undefined>} env
  * @returns {string}
  */
-function specreviewHome(env) {
+function suikoHome(env) {
   return env.SPECREVIEW_HOME ? path.resolve(env.SPECREVIEW_HOME) : path.join(os.homedir(), '.specreview');
 }
 
 /**
  * Tracked docs (doc.json contents with the directory name as id). Directories whose name is not a valid doc id,
  * doc.json files without a string path or a safe-integer head (their values would otherwise reach the agent's
- * context verbatim), and docs of a kind this version does not know (made by a newer SpecReview) are skipped.
+ * context verbatim), and docs of a kind this version does not know (made by a newer Suiko) are skipped.
  * @param {string} storeDir
  * @returns {any[]}
  */
@@ -409,7 +411,7 @@ function listDocs(storeDir) {
     if (!DOC_ID_RE.test(id)) continue;
     const doc = readJsonFile(path.join(docsDir, id, 'doc.json'));
     if (!isRecord(doc) || typeof doc.path !== 'string' || !Number.isSafeInteger(doc.head) || doc.head < 0) continue;
-    if (doc.kind !== undefined && !DOC_KINDS.includes(doc.kind)) continue;
+    if (doc.kind !== undefined && !HOOK_DOC_KINDS.includes(doc.kind)) continue;
     out.push({ ...doc, id });
   }
   return out;

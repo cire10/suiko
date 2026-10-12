@@ -1,5 +1,5 @@
 // @ts-check
-// Wall-clock access for timestamps written into SpecReview files, with an injectable clock for deterministic tests.
+// Wall-clock access for timestamps written into Suiko files, with an injectable clock for deterministic tests.
 //
 // - `now()` / `nowIso()` honour, in order: a clock installed with `setClock()`, then the `SPECREVIEW_NOW`
 //   environment variable (an ISO-8601 instant that pins the clock, useful for golden tests run through the CLI),

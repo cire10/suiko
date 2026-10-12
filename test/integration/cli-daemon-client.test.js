@@ -1,6 +1,6 @@
 // @ts-check
 // WP4 daemon-client tests (design 10.1, amendments 2.5) against a fake daemon process that behaves like
-// `specreview serve --foreground`: binds 127.0.0.1 on port 0 (never the default ports), writes daemon.json into
+// `suiko serve --foreground`: binds 127.0.0.1 on port 0 (never the default ports), writes daemon.json into
 // SPECREVIEW_HOME, answers /api/health and POST /api/shutdown (Bearer token + same-origin Origin required).
 // Covers spawn + health poll, reuse, version- and build-mismatch restarts, stop/--rotate, and startup failures.
 
@@ -176,10 +176,10 @@ describe('daemon client', () => {
     assert.equal(fs.existsSync(path.join(HOME, 'daemon.json')), false);
   });
 
-  test('`specreview stop` through main()', async () => {
+  test('`suiko stop` through main()', async () => {
     const r = await runCli(['stop'], { env: { SPECREVIEW_HOME: HOME } });
     assert.equal(r.code, 0);
-    assert.equal(r.stdout, 'specreview: the review server is not running\n');
+    assert.equal(r.stdout, 'suiko: the review server is not running\n');
   });
 
   test('a daemon that dies during startup is reported with the log tail', async () => {

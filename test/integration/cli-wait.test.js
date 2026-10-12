@@ -60,7 +60,7 @@ describe('wait', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.match(String(seenAtRecord), /^SPECREVIEW FEEDBACK · token-service/);
     assert.equal(r.stdout, seenAtRecord, 'printed exactly once');
-    assert.equal(r.stderr, 'specreview: waiting for a review of token-service v1 (as claude). Safe to interrupt; nothing is lost.\n');
+    assert.equal(r.stderr, 'suiko: waiting for a review of token-service v1 (as claude). Safe to interrupt; nothing is lost.\n');
     const opts = engine.calls.find((c) => c.name === 'waitForFeedback')?.args[1];
     assert.deepEqual(opts.docIds, ['token-service']);
     assert.equal(opts.timeoutMs, 0);
@@ -104,7 +104,7 @@ describe('wait', () => {
   test('timeout -> exit 2; closed -> exit 5; dirty -> exit 3', async () => {
     const t = await runCli(['wait', 'token-service', '--timeout', '90s'], depsWith(async () => ({ status: 'timeout', packets: [], text: '' })).d);
     assert.equal(t.code, 2);
-    assert.match(t.stdout, /^specreview: no review yet for token-service after 1m30s\. Run `specreview wait token-service` again/);
+    assert.match(t.stdout, /^suiko: no review yet for token-service after 1m30s\. Run `suiko wait token-service` again/);
     const tj = await runCli(['wait', 'token-service', '--timeout', '1s', '--json'], depsWith(async () => ({ status: 'timeout' })).d);
     assert.deepEqual(JSON.parse(tj.stdout), { status: 'timeout', doc: 'token-service' });
     const c = await runCli(['wait', 'token-service'], depsWith(async () => ({ status: 'closed', packets: [], text: '', docId: 'token-service' })).d);
@@ -112,14 +112,14 @@ describe('wait', () => {
     assert.match(c.stdout, /review session for token-service was closed; stop waiting/);
     const dirty = await runCli(['wait', 'token-service'], depsWith(async () => ({ status: 'dirty', packets: [], text: '', docId: 'token-service' })).d);
     assert.equal(dirty.code, 3);
-    assert.match(dirty.stderr, /^specreview: token-service has unrecorded edits \(working copy differs from v1\)\. Record them first: `specreview revise token-service --replies -`/);
+    assert.match(dirty.stderr, /^suiko: token-service has unrecorded edits \(working copy differs from v1\)\. Record them first: `suiko revise token-service --replies -`/);
   });
 
   test('--allow-dirty, --all and usage errors', async () => {
     const { engine, d } = depsWith(async () => ({ status: 'timeout', packets: [], text: '' }));
     const all = await runCli(['wait', '--all', '--allow-dirty', '--timeout', '1s'], d);
     assert.equal(all.code, 2);
-    assert.match(all.stdout, /^specreview: no review yet for any tracked doc after 1s\. Run `specreview wait --all` again/);
+    assert.match(all.stdout, /^suiko: no review yet for any tracked doc after 1s\. Run `suiko wait --all` again/);
     const opts = engine.calls.find((c) => c.name === 'waitForFeedback')?.args[1];
     assert.equal(opts.all, true);
     assert.equal(opts.allowDirty, true);
@@ -134,7 +134,7 @@ describe('wait', () => {
     const r = await runCli(['wait', 'token-service'], d);
     assert.equal(r.code, 6);
     assert.equal(r.stderr.split('\n').filter((l) => l.includes('superseded')).length, 1);
-    assert.match(r.stderr, /specreview: superseded by pid 4321 \(a newer wait is listening\); ignore this\.\n$/);
+    assert.match(r.stderr, /suiko: superseded by pid 4321 \(a newer wait is listening\); ignore this\.\n$/);
     assert.equal(r.stdout, '');
     const j = await runCli(['wait', 'token-service', '--json'], d);
     assert.deepEqual(JSON.parse(j.stdout), { status: 'superseded', by: 4321 });
@@ -206,6 +206,6 @@ describe('wait', () => {
     });
     const r = await runCli(['wait', 'token-service'], d);
     assert.equal(r.code, 4);
-    assert.equal(r.stderr.trim().split('\n').pop(), 'specreview: no tracked docs to wait for');
+    assert.equal(r.stderr.trim().split('\n').pop(), 'suiko: no tracked docs to wait for');
   });
 });

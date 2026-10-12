@@ -31,7 +31,7 @@ test('parts.json lists every part exactly once, in order, and the parts are clas
   for (const name of parts) {
     const src = readFileSync(join(GUEST_PARTS_DIR, name), 'utf8');
     assert.doesNotMatch(src, /^\s*(import|export)\s/m, `${name} must not use module syntax`);
-    assert.match(src, /^\/\/ SpecReview guest, part \d\d: /, `${name} starts with its header comment`);
+    assert.match(src, /^\/\/ Suiko guest, part \d\d: /, `${name} starts with its header comment`);
     const at = bundle.indexOf(`// ---- ${name} ----\n`);
     assert.ok(at > last, `${name} appears in order`);
     last = at;

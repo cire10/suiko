@@ -1,5 +1,5 @@
 // @ts-check
-// JSDoc type definitions for every JSON shape SpecReview stores or exchanges (design 5.3, 9.3-9.5, 10.2 and
+// JSDoc type definitions for every JSON shape Suiko stores or exchanges (design 5.3, 9.3-9.5, 10.2 and
 // BUILD_AMENDMENTS 2-4, which win where they differ). Types only: import them with
 //   /** @typedef {import('../shared/types.js').Thread} Thread */
 // Conventions: lines are 1-based; character offsets are UTF-16 code units into the decoded source string;
@@ -324,7 +324,7 @@ export {};
  * @property {AgentReplyStatus} [status] agent replies
  * @property {LineRange} [atLines] agent replies: where the change landed (ReviseInput `at`)
  * @property {string} [atFile] code docs: the repo file of `atLines`
- * @property {true} [auto] written by SpecReview, not typed by the agent (e.g. "changed in v3 (L14-18)")
+ * @property {true} [auto] written by Suiko, not typed by the agent (e.g. "changed in v3 (L14-18)")
  */
 
 /**

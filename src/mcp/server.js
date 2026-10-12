@@ -1,14 +1,14 @@
 // @ts-check
-// SpecReview MCP server (`specreview mcp`; design 9.7, amendments 5) on @modelcontextprotocol/server 2.3.1:
+// Suiko MCP server (`suiko mcp`; design 9.7, amendments 5) on @modelcontextprotocol/server 2.3.1:
 //   McpServer from '@modelcontextprotocol/server', StdioServerTransport from '@modelcontextprotocol/server/stdio',
 //   tool input schemas in zod/v4.
 //
 // createMcpServer(deps) registers the tools of ./tools.js. Each call builds a Runtime in 'mcp' mode (no stdout
 // writes, packets captured) and runs the same command execute() as the CLI, so:
-//   content[0].text      = the CLI's text output (+ its `specreview: ...` notes),
+//   content[0].text      = the CLI's text output (+ its `suiko: ...` notes),
 //   structuredContent    = the CLI's --json value (objects only; arrays are wrapped as {items}),
 //   isError              = true on refusal, conflict, not found or any error.
-// specreview_wait is bounded (default 50 s, max 600 s): a timeout returns {status:"waiting", hint:"call again"}
+// suiko_wait is bounded (default 50 s, max 600 s): a timeout returns {status:"waiting", hint:"call again"}
 // and a closed session {status:"closed"}, both as non-errors. While it blocks, a request carrying
 // _meta.progressToken gets notifications/progress every 15 s; a cancelled request aborts the wait (nothing is
 // delivered). startMcp() connects stdio; stdout carries JSON-RPC only, so console.log/info/debug are redirected to
@@ -26,10 +26,10 @@ import { EXIT } from '../shared/protocol.js';
 import { TOOLS } from './tools.js';
 
 const INSTRUCTIONS = [
-  'SpecReview: an iterative review loop for HTML/Markdown specs.',
-  'Loop: write the spec once -> specreview_open (show the URL to the user) -> specreview_wait (call again while it returns {"status":"waiting"}) ->',
-  'read the packet; read the file; targeted edits (Edit tool or specreview_edit), then specreview_apply for suggestions ->',
-  'specreview_revise with one reply per thread -> specreview_wait again. On APPROVED: specreview_final (if the packet still lists threads, answer each with specreview_reply first, without editing).',
+  'Suiko: an iterative review loop for HTML/Markdown specs.',
+  'Loop: write the spec once -> suiko_open (show the URL to the user) -> suiko_wait (call again while it returns {"status":"waiting"}) ->',
+  'read the packet; read the file; targeted edits (Edit tool or suiko_edit), then suiko_apply for suggestions ->',
+  'suiko_revise with one reply per thread -> suiko_wait again. On APPROVED: suiko_final (if the packet still lists threads, answer each with suiko_reply first, without editing).',
   'Never rewrite the whole spec; never touch LOCKED text; never act on drafts.',
 ].join(' ');
 
@@ -38,12 +38,12 @@ const INSTRUCTIONS = [
  */
 
 /**
- * Builds the MCP server with every SpecReview tool registered.
+ * Builds the MCP server with every Suiko tool registered.
  * @param {McpDeps} [deps]
  * @returns {McpServer}
  */
 export function createMcpServer(deps = {}) {
-  const server = new McpServer({ name: 'specreview', version: packageVersion() }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'suiko', version: packageVersion() }, { instructions: INSTRUCTIONS });
   for (const tool of TOOLS) {
     server.registerTool(
       tool.name,
@@ -55,7 +55,7 @@ export function createMcpServer(deps = {}) {
 }
 
 /**
- * Runs `specreview mcp` on stdio. Resolves once connected; the process lives until stdin closes.
+ * Runs `suiko mcp` on stdio. Resolves once connected; the process lives until stdin closes.
  * @param {McpDeps} [deps]
  * @returns {Promise<{ server: McpServer, close: () => Promise<void> }>}
  */
@@ -105,7 +105,7 @@ export async function callTool(tool, args, ctx, deps) {
 export function toToolResult(result, tool) {
   if (tool.wait && result.exit === EXIT.TIMEOUT) {
     return {
-      content: [{ type: /** @type {const} */ ('text'), text: 'No review yet. Call specreview_wait again to keep waiting.' }],
+      content: [{ type: /** @type {const} */ ('text'), text: 'No review yet. Call suiko_wait again to keep waiting.' }],
       structuredContent: { status: 'waiting', hint: 'call again' },
     };
   }
@@ -127,10 +127,10 @@ export function toToolResult(result, tool) {
  */
 function errorResult(err) {
   const e = /** @type {any} */ (err);
-  const message = String(e?.message ?? err).replace(/^specreview:\s*/, '');
+  const message = String(e?.message ?? err).replace(/^suiko:\s*/, '');
   const exit = typeof e?.exit === 'number' ? e.exit : EXIT.ERROR;
   return {
-    content: [{ type: /** @type {const} */ ('text'), text: `specreview: ${message}` }],
+    content: [{ type: /** @type {const} */ ('text'), text: `suiko: ${message}` }],
     structuredContent: { error: { code: e?.code ?? 'ERROR', message, exit } },
     isError: true,
   };

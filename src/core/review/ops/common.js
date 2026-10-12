@@ -186,7 +186,7 @@ export function refuseSnapshot(ctx, doc, what) {
 
 /**
  * Refuses an edit command on a code doc (RefusedError, exit 3): the agent edits the repo files with its own tools
- * and `specreview revise <doc>` records the round.
+ * and `suiko revise <doc>` records the round.
  * @param {Ctx} ctx
  * @param {Doc} doc
  */

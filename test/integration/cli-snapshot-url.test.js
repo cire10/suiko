@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview snapshot <url>` against the real engine (main() in-process, ensureDaemon stubbed) and a local HTTP
+// `suiko snapshot <url>` against the real engine (main() in-process, ensureDaemon stubbed) and a local HTTP
 // server on 127.0.0.1 (hence --allow-private): the url doc (kind snapshot, origin url, key url:<normalized>,
 // render.network block, synthetic web/<id>.md), what the stored text keeps and drops (scripts, event handlers,
 // javascript: URLs), refusals (no --allow-private, SPECREVIEW_OFFLINE, user-level network.allow false), re-runs
@@ -126,9 +126,9 @@ describe('snapshot <url>', () => {
     assert.equal(r.code, 0, r.stderr);
     const id = '127-0-0-1-spec';
     const lines = r.stdout.trimEnd().split('\n');
-    assert.match(lines[0], new RegExp(`^specreview: tracking web page as "${id}" \\(markdown, \\d+ lines\\) · recorded v1 · removed 1 element$`));
+    assert.match(lines[0], new RegExp(`^suiko: tracking web page as "${id}" \\(markdown, \\d+ lines\\) · recorded v1 · removed 1 element$`));
     assert.match(lines[1], new RegExp(`^review UI: http://127\\.0\\.0\\.1:5873/d/[^/]+/${id}\\?k=tok$`));
-    assert.match(r.stdout, /^next: run `specreview wait 127-0-0-1-spec` in the background\. When the review arrives, change the sources that produce the page, then record what it serves with `specreview snapshot http:\/\/127\.0\.0\.1:\d+\/spec\.html --allow-private --replies -`/m);
+    assert.match(r.stdout, /^next: run `suiko wait 127-0-0-1-spec` in the background\. When the review arrives, change the sources that produce the page, then record what it serves with `suiko snapshot http:\/\/127\.0\.0\.1:\d+\/spec\.html --allow-private --replies -`/m);
     // the page's image is an absolute URL now: the review UI does not load it
     assert.match(r.stdout, new RegExp(`^remote images and styles are blocked in the review UI \\(127\\.0\\.0\\.1:${port}\\); --allow-remote-assets loads them$`, 'm'));
 
@@ -198,13 +198,13 @@ describe('snapshot <url>', () => {
     assert.equal((await cli(['snapshot', url('/spec.html'), '--allow-private'])).code, 0);
     const same = await cli(['snapshot', `HTTP://127.0.0.1:${port}/spec.html#retries`, '--allow-private']);
     assert.equal(same.code, 0, same.stderr);
-    assert.match(same.stdout, /^specreview: "127-0-0-1-spec" \(web page\) is unchanged \(identical to v1\)$/m);
+    assert.match(same.stdout, /^suiko: "127-0-0-1-spec" \(web page\) is unchanged \(identical to v1\)$/m);
     assert.equal((await docOf('127-0-0-1-spec')).head, 1);
 
     pages['/spec.html'].body = pages['/spec.html'].body.replace('3 times', '5 times');
     const changed = await cli(['snapshot', url('/spec.html'), '--allow-private']);
     assert.equal(changed.code, 0, changed.stderr);
-    assert.match(changed.stdout, /^specreview: recorded v2 of "127-0-0-1-spec" \(web page; \+1 -1 lines\) · removed 1 element$/m);
+    assert.match(changed.stdout, /^suiko: recorded v2 of "127-0-0-1-spec" \(web page; \+1 -1 lines\) · removed 1 element$/m);
     assert.match(versionText('127-0-0-1-spec', 2), /retry 5 times/);
     const dirs = fs.readdirSync(path.join(ws.root, '.specreview', 'docs'));
     assert.deepEqual(dirs, ['127-0-0-1-spec'], 'one doc for the URL');
@@ -229,21 +229,21 @@ describe('snapshot <url>', () => {
     const fb = await cli(['feedback', id]);
     assert.equal(fb.code, 0, fb.stderr);
     assert.match(fb.stdout, /^SPECREVIEW FEEDBACK · 127-0-0-1-spec \(web page\) · review rv1 on v1/m);
-    assert.match(fb.stdout, new RegExp(`^Line numbers = lines of SpecReview's Markdown snapshot of http://127\\.0\\.0\\.1:${port}/spec\\.html \\(fetched \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\); there is no file for you to edit\\.$`, 'm'));
+    assert.match(fb.stdout, new RegExp(`^Line numbers = lines of Suiko's Markdown snapshot of http://127\\.0\\.0\\.1:${port}/spec\\.html \\(fetched \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\); there is no file for you to edit\\.$`, 'm'));
     assert.match(fb.stdout, /^PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page/m);
-    assert.match(fb.stdout, new RegExp(`^NEXT: edit the sources that produce the page -> specreview snapshot http://127\\.0\\.0\\.1:${port}/spec\\.html --allow-private --replies - \\(records v2\\) -> specreview wait ${id} \\(background\\)$`, 'm'));
+    assert.match(fb.stdout, new RegExp(`^NEXT: edit the sources that produce the page -> suiko snapshot http://127\\.0\\.0\\.1:${port}/spec\\.html --allow-private --replies - \\(records v2\\) -> suiko wait ${id} \\(background\\)$`, 'm'));
 
     // revise without --source explains how a web page is revised
     const rev = await cli(['revise', id]);
     assert.equal(rev.code, 1);
-    assert.match(rev.stderr, /change the sources that produce the page, then record what the page serves now with `specreview snapshot http:\/\/127\.0\.0\.1:\d+\/spec\.html --allow-private --replies -`/);
+    assert.match(rev.stderr, /change the sources that produce the page, then record what the page serves now with `suiko snapshot http:\/\/127\.0\.0\.1:\d+\/spec\.html --allow-private --replies -`/);
 
     // the page changes; the snapshot records v2 and posts the reply in the same step
     pages['/spec.html'].body = pages['/spec.html'].body.replace('with exponential backoff', 'with exponential backoff (base 2, capped at 5 s)');
     const replies = JSON.stringify({ threads: { t1: { status: 'addressed', reply: 'Spelled out the backoff.' } } });
     const r = await cli(['snapshot', url('/spec.html'), '--allow-private', '--replies', '-'], { input: replies });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^specreview: recorded v2 of "127-0-0-1-spec" \(web page; \+1 -1 lines\) · removed 1 element · posted 1 reply$/m);
+    assert.match(r.stdout, /^suiko: recorded v2 of "127-0-0-1-spec" \(web page; \+1 -1 lines\) · removed 1 element · posted 1 reply$/m);
     const ctx = await engineCtx(ws.root);
     const t1 = /** @type {any} */ (await ctx.store.getThread(id, 't1'));
     assert.equal(t1.status, 'addressed');
@@ -266,7 +266,7 @@ describe('snapshot <url>', () => {
     await review(id, 'exponential backoff');
     const fb = await cli(['feedback', id]);
     assert.match(fb.stdout, /^PROTOCOL: the doc is a snapshot of a public web page: there is nothing for you to edit\./m);
-    assert.match(fb.stdout, new RegExp(`^NEXT: answer each thread with specreview reply ${id} <tid> -m <md> --status answered\\|declined -> specreview wait ${id} \\(background\\)$`, 'm'));
+    assert.match(fb.stdout, new RegExp(`^NEXT: answer each thread with suiko reply ${id} <tid> -m <md> --status answered\\|declined -> suiko wait ${id} \\(background\\)$`, 'm'));
   });
 
   test('--as-html keeps the sanitized HTML; the format cannot change later', async () => {
@@ -299,7 +299,7 @@ describe('snapshot <url>', () => {
   test('a page rendered by JavaScript: a note with little text, an error with none', async () => {
     const a = await cli(['snapshot', url('/app.html'), '--allow-private']);
     assert.equal(a.code, 0, a.stderr);
-    assert.match(a.stdout, /^note: little text was found; it is probably rendered by JavaScript, which SpecReview never runs$/m);
+    assert.match(a.stdout, /^note: little text was found; it is probably rendered by JavaScript, which Suiko never runs$/m);
     const b = await cli(['snapshot', url('/empty.html'), '--allow-private']);
     assert.equal(b.code, 1);
     assert.match(b.stderr, /has no text to review \(it is probably rendered by JavaScript/);

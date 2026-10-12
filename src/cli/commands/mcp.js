@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview mcp`: runs the stdio MCP server (src/mcp/server.js). stdout carries only JSON-RPC; logs go to stderr.
+// `suiko mcp`: runs the stdio MCP server (src/mcp/server.js). stdout carries only JSON-RPC; logs go to stderr.
 // The process keeps running until the client closes stdin.
 
 import { EXIT } from '../../shared/protocol.js';
@@ -8,7 +8,7 @@ import { expectPositionals } from '../args.js';
 export const spec = {
   name: 'mcp',
   usage: 'mcp [--as <agent>]',
-  summary: 'Run the stdio MCP server (tools: specreview_open, specreview_wait, specreview_revise, ...).',
+  summary: 'Run the stdio MCP server (tools: suiko_open, suiko_wait, suiko_revise, ...).',
   options: {},
 };
 

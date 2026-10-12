@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview hook pre-write | hook prompt` routed through main() (tests, `node src/cli/main.js`). The real entry
-// point (bin/specreview.js) dispatches `hook` to src/cli/hooks.js before importing anything else, for speed.
+// `suiko hook pre-write | hook prompt` routed through main() (tests, `node src/cli/main.js`). The real entry
+// point (bin/suiko.js) dispatches `hook` to src/cli/hooks.js before importing anything else, for speed.
 // Hooks always exit 0 and print nothing on error.
 
 import { EXIT } from '../../shared/protocol.js';

@@ -11,7 +11,7 @@ import { EXIT } from '../../shared/protocol.js';
  * @property {Record<string, unknown>} [details] machine-readable context (ids, paths, hashes)
  */
 
-export class SpecReviewError extends Error {
+export class SuikoError extends Error {
   /**
    * @param {string} message
    * @param {ErrorOptions & { exit?: number, code?: string }} [opts]
@@ -29,7 +29,7 @@ export class SpecReviewError extends Error {
 }
 
 /** A doc, version, thread, review, lock or file does not exist (exit 4). */
-export class NotFoundError extends SpecReviewError {
+export class NotFoundError extends SuikoError {
   /** @param {string} message @param {ErrorOptions} [opts] */
   constructor(message, opts = {}) {
     super(message, { ...opts, exit: EXIT.NOT_FOUND, code: 'NOT_FOUND' });
@@ -37,7 +37,7 @@ export class NotFoundError extends SpecReviewError {
 }
 
 /** Compare-and-swap failure or concurrent modification (exit 3). */
-export class ConflictError extends SpecReviewError {
+export class ConflictError extends SuikoError {
   /** @param {string} message @param {ErrorOptions} [opts] */
   constructor(message, opts = {}) {
     super(message, { ...opts, exit: EXIT.REFUSED, code: 'CONFLICT' });
@@ -45,7 +45,7 @@ export class ConflictError extends SpecReviewError {
 }
 
 /** A policy refused the operation (guards, $HOME as workspace root, dirty working copy...) (exit 3). */
-export class RefusedError extends SpecReviewError {
+export class RefusedError extends SuikoError {
   /** @param {string} message @param {ErrorOptions} [opts] */
   constructor(message, opts = {}) {
     super(message, { ...opts, exit: EXIT.REFUSED, code: 'REFUSED' });
@@ -53,7 +53,7 @@ export class RefusedError extends SpecReviewError {
 }
 
 /** A file lock could not be acquired before the timeout (exit 1). */
-export class LockTimeoutError extends SpecReviewError {
+export class LockTimeoutError extends SuikoError {
   /** @param {string} message @param {ErrorOptions} [opts] */
   constructor(message, opts = {}) {
     super(message, { ...opts, exit: EXIT.ERROR, code: 'LOCK_TIMEOUT' });
@@ -61,7 +61,7 @@ export class LockTimeoutError extends SpecReviewError {
 }
 
 /** Bad input from a caller (malformed id, invalid argument) (exit 1). */
-export class UsageError extends SpecReviewError {
+export class UsageError extends SuikoError {
   /** @param {string} message @param {ErrorOptions} [opts] */
   constructor(message, opts = {}) {
     super(message, { ...opts, exit: EXIT.ERROR, code: 'USAGE' });
@@ -74,5 +74,5 @@ export class UsageError extends SpecReviewError {
  * @returns {number}
  */
 export function exitCodeOf(err) {
-  return err instanceof SpecReviewError ? err.exit : EXIT.ERROR;
+  return err instanceof SuikoError ? err.exit : EXIT.ERROR;
 }

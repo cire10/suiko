@@ -1,5 +1,5 @@
 // @ts-check
-// Screen snips on the reviewer's Mac (key `B` in the review UI via the daemon, and `specreview snip`):
+// Screen snips on the reviewer's Mac (key `B` in the review UI via the daemon, and `suiko snip`):
 //
 //   captureScreenRegion({ timeoutMs = 120000, maxPx = SNIP.maxScreenPx, env = process.env, signal?, platform?,
 //                         sips?, maxBytes? }) -> Promise<{ png: Buffer, width: number, height: number } | null>
@@ -17,7 +17,7 @@
 // without writing to simulate Esc), else /usr/sbin/screencapture. sips (/usr/bin/sips, else /usr/sbin/sips) is not
 // used when SPECREVIEW_SCREENCAPTURE is set or when it is missing (the image is then returned as captured); pass
 // `sips` (a path, or null) to choose explicitly.
-// Errors: SpecReviewError code 'unsupported' (exit 1) when not on macOS and no override is set, or when the capture
+// Errors: SuikoError code 'unsupported' (exit 1) when not on macOS and no override is set, or when the capture
 // command does not exist / cannot run; code 'capture_failed' when the picker wrote something that is not a PNG/JPEG.
 // Never call this from automated tests without SPECREVIEW_SCREENCAPTURE: the real picker takes over the screen.
 
@@ -27,7 +27,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { EXIT, LIMITS, SNIP } from '../../shared/protocol.js';
-import { SpecReviewError } from '../store/errors.js';
+import { SuikoError } from '../store/errors.js';
 
 /** macOS's screenshot tool. */
 export const SCREENCAPTURE = '/usr/sbin/screencapture';
@@ -63,7 +63,7 @@ export async function captureScreenRegion({
     throw unsupported(`screen snips need macOS (its screencapture region picker); this is ${platform}`);
   }
   if (path.isAbsolute(cmd) && !fs.existsSync(cmd)) throw unsupported(`screen snips need ${cmd}, which does not exist`);
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'specreview-snip-'));
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'suiko-snip-'));
   const file = path.join(dir, 'snip.png');
   try {
     const { outcome, code, stderr } = await runPicker(cmd, ['-i', '-x', file], { timeoutMs, env, signal });
@@ -73,16 +73,16 @@ export async function captureScreenRegion({
       // Esc (or a click without a drag) ends the picker quietly. A failure says why on stderr: report it instead of
       // passing it off as a cancel (most often a missing Screen Recording permission).
       if (code !== 0 && stderr) {
-        throw new SpecReviewError(
+        throw new SuikoError(
           `the screen capture failed: ${stderr}. If macOS blocked it, allow Screen Recording for the app that runs ` +
-            'SpecReview (System Settings > Privacy & Security > Screen & System Audio Recording) and try again',
+            'Suiko (System Settings > Privacy & Security > Screen & System Audio Recording) and try again',
           { code: 'capture_failed', exit: EXIT.ERROR },
         );
       }
       return null;
     }
     let size = imageSize(buf);
-    if (!size) throw new SpecReviewError('the screen capture is not a PNG or JPEG image', { code: 'capture_failed', exit: EXIT.ERROR });
+    if (!size) throw new SuikoError('the screen capture is not a PNG or JPEG image', { code: 'capture_failed', exit: EXIT.ERROR });
     const tool = sips === undefined ? (override ? null : findSips()) : sips;
     if (tool && maxPx > 0 && Math.max(size.width, size.height) > maxPx) {
       if (await runTool(tool, ['-Z', String(Math.floor(maxPx)), file])) {
@@ -166,7 +166,7 @@ export function imageMime(b) {
 
 /** @param {string} message */
 function unsupported(message) {
-  return new SpecReviewError(message, { code: 'unsupported', exit: EXIT.ERROR });
+  return new SuikoError(message, { code: 'unsupported', exit: EXIT.ERROR });
 }
 
 /** The first existing sips binary, else null. */
@@ -280,5 +280,5 @@ function spawnError(cmd, err) {
   if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
     return unsupported(`screen snips need ${cmd}, which ${code === 'EACCES' ? 'cannot be run' : 'does not exist'}`);
   }
-  return new SpecReviewError(`could not run ${cmd}: ${/** @type {Error} */ (err)?.message ?? err}`, { code: 'capture_failed', exit: EXIT.ERROR, cause: err });
+  return new SuikoError(`could not run ${cmd}: ${/** @type {Error} */ (err)?.message ?? err}`, { code: 'capture_failed', exit: EXIT.ERROR, cause: err });
 }

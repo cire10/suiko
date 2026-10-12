@@ -68,7 +68,7 @@ export async function createContext(opts = {}) {
   } else {
     const ws = await findWorkspace(file ?? cwd, { create: Boolean(opts.createStore), explicitRoot: root });
     if (!ws.exists) {
-      throw new NotFoundError(`no SpecReview workspace found for ${file ?? cwd} (run specreview open <file> first)`, {
+      throw new NotFoundError(`no Suiko workspace found for ${file ?? cwd} (run suiko open <file> first)`, {
         details: { path: file ?? cwd },
       });
     }

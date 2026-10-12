@@ -1,14 +1,14 @@
 {
-  "name": "specreview",
-  "description": "SpecReview: an iterative, commentable, versioned review loop for AI-written HTML and Markdown specs.",
+  "name": "suiko",
+  "description": "Suiko: an iterative, commentable, versioned review loop for AI-written HTML and Markdown specs.",
   "owner": {
     "name": "Eric Tang"
   },
   "plugins": [
     {
-      "name": "specreview",
+      "name": "suiko",
       "source": "./integrations/claude-code",
-      "description": "Review AI-written specs in a local UI, send located feedback to Claude, get targeted edits and see exactly what changed. Adds the spec-review skill, /review-spec, /review-code, /specreview-last, and the Write and prompt hooks.",
+      "description": "Review AI-written specs in a local UI, send located feedback to Claude, get targeted edits and see exactly what changed. Adds the spec-review skill, /review-spec, /review-code, /suiko-last, and the Write and prompt hooks.",
       "category": "productivity",
       "tags": ["review", "specs", "documentation", "markdown", "html", "design-docs"]
     }

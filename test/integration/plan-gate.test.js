@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview plan-gate` (the Claude Code PermissionRequest hook for ExitPlanMode) as a real process: fixture hook
+// `suiko plan-gate` (the Claude Code PermissionRequest hook for ExitPlanMode) as a real process: fixture hook
 // JSON on stdin, a temp workspace and SPECREVIEW_HOME, the real daemon (ensureDaemon starts it on a free port pair
 // in 5700-5749; other suites use 5800-5899). The reviewer's side is played through the engine ops. Asserts the exact
 // deny decision (plan feedback citing the plan file), the exact allow decision (updatedInput with the reviewed plan)
@@ -20,7 +20,7 @@ import { memorySink } from '../../src/cli/io.js';
 import { planText } from '../../src/cli/commands/plan-gate.js';
 import { engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
 
-const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/specreview.js');
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/suiko.js');
 const SESSION = 'f00dfeed-0000-4000-8000-000000000001';
 
 /** @type {Awaited<ReturnType<typeof makeWorkspace>>} */
@@ -94,7 +94,7 @@ function hookInput(toolInput = { plan: PLAN_V1, planFilePath: planFile }, extra 
 }
 
 /**
- * Spawns `specreview plan-gate <args>` with `input` (an object is JSON-encoded) on stdin.
+ * Spawns `suiko plan-gate <args>` with `input` (an object is JSON-encoded) on stdin.
  * @param {unknown} input
  * @param {string[]} [args]
  */
@@ -189,7 +189,7 @@ describe('plan-gate', () => {
       { ...doc.origin, transcript: undefined },
       { type: 'plan', key: KEY(), session: SESSION, planFilePath: planFile, cwd: ws.root, transcript: undefined },
     );
-    assert.match(g1.stderr(), new RegExp(`specreview: review the plan \\(plan-token-refresh v1\\) at http://127\\.0\\.0\\.1:${port}/d/[0-9a-f]+/plan-token-refresh\\?k=`));
+    assert.match(g1.stderr(), new RegExp(`suiko: review the plan \\(plan-token-refresh v1\\) at http://127\\.0\\.0\\.1:${port}/d/[0-9a-f]+/plan-token-refresh\\?k=`));
 
     await submit(doc.id, 'changes_requested', 'Keep a 30 s grace window.', 'Close, but not yet.');
     const r1 = await g1.done;
@@ -202,7 +202,7 @@ describe('plan-gate', () => {
     assert.equal(
       message,
       [
-        'YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (SpecReview rv1 on v1).',
+        'YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (Suiko rv1 on v1).',
         `Plan file: ${planFile}   (line numbers below are lines of this file)`,
         'Reviewer summary: Close, but not yet.',
         '1 thread needs action (1 new): 1 blocking',
@@ -263,7 +263,7 @@ describe('plan-gate', () => {
     const r = await g.done;
     assert.equal(r.code, 0, r.stderr);
     const message = JSON.parse(r.stdout).hookSpecificOutput.decision.message;
-    assert.match(message, /^YOUR PLAN WAS NOT APPROVED: the reviewer commented on it \(SpecReview rv1 on v1\)\.\nThe plan has no plan file: line numbers below are lines of the plan text you submitted\.\n/);
+    assert.match(message, /^YOUR PLAN WAS NOT APPROVED: the reviewer commented on it \(Suiko rv1 on v1\)\.\nThe plan has no plan file: line numbers below are lines of the plan text you submitted\.\n/);
     assert.match(message, /- Revise the plan: change only what the threads ask for/);
   });
 
@@ -374,7 +374,7 @@ describe('plan-gate: the plan review belongs to the gate', () => {
     const w = await all.done;
     assert.doesNotMatch(w.stdout, /SPECREVIEW FEEDBACK/);
 
-    // `specreview wait` without a doc: the spec is the only doc that counts
+    // `suiko wait` without a doc: the spec is the only doc that counts
     const out = memorySink();
     const err = memorySink();
     const code = await main(['wait', '--timeout', '200ms'], {

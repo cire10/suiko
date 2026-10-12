@@ -1,16 +1,16 @@
 #!/bin/sh
-# SpecReview one-step installer (POSIX sh).
+# Suiko one-step installer (POSIX sh).
 #
-#   From a checkout:  ./install.sh [--yes] [specreview install options, e.g. --only claude,codex]
+#   From a checkout:  ./install.sh [--yes] [suiko install options, e.g. --only claude,codex]
 #   Without one:      curl -fsSL <raw URL of this file> | SPECREVIEW_REPO=<git URL> sh -s -- [--yes] [options]
 #
 # 1. checks Node.js >= 20.19 (and npm);
 # 2. uses this checkout, or clones SPECREVIEW_REPO into ~/.specreview/app (updates it when it is already there);
 # 3. installs the npm dependencies (a checkout that already has node_modules is left as is);
-# 4. puts `specreview` on PATH with `npm link`, or, when that fails (a global prefix that needs sudo), with a small
+# 4. puts `suiko` on PATH with `npm link`, or, when that fails (a global prefix that needs sudo), with a small
 #    shim in ~/.local/bin;
-# 5. runs `specreview install`, which detects your coding agents and prints exactly what it would write for each.
-#    Nothing is written to an agent's config until you re-run with --yes (= `specreview install --apply`).
+# 5. runs `suiko install`, which detects your coding agents and prints exactly what it would write for each.
+#    Nothing is written to an agent's config until you re-run with --yes (= `suiko install --apply`).
 #
 # Environment:
 #   SPECREVIEW_REPO      git URL to clone when not run from a checkout (there is no public default)
@@ -19,7 +19,7 @@
 #   SPECREVIEW_APP_DIR   where to clone (default: $HOME/.specreview/app)
 #   SPECREVIEW_BIN_DIR   where the fallback shim goes (default: $HOME/.local/bin)
 #   SPECREVIEW_NO_LINK=1 skip `npm link` and always use the shim
-# Undo: `specreview uninstall --apply` removes what `specreview install` added; then `npm unlink -g specreview` (or
+# Undo: `suiko uninstall --apply` removes what `suiko install` added; then `npm unlink -g suiko` (or
 # delete the shim) and the clone.
 
 set -eu
@@ -33,12 +33,12 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--yes] [specreview install options]
+Usage: ./install.sh [--yes] [suiko install options]
        curl -fsSL <URL>/install.sh | SPECREVIEW_REPO=<git URL> sh -s -- [--yes] [options]
 
-Installs the SpecReview CLI, then runs `specreview install` (a dry run that lists, per detected coding agent, the
-files and entries it would write). --yes applies them (`specreview install --apply`).
-Other options go to `specreview install`: --only a,b  --skip a,b  --project  --json
+Installs the Suiko CLI, then runs `suiko install` (a dry run that lists, per detected coding agent, the
+files and entries it would write). --yes applies them (`suiko install --apply`).
+Other options go to `suiko install`: --only a,b  --skip a,b  --project  --json
 Environment: SPECREVIEW_REPO, SPECREVIEW_REF, SPECREVIEW_APP_DIR, SPECREVIEW_BIN_DIR, SPECREVIEW_NO_LINK=1
 EOF
 }
@@ -78,9 +78,9 @@ if [ "$MAJOR" -lt 20 ] || { [ "$MAJOR" -eq 20 ] && [ "$MINOR" -lt 19 ]; }; then
 fi
 NPM=$(command -v npm 2>/dev/null || true)
 
-# 2. The SpecReview source: this checkout, or a clone of SPECREVIEW_REPO ----------------------------------------
-is_specreview() {
-  [ -f "$1/bin/specreview.js" ] && [ -f "$1/package.json" ] && grep -q '"name": *"specreview"' "$1/package.json"
+# 2. The Suiko source: this checkout, or a clone of SPECREVIEW_REPO ----------------------------------------
+is_suiko() {
+  [ -f "$1/bin/suiko.js" ] && [ -f "$1/package.json" ] && grep -q '"name": *"suiko"' "$1/package.json"
 }
 
 SRC=''
@@ -88,18 +88,18 @@ case "$0" in
   */*) HERE=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P || true) ;;
   *) HERE=$(if [ -f "$0" ]; then pwd -P; fi) ;;
 esac
-if [ -n "$HERE" ] && [ -f "$HERE/install.sh" ] && is_specreview "$HERE"; then
+if [ -n "$HERE" ] && [ -f "$HERE/install.sh" ] && is_suiko "$HERE"; then
   SRC=$HERE
   MODE=checkout
-  say "SpecReview checkout: $SRC"
+  say "Suiko checkout: $SRC"
 else
   MODE=clone
   REPO=${SPECREVIEW_REPO:-}
-  [ -n "$REPO" ] || die 'not run from a SpecReview checkout, and SPECREVIEW_REPO is not set. SpecReview has no public
+  [ -n "$REPO" ] || die 'not run from a Suiko checkout, and SPECREVIEW_REPO is not set. Suiko has no public
 download: set SPECREVIEW_REPO to the git URL of the repository you were given, e.g.
-  curl -fsSL <URL>/install.sh | SPECREVIEW_REPO=git@github.com:<owner>/specreview.git sh
+  curl -fsSL <URL>/install.sh | SPECREVIEW_REPO=git@github.com:<owner>/suiko.git sh
 or clone it yourself and run ./install.sh from the clone.'
-  command -v git >/dev/null 2>&1 || die 'git is required to fetch SpecReview'
+  command -v git >/dev/null 2>&1 || die 'git is required to fetch Suiko'
   SRC=${SPECREVIEW_APP_DIR:-$HOME/.specreview/app}
   REF=${SPECREVIEW_REF:-}
   if [ -d "$SRC/.git" ]; then
@@ -118,7 +118,7 @@ or clone it yourself and run ./install.sh from the clone.'
       git -C "$SRC" checkout --quiet --detach FETCH_HEAD || die "could not check out the default branch in $SRC (local changes?); fix it or delete $SRC and re-run"
     fi
   elif [ -e "$SRC" ] && [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
-    die "$SRC exists and is not a SpecReview clone; move it away or set SPECREVIEW_APP_DIR"
+    die "$SRC exists and is not a Suiko clone; move it away or set SPECREVIEW_APP_DIR"
   else
     say "Cloning $REPO into $SRC"
     mkdir -p "$(dirname "$SRC")"
@@ -128,7 +128,7 @@ or clone it yourself and run ./install.sh from the clone.'
       git clone --quiet --depth 1 "$REPO" "$SRC" || die "git clone of $REPO failed"
     fi
   fi
-  is_specreview "$SRC" || die "$SRC does not look like SpecReview (no bin/specreview.js or package.json named specreview)"
+  is_suiko "$SRC" || die "$SRC does not look like Suiko (no bin/suiko.js or package.json named suiko)"
 fi
 
 # 3. npm dependencies -------------------------------------------------------------------------------------------
@@ -139,7 +139,7 @@ npm_quiet() {
   (cd "$SRC" && "$NPM" "$@") >"$log" 2>&1
 }
 
-LOG=$(mktemp "${TMPDIR:-/tmp}/specreview-install.XXXXXX")
+LOG=$(mktemp "${TMPDIR:-/tmp}/suiko-install.XXXXXX")
 trap 'rm -f "$LOG"' EXIT
 trap 'exit 130' HUP INT TERM
 
@@ -163,9 +163,9 @@ else
   fi
 fi
 
-# 4. `specreview` on PATH ---------------------------------------------------------------------------------------
+# 4. `suiko` on PATH ---------------------------------------------------------------------------------------
 BIN_DIR=${SPECREVIEW_BIN_DIR:-$HOME/.local/bin}
-SHIM="$BIN_DIR/specreview"
+SHIM="$BIN_DIR/suiko"
 SHIM_TAG='specreview-shim'
 
 write_shim() {
@@ -174,10 +174,10 @@ write_shim() {
   fi
   mkdir -p "$BIN_DIR"
   node_q=$(quote "$NODE")
-  script_q=$(quote "$SRC/bin/specreview.js")
+  script_q=$(quote "$SRC/bin/suiko.js")
   cat >"$SHIM.tmp" <<EOF
 #!/bin/sh
-# $SHIM_TAG: written by SpecReview's install.sh; runs the CLI from $SRC
+# $SHIM_TAG: written by Suiko's install.sh; runs the CLI from $SRC
 if [ -x $node_q ]; then exec $node_q $script_q "\$@"; fi
 exec node $script_q "\$@"
 EOF
@@ -195,26 +195,26 @@ LINKED=0
 if [ "${SPECREVIEW_NO_LINK:-}" != 1 ] && [ -n "$NPM" ]; then
   if npm_quiet "$LOG" link --no-audit --no-fund; then
     LINKED=1
-    say 'Linked specreview with npm link'
+    say 'Linked suiko with npm link'
   else
     say 'npm link failed (the global npm prefix probably needs sudo); using a shim instead'
   fi
 fi
-FOUND=$(command -v specreview 2>/dev/null || true)
+FOUND=$(command -v suiko 2>/dev/null || true)
 # npm's link can live at the shim's own path (npm prefix ~/.local, so its bin is ~/.local/bin): that is npm's link
 # to this checkout, not a file to replace.
 NPM_LINK_AT_SHIM=0
-if [ "$LINKED" = 1 ] && [ -n "$FOUND" ] && [ "$FOUND" = "$SHIM" ] && [ "$(realpath_of "$FOUND")" = "$(realpath_of "$SRC/bin/specreview.js")" ]; then
+if [ "$LINKED" = 1 ] && [ -n "$FOUND" ] && [ "$FOUND" = "$SHIM" ] && [ "$(realpath_of "$FOUND")" = "$(realpath_of "$SRC/bin/suiko.js")" ]; then
   NPM_LINK_AT_SHIM=1
 fi
 if [ "$NPM_LINK_AT_SHIM" = 0 ] && { [ "$LINKED" = 0 ] || [ -z "$FOUND" ] || [ "$FOUND" = "$SHIM" ]; }; then
-  if [ "$LINKED" = 1 ] && [ -z "$FOUND" ]; then say "npm linked specreview into a directory that is not on PATH; adding a shim in $BIN_DIR"; fi
+  if [ "$LINKED" = 1 ] && [ -z "$FOUND" ]; then say "npm linked suiko into a directory that is not on PATH; adding a shim in $BIN_DIR"; fi
   write_shim
-  # PATH is left as is for step 5: while BIN_DIR is not on it, `specreview install` writes the absolute invocation
+  # PATH is left as is for step 5: while BIN_DIR is not on it, `suiko install` writes the absolute invocation
   # into the agents' instructions, which works from any shell.
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) warn "$BIN_DIR is not on PATH. Add it (e.g. in ~/.profile), then re-run \"specreview install --apply\" to use the short command:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+    *) warn "$BIN_DIR is not on PATH. Add it (e.g. in ~/.profile), then re-run \"suiko install --apply\" to use the short command:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
   esac
 fi
 
@@ -227,11 +227,11 @@ STATUS=0
 eval "set -- $FORWARD"
 # SPECREVIEW_NODE: the node found on PATH (e.g. /opt/homebrew/bin/node), which the agent configs get instead of its
 # resolved, version-specific path.
-SPECREVIEW_NODE=$NODE "$NODE" "$SRC/bin/specreview.js" install "$@" || STATUS=$?
+SPECREVIEW_NODE=$NODE "$NODE" "$SRC/bin/suiko.js" install "$@" || STATUS=$?
 case "$FORWARD" in *"'--json'"*) exit "$STATUS" ;; esac
 if [ "$APPLY" = 0 ] && [ "$STATUS" -eq 0 ]; then
-  RUN=specreview
-  if ! command -v specreview >/dev/null 2>&1 && [ -x "$SHIM" ]; then RUN=$(quote "$SHIM"); fi
+  RUN=suiko
+  if ! command -v suiko >/dev/null 2>&1 && [ -x "$SHIM" ]; then RUN=$(quote "$SHIM"); fi
   say ''
   if [ "$MODE" = checkout ]; then
     say "To write these changes: $RUN install --apply   (or: $(quote "$SRC/install.sh") --yes)"

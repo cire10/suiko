@@ -2,7 +2,7 @@
 // Reviewer drafts and capture resolution (design 7.2, 10.2, 11.4; BUILD_AMENDMENTS 3.3):
 //   resolveCapture(ctx, doc, { version, capture })      -> { anchor, preview: { label, lines, section, src, text } }
 //   saveDraft(ctx, doc, item, { source? })               -> DraftItem (id allocated, anchor resolved); `source`
-//                                                           ('snip' for `specreview snip`) rides on the
+//                                                           ('snip' for `suiko snip`) rides on the
 //                                                           drafts.changed event so the UI can announce the draft
 //   updateDraft(ctx, doc, draftId, patch)                -> DraftItem
 //   deleteDraft(ctx, doc, draftId)                       -> { ok, deleted }
@@ -65,7 +65,7 @@ export async function listDrafts(ctx, ref) {
  * @param {string | Doc} ref
  * @param {any} item DraftItem without id
  * @param {{ source?: string | null }} [opts] source: where the draft came from, added to the drafts.changed event
- *   ({draft, source: 'snip'} for `specreview snip`)
+ *   ({draft, source: 'snip'} for `suiko snip`)
  * @returns {Promise<DraftItem>}
  */
 export async function saveDraft(ctx, ref, item, { source = null } = {}) {

@@ -266,7 +266,7 @@ export function resnapshotCommand(doc, root) {
   if (d.format === 'html') flags.push('--as-html');
   if (d.render?.network === 'allow') flags.push('--allow-remote-assets');
   if (isScratchRoot(root)) flags.push(`--workspace ${shellQuote(String(root))}`);
-  return `specreview snapshot ${shellQuote(url)}${flags.length ? ` ${flags.join(' ')}` : ''}`;
+  return `suiko snapshot ${shellQuote(url)}${flags.length ? ` ${flags.join(' ')}` : ''}`;
 }
 
 /**
@@ -282,12 +282,12 @@ export function reviseHint(doc, ref) {
   }
   if (originType(doc) === 'url') {
     // a scratch workspace: the ref carries --workspace, and so must the snapshot command
-    const again = `${resnapshotCommand(doc, null) ?? 'specreview snapshot <url>'}${/\s--workspace\s.+$/.exec(ref)?.[0] ?? ''}`;
+    const again = `${resnapshotCommand(doc, null) ?? 'suiko snapshot <url>'}${/\s--workspace\s.+$/.exec(ref)?.[0] ?? ''}`;
     return /** @type {any} */ (doc).origin?.private === true
       ? `change the sources that produce the page, then record what the page serves now with \`${again} --replies -\` (replies JSON on stdin)`
-      : `answer the threads with \`specreview reply ${ref} <tid> -m <md> --status answered|declined\`; \`${again}\` records a newer version of the page when it changes`;
+      : `answer the threads with \`suiko reply ${ref} <tid> -m <md> --status answered|declined\`; \`${again}\` records a newer version of the page when it changes`;
   }
-  return `write the complete revised text to a file (\`specreview show ${ref}\` prints the current version), then record it with \`specreview revise ${ref} --source <file> --replies -\` (replies JSON on stdin)`;
+  return `write the complete revised text to a file (\`suiko show ${ref}\` prints the current version), then record it with \`suiko revise ${ref} --source <file> --replies -\` (replies JSON on stdin)`;
 }
 
 /**
@@ -299,7 +299,7 @@ export function reviseHint(doc, ref) {
  */
 export function snapshotRefusal(doc, what, ref) {
   const d = /** @type {any} */ (doc);
-  return `${d?.id ?? 'this doc'} is ${snapshotNoun(doc)}, not a file in the workspace, so SpecReview cannot ${what} it. Instead, ${reviseHint(doc, ref ?? d?.id ?? '<doc>')}.`;
+  return `${d?.id ?? 'this doc'} is ${snapshotNoun(doc)}, not a file in the workspace, so Suiko cannot ${what} it. Instead, ${reviseHint(doc, ref ?? d?.id ?? '<doc>')}.`;
 }
 
 /**
@@ -319,5 +319,5 @@ export function snapshotNoun(doc) {
  */
 export function codeEditRefusal(doc, ref) {
   const d = /** @type {any} */ (doc);
-  return `code docs: edit the files with your own tools; \`specreview revise ${ref ?? d?.id ?? '<doc>'}\` records the round`;
+  return `code docs: edit the files with your own tools; \`suiko revise ${ref ?? d?.id ?? '<doc>'}\` records the round`;
 }

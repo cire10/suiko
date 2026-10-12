@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview final <doc> [--decisions] [--out <dir>] [--json]` (design 3.12 / 8.9).
+// `suiko final <doc> [--decisions] [--out <dir>] [--json]` (design 3.12 / 8.9).
 // Checks that the working copy equals the final (approved) version and, with --decisions, writes
 // `<name>.decisions.md`. Exit 0; 3 when the doc has no final version or the working copy differs.
 

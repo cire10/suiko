@@ -1,4 +1,4 @@
-/* SpecReview Markdown shell: readable page layout on top of github-markdown-css.
+/* Suiko Markdown shell: readable page layout on top of github-markdown-css.
  *
  * Theme: the active github-markdown stylesheet (link[data-sr-theme], selected by prefers-color-scheme or flipped
  * by the guest) colours .markdown-body. The article therefore spans the whole page and centres its content with

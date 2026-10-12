@@ -492,7 +492,7 @@ export function defaultVerdict(ds, otherwise = 'comment') {
  * @param {DocState} ds
  */
 export function agentPrompt(ds) {
-  return `Run \`specreview feedback ${ds?.doc?.id ?? ''}\` and address it.`;
+  return `Run \`suiko feedback ${ds?.doc?.id ?? ''}\` and address it.`;
 }
 
 /** Threads an Approve with "resolve addressed" would resolve. @param {DocState} ds */

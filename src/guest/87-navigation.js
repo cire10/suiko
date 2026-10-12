@@ -1,4 +1,4 @@
-// SpecReview guest, part 87: keeping the reviewed document in its frame.
+// Suiko guest, part 87: keeping the reviewed document in its frame.
 //
 // A link (or a document script) that navigates the doc iframe to another URL strands the review: the new page has no
 // guest (or the guest of another document), while the UI still shows the old outline and posts to a dead port. So,
@@ -187,7 +187,7 @@ const NavGuard = (() => {
   }
 
   return {
-    /** Debug snapshot (window.__specreviewGuest.inspect().navigation). */
+    /** Debug snapshot (window.__suikoGuest.inspect().navigation). */
     debug() {
       return { active: ENV.framed, navigationApi: HAS_NAV_API, blocked, opened: opened.slice() };
     },

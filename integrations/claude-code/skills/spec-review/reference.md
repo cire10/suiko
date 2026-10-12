@@ -1,6 +1,6 @@
 <!-- Reference for the spec-review skill (loaded on demand from SKILL.md). Self-contained because the plugin may be installed outside this repository. Keep in sync with docs/agent-protocol.md. -->
 
-# SpecReview reference
+# Suiko reference
 
 - [Conventions](#conventions)
 - [Commands](#commands)
@@ -84,7 +84,7 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
   crop: /abs/path/.specreview/docs/token-service/attachments/a1.png  (Read it to see the region)
   Eric: Does the gateway sit in front of the auth service or beside it?
 
-[t3] suggestion · L120 · §5.1 Retries · apply verbatim: specreview apply token-service t3
+[t3] suggestion · L120 · §5.1 Retries · apply verbatim: suiko apply token-service t3
   - The client MUST retry 3 times.
   + The client MUST retry up to 5 times with exponential backoff (base 200 ms, full jitter).
   Eric: Match the platform retry policy.
@@ -95,8 +95,8 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
-NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
+PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
+NEXT: edits -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
 ```
 
 - **Header:** doc, path, the review(s) and the version they were made on, and the verdict (`COMMENT`, `CHANGES REQUESTED`, `APPROVED`; `· FINAL = vN` when the reviewer marked a final version). The second line says whether the working copy is identical to head or differs (`lines mapped`).
@@ -112,11 +112,11 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 - **`crop:`** an absolute path to a PNG of the region the reviewer drew. Read it to see what they mean.
 - **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc, a screenshot of anything on their screen, or a pasted image (PNG, or JPEG when very large). **Read every `crop:` and `image:` file with the Read tool before acting on its thread**; the comment often only makes sense with the picture. See [Pictures](#pictures-snips-and-screenshots).
 - **Suggestions** show `-` (current) and `+` (proposed) lines and the `apply` command.
-- **Conversation:** your last reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment since. Older ones collapse to `(+2 earlier, specreview show <doc> t2)`.
-- **Anchor notes:** `(outdated: text changed)` means the quoted text was edited since the comment; `(orphaned: was "…" in §5 v1 L260; reanchor with specreview reanchor)` means it could not be found.
+- **Conversation:** your last reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment since. Older ones collapse to `(+2 earlier, suiko show <doc> t2)`.
+- **Anchor notes:** `(outdated: text changed)` means the quoted text was edited since the comment; `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)` means it could not be found.
 - **Footer:** `LOCKED` ranges, `DECISIONS` to keep true, drafts (only with `--include-drafts`, clearly labelled as not submitted), the protocol reminder and `NEXT`.
-- **Size cap:** 10,000 characters. Threads beyond it are listed one per line; run `specreview show <doc> tN` for each.
-- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: specreview final token-service --decisions   (then stop waiting)`. When the approval also reopened or answered threads, they are listed and NEXT says to answer each with `specreview reply <doc> <tid> -m <md> --status answered|declined` (no edits, no new version) before `final`, and the PROTOCOL lines are replaced by a reply-only line. This applies only when the final version is the current head; an approval without a final version keeps the usual revise flow.
+- **Size cap:** 10,000 characters. Threads beyond it are listed one per line; run `suiko show <doc> tN` for each.
+- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: suiko final token-service --decisions   (then stop waiting)`. When the approval also reopened or answered threads, they are listed and NEXT says to answer each with `suiko reply <doc> <tid> -m <md> --status answered|declined` (no edits, no new version) before `final`, and the PROTOCOL lines are replaced by a reply-only line. This applies only when the final version is the current head; an approval without a final version keeps the usual revise flow.
 
 ### Pictures: snips and screenshots
 
@@ -136,7 +136,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 ```
 
 - **Snip** (`b` in the UI): the reviewer boxed an area of the rendered doc. `src>` covers every block under the box, in file order; edit only what the comment is about. A large snip's `src>` is shortened like any other: Read those lines first.
-- **Screenshot** (`B`, or `specreview snip` from a hotkey): usually a `GENERAL` thread, or anchored to text the reviewer had selected. It may show something outside the doc (the running app, a terminal, another page). Tie it to the spec through the comment; if you cannot tell which part it concerns, reply `needs_input`.
+- **Screenshot** (`B`, or `suiko snip` from a hotkey): usually a `GENERAL` thread, or anchored to text the reviewer had selected. It may show something outside the doc (the running app, a terminal, another page). Tie it to the spec through the comment; if you cannot tell which part it concerns, reply `needs_input`.
 - In JSON, `attachments` lists the absolute paths of a thread's pictures, and `attachmentKind` says what they are (`region`, `snip` or `image`).
 
 ### JSON form (`--json`, and MCP `structuredContent`)
@@ -154,7 +154,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
  "locks":[{"id":"L1","lines":[170,196],"section":["7 Rollout plan"]}],
  "decisions":[],"drafts":null,
  "counts":{"actionable":4,"new":4,"reopened":0,"reply":0,"answer":0,"awaitingReviewer":0,"resolved":0,"outdated":0},
- "next":"targeted edits, then: specreview revise token-service --replies -"}
+ "next":"targeted edits, then: suiko revise token-service --replies -"}
 ```
 
 ## Thread types, statuses and "needs action"
@@ -162,18 +162,18 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 - Types: `comment`, `question`, `suggestion`, `agent-question` (created by `ask`). Severities: `blocking`, `normal`, `nit`.
 - Statuses: `open`, `addressed`, `answered`, `declined`, `needs_input`, `resolved`. You set `addressed`, `answered`, `declined` or `needs_input` through `revise` or `reply`. **Only the reviewer resolves** (Accept) or reopens.
 - A thread needs action when its status is `open`, or when the reviewer's newest comment is newer than yours and it is not `resolved`.
-- A review can hold a single thread: the reviewer's **Send now** (or `specreview snip --send`) submits one comment at once with verdict `comment`. It needs action like any other packet: handle it, revise, wait again.
+- A review can hold a single thread: the reviewer's **Send now** (or `suiko snip --send`) submits one comment at once with verdict `comment`. It needs action like any other packet: handle it, revise, wait again.
 - Delivery: a review is marked delivered when the packet has been printed. Your next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. If you never act on it, the prompt hook reminds you after about 5 minutes.
 
 ## Making edits: Edit, apply, edit
 
 1. **Read first.** Read the spec file, or the cited ranges, before editing. The reviewer may have recorded their own revision since the packet.
 2. **Edit tool** for comments: `old_string` = the `src>` text. Edit bottom-up, or rely on the `src>` text rather than line numbers.
-3. **`specreview apply <doc> <tid...>`** for suggestions, after all Edit-tool edits. It maps the anchored range to the current file and splices the exact text if it is still there (or if it occurs once, or near the expected place). Otherwise it reports `conflict tN: expected text not found near L120; treat as a normal comment` (exit 3). On success the suggestion is `staged` and the edit is tagged to the thread. `apply` rewrites the file, so re-Read before any later Edit.
-4. **`specreview edit`** is the CLI form of an exact replace, tagged to threads. Use it when you have no Edit tool:
+3. **`suiko apply <doc> <tid...>`** for suggestions, after all Edit-tool edits. It maps the anchored range to the current file and splices the exact text if it is still there (or if it occurs once, or near the expected place). Otherwise it reports `conflict tN: expected text not found near L120; treat as a normal comment` (exit 3). On success the suggestion is `staged` and the edit is tagged to the thread. `apply` rewrites the file, so re-Read before any later Edit.
+4. **`suiko edit`** is the CLI form of an exact replace, tagged to threads. Use it when you have no Edit tool:
    ```bash
-   specreview edit token-service --thread t1 --old "rotated on every use" --new "rotated with a 30 s grace window"
-   specreview edit token-service --stdin <<'JSON'
+   suiko edit token-service --thread t1 --old "rotated on every use" --new "rotated with a 30 s grace window"
+   suiko edit token-service --stdin <<'JSON'
    [{"threads":["t1"],"old":"rotated on every use","new":"rotated with a 30 s grace window"},
     {"threads":["t4"],"old":"| refresh_token | opaque | 30d |","new":"| refresh_token (user) | opaque | 30d |","all":false}]
    JSON
@@ -182,7 +182,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 
 ## The revise input
 
-`specreview revise <doc> --replies -` reads JSON from stdin (or `--replies <file>`):
+`suiko revise <doc> --replies -` reads JSON from stdin (or `--replies <file>`):
 
 ```text
 { "summary": string,                                      // -m <summary> overrides it
@@ -201,7 +201,7 @@ NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per 
 Successful report:
 
 ```text
-specreview: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
+suiko: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
   h1 L42-46  §3.2 Token refresh  -> t1 addressed  (overlap)
   h2 L90-91  §4 Architecture     -> t2 addressed  (hint)
   h3 L120    §5.1 Retries        -> t3 addressed  (tagged: apply)
@@ -209,17 +209,17 @@ specreview: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to 
   t4 needs_input (reply only)
 guards: ok · lock L1 untouched · no unexplained deletions · rewrite 4%
 anchors: 4 threads + 1 lock -> 1 exact, 1 moved, 3 edited, 0 changed, 0 orphaned
-reviewer notified (1 UI open). next: specreview wait token-service (background)
+reviewer notified (1 UI open). next: suiko wait token-service (background)
 ```
 
 Refusal (exit 3, nothing recorded, working copy untouched):
 
 ```text
-specreview: REFUSED - nothing recorded (exit 3)
+suiko: REFUSED - nothing recorded (exit 3)
   ERR lock: h5 L171-174 changes L1 §7 Rollout plan (agreed in rv1)
-      fix: specreview revert token-service --hunk h5   or   --break-lock L1="<reason>"
+      fix: suiko revert token-service --hunk h5   or   --break-lock L1="<reason>"
   ERR deletion: h6 removes 14 lines (v1 L201-214, §8 Open questions) linked to no thread
-      fix: specreview revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
+      fix: suiko revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
   WARN t2 marked addressed but no hunk is linked to it (add "at":"L90-91" if you changed it)
 working copy left untouched. Preview with --dry-run.
 ```
@@ -258,20 +258,20 @@ Human and external edits look the same as yours. If you did not make a hunk, exp
 | `moved` | Same text, different place | lines |
 | `edited` | Changed by a hunk linked to the thread | lines of the new text |
 | `changed` | The text was edited without a link ("outdated") | `(outdated: text changed)` |
-| `orphaned` | Not found | `(orphaned: …; reanchor with specreview reanchor)` |
+| `orphaned` | Not found | `(orphaned: …; reanchor with suiko reanchor)` |
 
-If an anchor is wrong, move it: `specreview reanchor <doc> tN --lines A-B` or `--quote "exact text"`.
+If an anchor is wrong, move it: `suiko reanchor <doc> tN --lines A-B` or `--quote "exact text"`.
 
 ## Locks and decisions
 
 - **Locks** (`L1`, "Mark agreed" in the UI) are hard: `revise` refuses a version that changes the agreed text. The packet lists them under `LOCKED`.
 - **Decisions** (`D1`) are recorded when the reviewer accepts a thread with a one-line decision. They are soft: changing their text is a warning, and every packet reminds you under `DECISIONS`.
-- `specreview final <doc> --decisions` writes `<name>.decisions.md`: each decision with its context, resolution, version and hunk.
+- `suiko final <doc> --decisions` writes `<name>.decisions.md`: each decision with its context, resolution, version and hunk.
 
 ## Hooks
 
-- **`hook pre-write`** (PreToolUse, matcher `Write`): if the target is a tracked doc that has at least one review and is not closed, and the Write would change more than 40% of its lines, it denies the Write with a reason pointing to Edit, `specreview apply` and `specreview edit` (in `warn` mode it asks the user instead). Small Writes are allowed.
-- **`hook prompt`** (UserPromptSubmit): adds a note to the prompt when a submitted review on a doc in this workspace was not delivered and nothing is waiting for it, or was delivered more than about 5 minutes ago but never acted on. Example: `specreview: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run specreview feedback token-service and address it per the spec-review skill.` When the current directory has no workspace of its own, the registered workspaces below it are checked and the command names them (`specreview feedback token-service --workspace notes/specs`).
+- **`hook pre-write`** (PreToolUse, matcher `Write`): if the target is a tracked doc that has at least one review and is not closed, and the Write would change more than 40% of its lines, it denies the Write with a reason pointing to Edit, `suiko apply` and `suiko edit` (in `warn` mode it asks the user instead). Small Writes are allowed.
+- **`hook prompt`** (UserPromptSubmit): adds a note to the prompt when a submitted review on a doc in this workspace was not delivered and nothing is waiting for it, or was delivered more than about 5 minutes ago but never acted on. Example: `suiko: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run suiko feedback token-service and address it per the spec-review skill.` When the current directory has no workspace of its own, the registered workspaces below it are checked and the command names them (`suiko feedback token-service --workspace notes/specs`).
 - Both always exit 0 and print nothing on error.
 - **`plan-gate`** (PermissionRequest, matcher `ExitPlanMode`, timeout 345600): records the plan (the plan file, else the inline plan) as a snapshot doc, a new version on each ExitPlanMode of the same plan file in the session, opens the UI and blocks until the review (`wait --all` never takes a plan review). Threads your new version changed are marked addressed (`Changed in vN.`). Approved: allows ExitPlanMode. Request changes or Comment: denies it with feedback citing the plan file and its lines (`YOUR PLAN WAS NOT APPROVED ...`): make targeted Edit-tool changes to the plan file and call ExitPlanMode again. On any error, or when the user answers in the terminal, it prints nothing and exits 0. Comments sent with an approval are not passed on.
 
@@ -280,7 +280,7 @@ If an anchor is wrong, move it: `specreview reanchor <doc> tN --lines A-B` or `-
 A plan, your last message or piped text is a **snapshot doc**: no working file (its synthetic path, e.g. `plans/<slug>.md`, is never read or written), versions recorded from text. Threads, re-anchoring, attribution, Changes and History work as for files. Differences:
 - `apply`, `edit` and `revert` are refused; revise with `revise <doc> --source <file> --replies -` (or, for a plan, edit the plan file and call ExitPlanMode again).
 - Guards still run, but their errors are recorded as warnings: nothing is refused.
-- A **web page** (`snapshot <url>`, path `web/<slug>.md`): the packet's line basis names the page (`Line numbers = lines of SpecReview's Markdown snapshot of <url> (fetched …)`). For a page you build (`--allow-private`), change its sources as the threads ask and run the `NEXT:` command, `specreview snapshot <url> --allow-private --replies -`, with the replies JSON on stdin. A public page has nothing to edit: answer each thread with `specreview reply <doc> <tid> -m <md> --status answered|declined`.
+- A **web page** (`snapshot <url>`, path `web/<slug>.md`): the packet's line basis names the page (`Line numbers = lines of Suiko's Markdown snapshot of <url> (fetched …)`). For a page you build (`--allow-private`), change its sources as the threads ask and run the `NEXT:` command, `suiko snapshot <url> --allow-private --replies -`, with the replies JSON on stdin. A public page has nothing to edit: answer each thread with `suiko reply <doc> <tid> -m <md> --status answered|declined`.
 - When the current directory cannot be a workspace (your home directory or `/`), the doc goes to a scratch workspace under `$SPECREVIEW_HOME/scratch/`, and every printed command carries `--workspace <dir>`: keep it.
 
 ## Code reviews
@@ -313,7 +313,7 @@ Line numbers = files in your working tree now (all identical to v1).
   src>   if (stored.used) throw new TokenReuseError();
   Eric: Two tabs refreshing at once will trip this. Allow reuse within 30 s before throwing.
 
-[t2] suggestion · src/auth/refresh.js:L11 · apply verbatim: specreview apply cr-feat-token-refresh t2
+[t2] suggestion · src/auth/refresh.js:L11 · apply verbatim: suiko apply cr-feat-token-refresh t2
   -   const ttlSec = config.refreshTtlSec;
   +   const ttlSec = config.refreshTtlSec ?? 30 * 24 * 3600;
   Eric: Keep the old default when the config has no TTL.
@@ -326,8 +326,8 @@ Line numbers = files in your working tree now (all identical to v1).
 
 DECISIONS to keep true: (none yet)
 PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
-  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
-NEXT: edit the files -> specreview revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> specreview wait cr-feat-token-refresh (background)
+  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> suiko wait cr-feat-token-refresh (background)
 ```
 
 - **Items** cite `path:L..` relative to the repo root, with `(new file)`, `(old side)` or `(whole file)` where it applies. There is no `on:` line, no section and no LOCKED line: code reviews have no locks.
@@ -376,27 +376,27 @@ Edit the files with your editor tools. Use `apply <doc> <tid>` for suggestions, 
 
 ## MCP tools
 
-`specreview mcp` serves these tools over stdio. Each returns the CLI text as `content` and the `--json` shape as `structuredContent`, with `isError: true` on a refusal or conflict. In Claude Code the background CLI `wait` is preferred.
+`suiko mcp` serves these tools over stdio. Each returns the CLI text as `content` and the `--json` shape as `structuredContent`, with `isError: true` on a refusal or conflict. In Claude Code the background CLI `wait` is preferred.
 
 | Tool | Input |
 |---|---|
-| `specreview_open` | `{path, title?}` -> `{doc, version, url}` |
-| `specreview_snapshot` | `{url, title?}` -> `{doc, version, url, page}`: a public web page only |
-| `specreview_review` | `{mode?, base?, range?, commit?, paths?, title?}` -> a code review (modes as in Code reviews, without PR mode) |
-| `specreview_wait` | `{doc?, timeout_sec?}` (default 50, max 600) -> the packet, `{status:"waiting"}` (call again) or `{status:"closed"}` |
-| `specreview_feedback` | `{doc, peek?, include_drafts?}` |
-| `specreview_apply` | `{doc, thread_ids}` |
-| `specreview_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` |
-| `specreview_reply` | `{doc, thread_id, body, status?, at?, decision?}` |
-| `specreview_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` |
-| `specreview_revert` | `{doc, hunk?, lock?}` |
-| `specreview_reanchor` | `{doc, thread_id, lines?, quote?, file?}` |
-| `specreview_ask` | `{doc, body, quote? or lines?, file?}` |
-| `specreview_threads` | `{doc, status?}` |
-| `specreview_diff` | `{doc, from?, to?, format?: "stat" or "unified"}` |
-| `specreview_log`, `specreview_status` | `{doc?}` |
-| `specreview_show` | `{doc, thread_id?, version?, lines?, file?, side?}` |
-| `specreview_final` | `{doc, decisions?, out_dir?}` |
+| `suiko_open` | `{path, title?}` -> `{doc, version, url}` |
+| `suiko_snapshot` | `{url, title?}` -> `{doc, version, url, page}`: a public web page only |
+| `suiko_review` | `{mode?, base?, range?, commit?, paths?, title?}` -> a code review (modes as in Code reviews, without PR mode) |
+| `suiko_wait` | `{doc?, timeout_sec?}` (default 50, max 600) -> the packet, `{status:"waiting"}` (call again) or `{status:"closed"}` |
+| `suiko_feedback` | `{doc, peek?, include_drafts?}` |
+| `suiko_apply` | `{doc, thread_ids}` |
+| `suiko_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` |
+| `suiko_reply` | `{doc, thread_id, body, status?, at?, decision?}` |
+| `suiko_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` |
+| `suiko_revert` | `{doc, hunk?, lock?}` |
+| `suiko_reanchor` | `{doc, thread_id, lines?, quote?, file?}` |
+| `suiko_ask` | `{doc, body, quote? or lines?, file?}` |
+| `suiko_threads` | `{doc, status?}` |
+| `suiko_diff` | `{doc, from?, to?, format?: "stat" or "unified"}` |
+| `suiko_log`, `suiko_status` | `{doc?}` |
+| `suiko_show` | `{doc, thread_id?, version?, lines?, file?, side?}` |
+| `suiko_final` | `{doc, decisions?, out_dir?}` |
 
 ## Writing specs that review well
 
@@ -421,8 +421,8 @@ Reviewers comment on what they see; you receive the source lines behind it. Spec
 **HTML:**
 
 - Keep the reviewable text in static markup. Text built by scripts at runtime (client-side templating, `innerHTML`, data fetched at load) can only be anchored to the nearest static element, so feedback on it arrives as a wide block.
-- Make the file self-contained: inline CSS and JS, or local files next to the doc. No CDN scripts, remote fonts or remote images. SpecReview works offline and only versions local files.
-- Put mermaid in `<pre class="mermaid">…</pre>`. If the doc does not load mermaid itself, SpecReview injects its own copy.
+- Make the file self-contained: inline CSS and JS, or local files next to the doc. No CDN scripts, remote fonts or remote images. Suiko works offline and only versions local files.
+- Put mermaid in `<pre class="mermaid">…</pre>`. If the doc does not load mermaid itself, Suiko injects its own copy.
 - Use real `<h1>`-`<h6>` headings with `id`s, real `<table>`s with `<th>` header cells, and `<figure>`/`<figcaption>` for images.
 - Pretty-print the file (roughly one element per line). Do not minify it.
 - Interactive parts such as tabs and `<details>` are fine: a hidden target is revealed when its thread is focused.

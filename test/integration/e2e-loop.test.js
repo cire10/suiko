@@ -1,5 +1,5 @@
 // @ts-check
-// End-to-end agent loop with REAL processes (integration): every agent step is the real CLI (`bin/specreview.js`)
+// End-to-end agent loop with REAL processes (integration): every agent step is the real CLI (`bin/suiko.js`)
 // run as a subprocess, the reviewer side is the real daemon's HTTP API driven exactly as the UI drives it
 // (POST /anchors/resolve -> POST /drafts -> POST /reviews, with the UI's headers), and nothing is stubbed.
 //
@@ -9,7 +9,7 @@
 //   -> round 2 (reopen + resolutions + a decision) -> `edit --stdin` + revise (v3) -> approve with markFinal ->
 //   `final --decisions`.
 //   app-spec.html: round 1 (text, image region, table cell, script-generated text, suggestion) through v2.
-//   Also: `specreview mcp` (tools/list + a call), the hooks (output + timing), `install claude` as a dry run
+//   Also: `suiko mcp` (tools/list + a call), the hooks (output + timing), `install claude` as a dry run
 //   (HOME and CLAUDE_CONFIG_DIR point at a temp dir; nothing may be written), and `stop`.
 //
 // Isolation: temp workspace, temp SPECREVIEW_HOME and HOME, and a free UI/content port pair in 5850-5899
@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const BIN = path.join(ROOT, 'bin', 'specreview.js');
+const BIN = path.join(ROOT, 'bin', 'suiko.js');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures', 'docs');
 
 const BASE = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-e2e-loop-')));
@@ -159,7 +159,7 @@ async function run(args, opts = {}) {
  */
 async function ok(args, opts) {
   const r = await run(args, opts);
-  assert.equal(r.code, 0, `specreview ${args.join(' ')} exited ${r.code}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+  assert.equal(r.code, 0, `suiko ${args.join(' ')} exited ${r.code}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
   return r;
 }
 
@@ -241,7 +241,7 @@ function threadDraft(resolved, version, o) {
 }
 
 /**
- * Starts `specreview wait <doc>` in the background and resolves once its waiter is visible to the daemon (presence).
+ * Starts `suiko wait <doc>` in the background and resolves once its waiter is visible to the daemon (presence).
  * @param {ReturnType<typeof uiApi>} api
  * @param {string} docId
  */
@@ -375,10 +375,10 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     assert.match(out, new RegExp(`crop: ${path.join(WS, '.specreview', 'docs', 'kitchen-sink', 'attachments', 'a1.png').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     assert.match(out, /^\[t3\] question · L46 · .*row "refresh_token" x col "TTL" = "30 d"$/m);
     assert.match(out, /^ {2}src> \| refresh_token \| 30 d \| `token_store` \|$/m);
-    assert.match(out, /^\[t4\] nit · suggestion · L24 · .* apply verbatim: specreview apply kitchen-sink t4$/m);
+    assert.match(out, /^\[t4\] nit · suggestion · L24 · .* apply verbatim: suiko apply kitchen-sink t4$/m);
     assert.match(out, /^ {2}- Ship rotation behind a flag\.$/m);
     assert.match(out, /^ {2}\+ Ship rotation behind the `token_rotation` flag\.$/m);
-    assert.match(out, /NEXT: .*specreview revise kitchen-sink --replies -/);
+    assert.match(out, /NEXT: .*suiko revise kitchen-sink --replies -/);
     const st = await api.state();
     assert.ok(st.reviews[0].deliveredTo[AGENT], 'delivery recorded for the agent');
     assert.deepEqual(st.waiters, [], 'the waiter is gone after delivery');
@@ -508,7 +508,7 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     const res = await waitExit(w);
     assert.equal(res.code, 0, res.stderr);
     assert.match(res.stdout, /review rv3 on v3 · APPROVED/);
-    assert.match(res.stdout, /specreview final kitchen-sink/);
+    assert.match(res.stdout, /suiko final kitchen-sink/);
 
     const f = await ok(['final', 'kitchen-sink', '--decisions']);
     assert.match(f.stdout, /final: kitchen-sink = v3 \(approved in rv3 by .*; 3 versions, 3 reviews, 4 threads resolved, 1 decision\)/);
@@ -561,7 +561,7 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     assert.match(res.stdout, /^SPECREVIEW FEEDBACK · app-spec \(docs\/app-spec\.html\) · review rv1 on v1 · CHANGES REQUESTED$/m);
     assert.match(res.stdout, /5 threads need action \(5 new\)/);
     assert.match(res.stdout, /^ {2}src> {3}<p>Requests arrive through the API gateway and are processed in three stages\.<\/p>$/m);
-    assert.match(res.stdout, /^\[t5\] blocking · suggestion · L64 · .*apply verbatim: specreview apply app-spec t5$/m);
+    assert.match(res.stdout, /^\[t5\] blocking · suggestion · L64 · .*apply verbatim: suiko apply app-spec t5$/m);
     assert.match(res.stdout, /^\[t4\] comment · L96 · .*script-rendered text inside <ul id="generated">$/m);
     assert.match(res.stdout, /^ {2}src> {5}var stages = \['Validate cart', 'Price & tax', 'Authorize payment'\];$/m);
 
@@ -606,7 +606,7 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     });
     const deny = JSON.parse(pw.stdout).hookSpecificOutput;
     assert.equal(deny.permissionDecision, 'deny');
-    assert.match(deny.permissionDecisionReason, /docs\/kitchen-sink\.md is under SpecReview/);
+    assert.match(deny.permissionDecisionReason, /docs\/kitchen-sink\.md is under Suiko/);
     // outside a workspace: silent, exit 0
     const none = await ok(['hook', 'prompt'], { stdin: JSON.stringify({ prompt: 'x', cwd: USER_HOME }) });
     assert.equal(none.stdout, '');
@@ -625,14 +625,14 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     const reply = (/** @type {number} */ id) =>
       until(() => out.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((m) => m.id === id), `mcp reply ${id}`, 15000);
     send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } } });
-    assert.equal((await reply(1)).result.serverInfo.name, 'specreview');
+    assert.equal((await reply(1)).result.serverInfo.name, 'suiko');
     send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
     const names = (await reply(2)).result.tools.map((/** @type {any} */ t) => t.name);
-    for (const n of ['specreview_open', 'specreview_wait', 'specreview_feedback', 'specreview_apply', 'specreview_edit', 'specreview_revise', 'specreview_final']) {
+    for (const n of ['suiko_open', 'suiko_wait', 'suiko_feedback', 'suiko_apply', 'suiko_edit', 'suiko_revise', 'suiko_final']) {
       assert.ok(names.includes(n), `${n} is listed`);
     }
-    send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'specreview_threads', arguments: { doc: 'app-spec', status: 'all' } } });
+    send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'suiko_threads', arguments: { doc: 'app-spec', status: 'all' } } });
     const call = (await reply(3)).result;
     assert.notEqual(call.isError, true, JSON.stringify(call));
     assert.deepEqual(call.structuredContent.threads.map((/** @type {any} */ t) => t.id), ['t1', 't2', 't3', 't4', 't5']);
@@ -648,7 +648,7 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
     const claudeDir = path.join(USER_HOME, '.claude');
     assert.match(r.stdout, new RegExp(`would create ${claudeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/skills/spec-review/SKILL\\.md`));
     assert.match(r.stdout, /hook pre-write/);
-    assert.match(r.stdout, /claude mcp add --scope user specreview -- /);
+    assert.match(r.stdout, /claude mcp add --scope user suiko -- /);
     assert.match(r.stdout, /dry run: nothing written/);
     assert.equal(fs.existsSync(claudeDir), false, 'nothing was written');
     assert.deepEqual(fs.readdirSync(USER_HOME), []);

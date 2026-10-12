@@ -1,8 +1,8 @@
-<!-- Reviewer guide for the SpecReview web UI: layout, modes, commenting gestures, snipping (area snips, screen snips, `specreview snip` and a global macOS hotkey), submitting, verifying changes, locks, history, final, keyboard shortcuts, the command palette and settings. Describes the v1 UI (see docs/BUILD_AMENDMENTS.md section 1 for what is out of scope). -->
+<!-- Reviewer guide for the Suiko web UI: layout, modes, commenting gestures, snipping (area snips, screen snips, `suiko snip` and a global macOS hotkey), submitting, verifying changes, locks, history, final, keyboard shortcuts, the command palette and settings. Describes the v1 UI (see docs/BUILD_AMENDMENTS.md section 1 for what is out of scope). -->
 
-# SpecReview reviewer guide
+# Suiko reviewer guide
 
-SpecReview shows a spec exactly as written (scripts, SVG, images, tables, code, mermaid and math all work) and lets you comment on any part of it. Your agent receives each comment with the exact source lines behind it, makes targeted edits, and records a new version. You then see precisely what changed, accept or reopen each thread, and repeat until you approve a final version.
+Suiko shows a spec exactly as written (scripts, SVG, images, tables, code, mermaid and math all work) and lets you comment on any part of it. Your agent receives each comment with the exact source lines behind it, makes targeted edits, and records a new version. You then see precisely what changed, accept or reopen each thread, and repeat until you approve a final version.
 
 - [Opening a document](#opening-a-document)
 - [The screen](#the-screen)
@@ -28,12 +28,12 @@ SpecReview shows a spec exactly as written (scripts, SVG, images, tables, code, 
 
 ## Opening a document
 
-Your agent runs `specreview open <file>`, which opens the review UI in your default browser. If you prefer the Claude desktop app's built-in browser pane beside the chat, set `SPECREVIEW_BROWSER=pane` and the agent opens it there instead. If no browser can be opened (for example over SSH), open the printed URL in any modern browser on the same machine. You can also run `specreview open <file>` yourself.
+Your agent runs `suiko open <file>`, which opens the review UI in your default browser. If you prefer the Claude desktop app's built-in browser pane beside the chat, set `SPECREVIEW_BROWSER=pane` and the agent opens it there instead. If no browser can be opened (for example over SSH), open the printed URL in any modern browser on the same machine. You can also run `suiko open <file>` yourself.
 
 - The URL contains an access token (`?k=…`). It works only on this machine; don't share it.
 - The doc list (top-left) shows every tracked doc with its head version, open threads and whether an agent is listening.
-- If the local server restarts, the UI shows "Reconnecting to SpecReview…" and recovers on its own. Your drafts are saved on the server, so a reload loses nothing.
-- A web page can be reviewed too: `specreview snapshot <url>` fetches it once and opens a cleaned copy (no scripts; remote images blocked unless `--allow-remote-assets`). The doc list shows it as "web page · <host>". Running the command again records the next version when the page changed. See the README's "Snapshot a web page".
+- If the local server restarts, the UI shows "Reconnecting to Suiko…" and recovers on its own. Your drafts are saved on the server, so a reload loses nothing.
+- A web page can be reviewed too: `suiko snapshot <url>` fetches it once and opens a cleaned copy (no scripts; remote images blocked unless `--allow-remote-assets`). The doc list shows it as "web page · <host>". Running the command again records the next version when the page changed. See the README's "Snapshot a web page".
 
 ## The screen
 
@@ -86,14 +86,14 @@ A snip is a comment with a picture: "this, here". The agent gets the picture's f
 |---|---|---|---|
 | An area of the doc | `b`, or the scissors button | Any browser, any OS | The picture, the source lines of every block under the box, and a label |
 | Anything on your screen | `B` (Shift+B), or the screen-snip button | macOS | The screenshot, on your selection or as a general comment |
-| Anything, without the UI | `specreview snip`, or a global hotkey | macOS (or any OS with `--file`) | The screenshot as a draft comment, or sent at once with `--send` |
+| Anything, without the UI | `suiko snip`, or a global hotkey | macOS (or any OS with `--file`) | The screenshot as a draft comment, or sent at once with `--send` |
 | A region of one image | `e`, then shift-drag on the image | Any browser, any OS | The crop, the image's source and the region as percentages |
 
 ### Snip an area of the doc (`b`)
 
 Use it when the thing you mean is not a neat text selection: a figure together with its caption, the left half of a table, a diagram and the paragraph that contradicts it, a mockup in an HTML spec.
 
-1. Press `b`, or click the scissors button in the top bar. The cursor becomes a crosshair. This works whether focus is in the SpecReview UI or in the document.
+1. Press `b`, or click the scissors button in the top bar. The cursor becomes a crosshair. This works whether focus is in the Suiko UI or in the document.
 2. Drag a box over the area. It can cover anything: text, images, SVG, mermaid diagrams, tables, or a mix. Boxes smaller than a few pixels are ignored.
 3. When you let go, the composer opens with a thumbnail of the area. **Agent will see** shows the lines and the label the agent receives, such as `L60-64 §2 Request flow snip (figure + 2 paragraphs)`.
 4. Type your comment, then `Cmd+Enter` (**Add to review**) or `Cmd+Shift+Enter` (**Send now**). Text is optional: a comment with a picture can be added or sent without any.
@@ -111,18 +111,18 @@ Use it for things outside the document: the app the spec describes, a terminal w
 3. The composer opens with the screenshot attached. If you had text selected in the doc, the comment is anchored to it; otherwise it is a general comment on the whole doc. If a comment is already open in the composer, the screenshot is added to that comment instead.
 4. Type your comment and add it to the review, or send it now.
 
-SpecReview's local server takes the screenshot on your Mac with `screencapture`, so this needs macOS and the Screen Recording permission (see [below](#screen-recording-permission)). Large screenshots are scaled down to 2000 px on the longest side, and very large ones are stored as JPEG. Only one screen snip runs at a time, and an unused picker closes after two minutes.
+Suiko's local server takes the screenshot on your Mac with `screencapture`, so this needs macOS and the Screen Recording permission (see [below](#screen-recording-permission)). Large screenshots are scaled down to 2000 px on the longest side, and very large ones are stored as JPEG. Only one screen snip runs at a time, and an unused picker closes after two minutes.
 
 ### Snip from a terminal or a global hotkey
 
-`specreview snip` runs the same picker from any terminal and adds the screenshot to the doc as a **draft** comment. An open review UI shows it at once, with a toast "Screenshot added from your Mac" and an **Edit** button to add text before you submit.
+`suiko snip` runs the same picker from any terminal and adds the screenshot to the doc as a **draft** comment. An open review UI shows it at once, with a toast "Screenshot added from your Mac" and an **Edit** button to add text before you submit.
 
 ```bash
-specreview snip                                              # picker, then a draft on this workspace's doc
-specreview snip token-service -m "The header overlaps the logo"
-specreview snip --question -m "Should the empty state look like this?"
-specreview snip --send -m "This is the login page today"     # submitted to the agent right away
-specreview snip --file ~/Desktop/shot.png -m "From the design review"
+suiko snip                                              # picker, then a draft on this workspace's doc
+suiko snip token-service -m "The header overlaps the logo"
+suiko snip --question -m "Should the empty state look like this?"
+suiko snip --send -m "This is the login page today"     # submitted to the agent right away
+suiko snip --file ~/Desktop/shot.png -m "From the design review"
 ```
 
 | Option | Effect |
@@ -138,35 +138,35 @@ Pressing `Esc` in the picker cancels and adds nothing (exit code 0). Screen snip
 
 ### A global hotkey with the Shortcuts app
 
-The macOS Shortcuts app can bind `specreview snip` to a key that works in every app. Then snipping a bug in the running app and handing it to Claude is one keystroke and a drag.
+The macOS Shortcuts app can bind `suiko snip` to a key that works in every app. Then snipping a bug in the running app and handing it to Claude is one keystroke and a drag.
 
-1. **Find the paths of Node and SpecReview.** In a terminal:
+1. **Find the paths of Node and Suiko.** In a terminal:
 
    ```bash
    command -v node                        # e.g. /opt/homebrew/bin/node, or ~/.nvm/versions/node/v24.11.0/bin/node
-   realpath "$(command -v specreview)"    # e.g. /Users/you/src/specreview/bin/specreview.js
+   realpath "$(command -v suiko)"    # e.g. /Users/you/src/suiko/bin/suiko.js
    ```
 
-   If `specreview` is not on your `PATH`, the second path is `bin/specreview.js` inside your SpecReview checkout.
+   If `suiko` is not on your `PATH`, the second path is `bin/suiko.js` inside your Suiko checkout.
 2. **Allow scripts in Shortcuts.** Open the **Shortcuts** app, choose **Shortcuts > Settings > Advanced**, and turn on **Allow Running Scripts**.
 3. **Create the shortcut.** Choose **File > New Shortcut** (`Cmd+N`) and give it a name, such as "Snip to Claude".
 4. **Add a Run Shell Script action.** In the action list on the right, search for **Run Shell Script** and double-click it (or drag it into the shortcut).
 5. **Enter the command.** Leave **Shell** as `zsh` and **Input** as it is. Replace the sample text with the full form, built from the two paths and your project folder:
 
    ```bash
-   "/opt/homebrew/bin/node" "/Users/you/src/specreview/bin/specreview.js" snip --workspace "/Users/you/projects/my-app"
+   "/opt/homebrew/bin/node" "/Users/you/src/suiko/bin/suiko.js" snip --workspace "/Users/you/projects/my-app"
    ```
 
-   Shortcuts runs scripts with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), and the scripts do not start in your project, which is why the command names Node, SpecReview and the workspace explicitly. The full form works with nvm, asdf and Volta. With nvm, update the Node path when you change Node versions.
+   Shortcuts runs scripts with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), and the scripts do not start in your project, which is why the command names Node, Suiko and the workspace explicitly. The full form works with nvm, asdf and Volta. With nvm, update the Node path when you change Node versions.
 
-   If `npm link` put `specreview` next to a system-wide Node (Homebrew's, or the nodejs.org installer's in `/usr/local/bin`), the short form works too:
+   If `npm link` put `suiko` next to a system-wide Node (Homebrew's, or the nodejs.org installer's in `/usr/local/bin`), the short form works too:
 
    ```bash
    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-   specreview snip --workspace ~/projects/my-app
+   suiko snip --workspace ~/projects/my-app
    ```
 
-   Variations: add `--send` to send every snip to the agent at once instead of making a draft; add `--question` for a question. If the workspace tracks several docs, the snip goes to the most recently active one; to pin it to one doc, give the spec's file path instead of `--workspace`, for example `specreview snip ~/projects/my-app/docs/specs/token-service.md`.
+   Variations: add `--send` to send every snip to the agent at once instead of making a draft; add `--question` for a question. If the workspace tracks several docs, the snip goes to the most recently active one; to pin it to one doc, give the spec's file path instead of `--workspace`, for example `suiko snip ~/projects/my-app/docs/specs/token-service.md`.
 6. **Assign the keyboard shortcut.** Click the **Shortcut Details** button (ⓘ) in the right sidebar, then **Add Keyboard Shortcut**, and press the combination you want, for example `Ctrl+Option+Cmd+S`. Pick one that no app uses.
 7. **Try it.** Press your hotkey (or click Run, ▶, in the shortcut's window). The crosshair appears; drag a box. The draft shows up in the review UI with a toast. If Shortcuts asks whether the shortcut may run a script, allow it. The first run also asks for the Screen Recording permission.
 
@@ -178,11 +178,11 @@ macOS only lets an app capture other apps' windows after you allow it. The permi
 
 | You snip with | Allow |
 |---|---|
-| `B` or the screen-snip button in the UI | The app that started the SpecReview server: usually your terminal (Terminal, iTerm2), your editor, or Claude |
-| `specreview snip` in a terminal | That terminal app |
+| `B` or the screen-snip button in the UI | The app that started the Suiko server: usually your terminal (Terminal, iTerm2), your editor, or Claude |
+| `suiko snip` in a terminal | That terminal app |
 | A Shortcuts hotkey | **Shortcuts** (or the app macOS names in its prompt) |
 
-macOS asks on first use. To allow it later: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For `B`, also run `specreview stop` and open the doc again, so the server restarts under the reopened app. A screenshot that shows only the desktop wallpaper or empty windows means the permission is missing.
+macOS asks on first use. To allow it later: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For `B`, also run `suiko stop` and open the doc again, so the server restarts under the reopened app. A screenshot that shows only the desktop wallpaper or empty windows means the permission is missing.
 
 ## The composer
 
@@ -205,7 +205,7 @@ Press `s` on a selection to propose replacement text.
 - **Source mode** (when the selection spans markup): a monospace editor prefilled with the full source lines. Edit them directly.
 - A live word diff shows your change, and an optional rendered preview shows how it will look.
 
-The agent applies suggestions verbatim with `specreview apply`. You can also apply one yourself with **Apply now** on its card when the file on disk has no unrecorded changes; that records a new version authored by you.
+The agent applies suggestions verbatim with `suiko apply`. You can also apply one yourself with **Apply now** on its card when the file on disk has no unrecorded changes; that records a new version authored by you.
 
 ## Submitting a review
 
@@ -218,11 +218,11 @@ Click **Submit review** (`f`, or `Cmd+Shift+Enter` while you are not writing a c
 
 With **Approve**, two options appear, both on by default: **Mark vN final** and **Resolve N addressed threads**. The dialog warns you if blocking threads are still open.
 
-If no agent is listening, the dialog says so and offers **Copy prompt**, which copies an instruction such as "Run `specreview feedback token-service` and address it." Paste it into your agent's chat.
+If no agent is listening, the dialog says so and offers **Copy prompt**, which copies an instruction such as "Run `suiko feedback token-service` and address it." Paste it into your agent's chat.
 
 After you submit, a status chip moves through **Submitted**, **Delivered to claude 14:02**, **revising…** and **v3 ready**.
 
-For one urgent point, you do not need a whole review: **Send now** (`Cmd+Shift+Enter` in the comment box) sends just that comment, and `specreview snip --send` does the same for a screenshot.
+For one urgent point, you do not need a whole review: **Send now** (`Cmd+Shift+Enter` in the comment box) sends just that comment, and `suiko snip --send` does the same for a screenshot.
 
 ## While the agent works
 
@@ -230,7 +230,7 @@ The presence chip shows what the agent is doing:
 
 | Chip | Meaning |
 |---|---|
-| claude is listening (green) | A `specreview wait` is running; your next submit is delivered at once |
+| claude is listening (green) | A `suiko wait` is running; your next submit is delivered at once |
 | claude is revising… (amber) | Your review was delivered and the agent is working on it |
 | claude is editing (unrecorded) | The file on disk has changed but no version is recorded yet |
 | No agent listening (grey) | Nothing is waiting; use **Copy prompt** after submitting, or tell the agent "done" |
@@ -281,12 +281,12 @@ Accepting takes effect immediately. Reopens, replies and new comments wait in yo
 Select text (or use the **⋯** menu of a heading in the outline) and choose **Mark agreed** (`a`). Once you confirm, this creates a lock (`L1`) immediately; it does not wait for Submit. Locked regions show a bracket in the margin and `[L]` in the outline.
 
 - The agent sees every lock as `LOCKED (agreed - do not modify)` in its feedback.
-- `specreview revise` **refuses** any version that changes locked text. The agent can only override that with an explicit reason (`--break-lock`), which shows a red "lock broken" badge on the version and deactivates the lock until you re-lock it with **Relock** (offered in the message that appears when you click the lock bracket).
+- `suiko revise` **refuses** any version that changes locked text. The agent can only override that with an explicit reason (`--break-lock`), which shows a red "lock broken" badge on the version and deactivates the lock until you re-lock it with **Relock** (offered in the message that appears when you click the lock bracket).
 - **Unlock** removes a lock when you want the agent to change that part again.
 
 ## Decisions
 
-When you accept a thread you can record a one-line decision, such as "30 s reuse-detection grace window". Decisions are listed in every packet as `DECISIONS to keep true`, and the agent gets a warning if it changes their text. When the doc is final, `specreview final <doc> --decisions` writes a decision log next to the spec.
+When you accept a thread you can record a one-line decision, such as "30 s reuse-detection grace window". Decisions are listed in every packet as `DECISIONS to keep true`, and the agent gets a warning if it changes their text. When the doc is final, `suiko final <doc> --decisions` writes a decision log next to the spec.
 
 ## History and versions
 
@@ -300,7 +300,7 @@ The version picker and `[` / `]` (outside pick mode) move between versions. Ever
 
 ## Approving and the final version
 
-Submit with **Approve** and keep **Mark vN final** checked. The doc shows a **FINAL vN** badge. If the agent records a later version, the badge stays on vN and the UI notes that newer unapproved changes exist. The agent then runs `specreview final <doc> --decisions`, which checks the file on disk matches the final version and writes the decision log.
+Submit with **Approve** and keep **Mark vN final** checked. The doc shows a **FINAL vN** badge. If the agent records a later version, the badge stays on vN and the UI notes that newer unapproved changes exist. The agent then runs `suiko final <doc> --decisions`, which checks the file on disk matches the final version and writes the decision log.
 
 ## Keyboard shortcuts
 
@@ -335,13 +335,13 @@ Press `Cmd+/` (or `?`) in the UI for this list. Buttons show their key when you 
 | | `\` | Toggle the thread sidebar or drawer |
 | | `t` | Cycle theme (light, dark, system) |
 
-`Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere: in the SpecReview UI, in the document, and while you type a comment or reply (your draft is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` do the same, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves.
+`Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere: in the Suiko UI, in the document, and while you type a comment or reply (your draft is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` do the same, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves.
 
-Navigation keys, `b` and `Cmd+Shift+Enter` work while the document has focus too, as long as you are not typing in one of its fields. Keys that change state act only when focus is in the SpecReview UI: `x`, `o` and `y` do nothing while focus is inside the document (click the thread panel first), and `a` on a document selection asks you to confirm before it locks anything. This keeps scripts in a reviewed document from triggering actions on your behalf.
+Navigation keys, `b` and `Cmd+Shift+Enter` work while the document has focus too, as long as you are not typing in one of its fields. Keys that change state act only when focus is in the Suiko UI: `x`, `o` and `y` do nothing while focus is inside the document (click the thread panel first), and `a` on a document selection asks you to confirm before it locks anything. This keeps scripts in a reviewed document from triggering actions on your behalf.
 
 ## Command palette
 
-Press `Cmd+K` (or click **Commands** in the top bar) to search everything SpecReview can do by name, so you do not need to remember a key. Type a few letters (for example "verify" or "compare") and press `Enter` to run the highlighted command; `Up` / `Down` move through the list. `Esc` or `Cmd+K` closes it. With nothing typed, it starts with the commands you ran last.
+Press `Cmd+K` (or click **Commands** in the top bar) to search everything Suiko can do by name, so you do not need to remember a key. Type a few letters (for example "verify" or "compare") and press `Enter` to run the highlighted command; `Up` / `Down` move through the list. `Esc` or `Cmd+K` closes it. With nothing typed, it starts with the commands you ran last.
 
 A command that cannot run right now is dimmed and says why (for example "select text in the doc first"). Commands that end in "…" open a short list of their own: type to narrow it, and press `Backspace` in the empty field to go back. A thread id such as `t4`, a version such as `v2` or the words of a heading also work straight from the top-level search.
 
@@ -362,7 +362,7 @@ The palette lists every action that has a key, plus these, which have none:
 | **Toggle the outline rail** | Show or hide the outline and history beside the document |
 | **Reload the document** | Render the version shown again |
 | **Open the document list / Open another document** | The list of tracked docs, or switch straight to another one |
-| **Close the review session** | Asks first, then ends the session like `specreview close`; a waiting agent stops waiting |
+| **Close the review session** | Asks first, then ends the session like `suiko close`; a waiting agent stops waiting |
 | **Theme: System / Light / Dark** | Pick a theme directly |
 | **Toggle single-letter shortcuts** | Turn them on or off (see [Settings](#settings)) |
 
@@ -379,7 +379,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 | **When the agent records a new version** | Show a toast, Switch to Changes | A toast with **Review changes** and **Verify**, or go straight to Changes mode against your last review. The UI never switches while you are writing a comment or reply, or while a dialog is open; you get the toast then |
 | **Ask before Send now** | On, Off | On: **Send now** (`Cmd+Shift+Enter` in the composer, or its button) asks you to confirm in the composer first; press it again to send, or `Esc` to go back |
 | **Default verdict** | Comment, Request changes | The verdict **Submit review** starts on when nothing in the review is blocking (a blocking comment always starts it on **Request changes**). You can still change it there, including to **Approve** |
-| **About** | | The SpecReview version, the workspace and spec path, the ports in use, and the "tell the agent" prompt to copy |
+| **About** | | The Suiko version, the workspace and spec path, the ports in use, and the "tell the agent" prompt to copy |
 
 ## Theme, accessibility and clean reading
 
@@ -398,8 +398,8 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 | A thread is **Outdated** | Its text was edited without being linked to it | Read "was / now" on the card; reply, resolve, or **Move here** |
 | A thread is **Orphaned** | Its text is gone | Use the orphan tray: **Move here**, **Keep as general** or **Resolve** |
 | "No agent listening" after you submit | The agent's wait is not running | Click **Copy prompt** and paste it into the agent's chat, or tell it "done" |
-| "Reconnecting to SpecReview…" | The local server restarted or is starting | Wait a few seconds; run `specreview doctor` if it persists |
-| A screen snip shows only the wallpaper or empty windows | macOS has not allowed the capturing app to record the screen | Allow it under [Screen Recording permission](#screen-recording-permission), quit and reopen the app, then `specreview stop` and reopen the doc |
-| `B` or `specreview snip` reports that screen snips are unsupported | Screen snips use macOS's `screencapture`, which this machine does not have | Use `b` to snip inside the doc, paste an image into the composer, or `specreview snip --file <png>` |
+| "Reconnecting to Suiko…" | The local server restarted or is starting | Wait a few seconds; run `suiko doctor` if it persists |
+| A screen snip shows only the wallpaper or empty windows | macOS has not allowed the capturing app to record the screen | Allow it under [Screen Recording permission](#screen-recording-permission), quit and reopen the app, then `suiko stop` and reopen the doc |
+| `B` or `suiko snip` reports that screen snips are unsupported | Screen snips use macOS's `screencapture`, which this machine does not have | Use `b` to snip inside the doc, paste an image into the composer, or `suiko snip --file <png>` |
 | An area snip has no thumbnail | The browser could not draw that area (an image from another site, a video, a cross-origin frame) | The comment still carries the source lines. Use `B` to attach a real screenshot |
 | The Shortcuts hotkey does nothing | Scripts are not allowed, or the command cannot find Node | Turn on **Allow Running Scripts** in Shortcuts settings, use the full form with absolute paths, and run the shortcut from its window to see the error |

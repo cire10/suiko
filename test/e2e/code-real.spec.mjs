@@ -1,15 +1,15 @@
 // @ts-check
 // The whole code-review loop against the REAL daemon, engine and CLI (test/e2e/real-daemon.mjs
 // startRealCodeDaemon): a scripted repository (the design 4.10 example, test/helpers/git-repo.js designRepo), then
-//   `specreview review --json`          the agent opens the review; the URL is the in-process daemon's
+//   `suiko review --json`          the agent opens the review; the URL is the in-process daemon's
 //   the UI                              the reviewer comments on new-side lines, suggests a line (prefilled from
 //                                       the working file), asks about removed lines (old side), comments on a
 //                                       binary file, and submits
-//   `specreview wait <doc>`             (started before the submit, as the agent runs it in the background) prints
+//   `suiko wait <doc>`             (started before the submit, as the agent runs it in the background) prints
 //                                       the packet: repo-relative path:L.. items, src> lines, was> lines, apply
-//   `specreview apply <doc> t2`         the suggestion lands in the real file
+//   `suiko apply <doc> t2`         the suggestion lands in the real file
 //   an Edit with the src> lines         the UI shows "Files changed since v1" (the working-tree poller)
-//   `specreview revise --replies -`     records round v2
+//   `suiko revise --replies -`     records round v2
 //   the UI                              v2 arrives live: Changes shows the interdiff with thread chips, Verify
 //                                       (round results and the Threads tab) accepts and shows the thread's change,
 //                                       Files shows the review diff at v2
@@ -124,13 +124,13 @@ test('review -> UI comments and submit -> wait prints the packet -> apply + edit
   expect(packet).toContain(`Repo root: ${repo.root} (paths below are relative to it)`);
   expect(packet).toContain('[t1] blocking · comment · src/auth/refresh.js:L41-44');
   expect(packet).toContain('  src> if (stored.used) {\n  src>   await revokeFamily(stored.family);\n  src>   throw new TokenReuseError();\n  src> }');
-  expect(packet).toContain(`[t2] suggestion · src/auth/refresh.js:L88 · apply verbatim: specreview apply ${DOC} t2`);
+  expect(packet).toContain(`[t2] suggestion · src/auth/refresh.js:L88 · apply verbatim: suiko apply ${DOC} t2`);
   expect(packet).toContain('  - const ttlSec = 30 * 24 * 3600;\n  + const ttlSec = config.refreshTtlSec;');
   expect(packet).toMatch(/\[t3\] question · src\/auth\/store\.js \(old side\) base L12-14, now between L11-12/);
   expect(packet).toContain('  was> export function legacyLookup(id) {');
   expect(packet).toContain('[t4] comment · assets/logo.png (whole file)');
   expect(packet).toContain('Eric: Two tabs refreshing at once');
-  expect(packet).toContain(`NEXT: edit the files -> specreview revise ${DOC} --replies - (records round v2 from your working tree) -> specreview wait ${DOC} (background)`);
+  expect(packet).toContain(`NEXT: edit the files -> suiko revise ${DOC} --replies - (records round v2 from your working tree) -> suiko wait ${DOC} (background)`);
 
   // ---- the agent applies the suggestion and edits with the src> lines
   const applied = await r.cli(['apply', DOC, 't2']);

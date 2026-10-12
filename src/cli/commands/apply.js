@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview apply <doc> <tid...> [--dry-run] [--json]` (design 9.4).
+// `suiko apply <doc> <tid...> [--dry-run] [--json]` (design 9.4).
 // Applies suggestion threads verbatim to the working copy and stages them as tagged edits (recorded by the next
 // `revise`). Prints one line per thread:
 //   applied t3 at L120 (exact) · staged (not recorded yet)
@@ -73,7 +73,7 @@ function fallbackText(applied, conflicts, dryRun, docId) {
     lines.push(`conflict ${c.id}: ${c.reason ?? 'expected text not found'}; treat as a normal comment`);
   }
   if (applied.length && !dryRun) {
-    lines.push(`the file changed on disk: re-read ${docId} before editing it again; record with \`specreview revise ${docId} --replies -\``);
+    lines.push(`the file changed on disk: re-read ${docId} before editing it again; record with \`suiko revise ${docId} --replies -\``);
   }
   return lines.join('\n');
 }

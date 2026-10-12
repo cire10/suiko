@@ -66,7 +66,7 @@ export async function msgsOf(page, type, from = 0) {
 
 /** @param {Frame} frame */
 export async function inspect(frame) {
-  return frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.inspect());
+  return frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.inspect());
 }
 
 /** Waits for two animation frames plus a short pause inside the doc. @param {Frame} frame @param {number} [ms] */

@@ -1,6 +1,6 @@
 // @ts-check
 // zod schemas for agent-supplied JSON: the `revise` input (design 9.5 ReviseInput; `--replies <file|->` and the
-// MCP specreview_revise tool) and the `edit --stdin` batch (amendments 5). Unknown keys are rejected so a typo
+// MCP suiko_revise tool) and the `edit --stdin` batch (amendments 5). Unknown keys are rejected so a typo
 // ("replies" instead of "threads") fails loudly instead of silently dropping the agent's replies.
 
 import * as z from 'zod/v4';

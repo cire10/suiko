@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha> | --pr <n|url>]
+// `suiko review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha> | --pr <n|url>]
 //  [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane|system|none] [--workspace <dir>]
 //  [--json]` (design 4.2, 4.18): opens a code review of the agent's changes (doc kind 'code') and returns at once with
 // the review URL and the background `wait` command.
@@ -72,13 +72,13 @@ export const spec = {
     '--pr <n|url>: a GitHub PR, through gh (signed in). Checked out (gh pr checkout): its merge-base .. your working tree;',
     '  otherwise its head, fetched once from the remote of its repository (line numbers are the PR head; check it out to',
     '  edit). The only review that uses the network (refused when SPECREVIEW_OFFLINE=1); run it again for new PR commits.',
-    'Then run the printed `specreview wait` in the background; after editing the files, `specreview revise <doc> --replies -`.',
+    'Then run the printed `suiko wait` in the background; after editing the files, `suiko revise <doc> --replies -`.',
     '--browser system (default) | pane | none, as for open; $SPECREVIEW_BROWSER changes the default.',
   ],
 };
 
 /**
- * The normalised input of `review` (and of MCP specreview_review): what src/core/code/review.js openCodeReview takes.
+ * The normalised input of `review` (and of MCP suiko_review): what src/core/code/review.js openCodeReview takes.
  * `mode` is omitted for the default (since-base, else uncommitted: decided by the engine).
  * @typedef {object} ReviewInput
  * @property {'since-base' | 'uncommitted' | 'staged' | 'branch' | 'range' | 'commit'} [mode]
@@ -120,7 +120,7 @@ export async function parse({ values, positionals }, rt) {
 }
 
 /**
- * Flags (CLI) or an explicit mode with its fields (MCP specreview_review) -> ReviewInput. A mode's own field is
+ * Flags (CLI) or an explicit mode with its fields (MCP suiko_review) -> ReviewInput. A mode's own field is
  * required (range: range, commit: commit, branch: base) and fields of other modes are refused.
  * @param {{ range?: string, uncommitted?: boolean, staged?: boolean, base?: string, committed?: boolean, commit?: string,
  *   paths?: string[], context?: string | number, maxFiles?: string | number, mode?: string }} o
@@ -221,7 +221,7 @@ export async function execute(rt, input) {
   const st = codeStats(code.files);
   const label = specLabel(doc.code, code);
   const what = res.created ? `v${v}` : res.recorded ? `recorded round v${v}` : `unchanged since v${v}`;
-  const lines = [`specreview: code review ${doc.id} ${what} · ${label}`];
+  const lines = [`suiko: code review ${doc.id} ${what} · ${label}`];
   const skipped = code.skipped.length ? ` · skipped: ${skippedText(code.skipped)}` : '';
   lines.push(`  ${st.files} file${st.files === 1 ? '' : 's'} · +${st.added} -${st.removed}${skipped}`);
   const pr = engineInput.pr;
@@ -230,10 +230,10 @@ export async function execute(rt, input) {
     if (code.newSide !== 'worktree') lines.push(`  PR #${pr.number} is not checked out here: line numbers are its head ${String(code.newSha ?? '').slice(0, 7)}; run \`gh pr checkout ${pr.number}\` before editing`);
   }
   lines.push(url ? `  review UI: ${url}` : `  review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
-  lines.push(`next: ${shownPrefix(shown)}run \`specreview wait ${ref}\` in the background`);
-  if (storeCreated) lines.push(`created ${path.join(ws.root, '.specreview')}/ (the SpecReview store; reviews never include it)`);
+  lines.push(`next: ${shownPrefix(shown)}run \`suiko wait ${ref}\` in the background`);
+  if (storeCreated) lines.push(`created ${path.join(ws.root, '.specreview')}/ (the Suiko store; reviews never include it)`);
   if (daemonError) {
-    stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the review is recorded; run \`specreview doctor\`)`);
+    stderr.push(`suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the review is recorded; run \`suiko doctor\`)`);
   }
   const spec = /** @type {any} */ (doc.code ?? {});
   const json = {

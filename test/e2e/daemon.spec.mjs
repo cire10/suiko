@@ -122,7 +122,7 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   await expect(page.getByTestId(TESTID.presence)).toHaveText(/claude is editing \(unrecorded\)/);
   r.write('docs/img/arch.png', /** @type {any} */ (REDRAWN_PNG));
 
-  // 6. `specreview revise`: v2 answers rv1.
+  // 6. `suiko revise`: v2 answers rv1.
   const res = await r.revise('kitchen-sink', {
     summary: 'Grace window and a redrawn diagram',
     threads: {

@@ -169,7 +169,7 @@ async function recordRound(ctx, doc, { author, capturedBy, replies, other, summa
     if (agentRevise && Object.values(replies).some((r) => r.status === 'addressed')) {
       const step = await missingStep(ctx, spec, H);
       if (step) {
-        throw new RefusedError(`v${head.v} of ${doc.id} records ${step.records}, and that is unchanged while your working tree has changes: ${step.fix}, then run specreview revise ${ref} again`, {
+        throw new RefusedError(`v${head.v} of ${doc.id} records ${step.records}, and that is unchanged while your working tree has changes: ${step.fix}, then run suiko revise ${ref} again`, {
           details: { doc: doc.id, mode: spec.mode },
         });
       }
@@ -178,7 +178,7 @@ async function recordRound(ctx, doc, { author, capturedBy, replies, other, summa
     const unstaged = agentRevise && !dryRun && H.newSide === 'worktree' ? await dropStalePending(ctx, doc) : [];
     if (!replyList.length) {
       const r = { ...base, nothing: true };
-      r.text = `specreview: nothing to record (the round matches v${head.v}, no replies)\n`;
+      r.text = `suiko: nothing to record (the round matches v${head.v}, no replies)\n`;
       return r;
     }
     if (!dryRun) {
@@ -191,9 +191,9 @@ async function recordRound(ctx, doc, { author, capturedBy, replies, other, summa
       await emit(ctx, doc.id, SSE.THREAD_UPDATED, { threads: Object.keys(replies), replies: true });
     }
     const r = { ...base, repliesOnly: true, notified: !dryRun };
-    const lines = [`specreview: the round matches v${head.v}; ${dryRun ? 'would post' : 'posted'} ${replyList.length} ${replyList.length === 1 ? 'reply' : 'replies'} (no new version)`];
+    const lines = [`suiko: the round matches v${head.v}; ${dryRun ? 'would post' : 'posted'} ${replyList.length} ${replyList.length === 1 ? 'reply' : 'replies'} (no new version)`];
     for (const rep of replyList) lines.push(`  ${rep.thread} ${rep.status}`);
-    lines.push(dryRun ? 'dry run: nothing posted' : `next: run \`specreview wait ${ref}\` in the background`);
+    lines.push(dryRun ? 'dry run: nothing posted' : `next: run \`suiko wait ${ref}\` in the background`);
     r.text = `${lines.join('\n')}\n`;
     return r;
   }
@@ -677,7 +677,7 @@ function roundText(r, { H, N, filesChanged, baseLabel }) {
   const plural = (/** @type {number} */ n, /** @type {string} */ one, /** @type {string} */ many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   const what = `round ${r.version}: ${plural(filesChanged, 'file')} changed, +${r.stats.added} -${r.stats.removed}, ${plural(r.stats.hunks, 'hunk')}`;
   const responds = r.respondsTo ? ` · responds to ${r.respondsTo}` : '';
-  out.push(r.dryRun ? `specreview: dry run - would record v${r.version} for ${r.doc} (${what})${responds}; nothing recorded` : `specreview: recorded v${r.version} for ${r.doc} (${what})${responds}`);
+  out.push(r.dryRun ? `suiko: dry run - would record v${r.version} for ${r.doc} (${what})${responds}; nothing recorded` : `suiko: recorded v${r.version} for ${r.doc} (${what})${responds}`);
   const status = new Map(r.replies.map((/** @type {any} */ x) => [x.thread, x.status]));
   const rows = r.hunks.map((/** @type {any} */ h) => {
     const where = h.newRange ? `L${h.newRange[0]}${h.newRange[1] !== h.newRange[0] ? `-${h.newRange[1]}` : ''}` : `del L${h.oldRange?.[0] ?? '?'}${h.oldRange && h.oldRange[1] !== h.oldRange[0] ? `-${h.oldRange[1]}` : ''}`;
@@ -710,7 +710,7 @@ function roundText(r, { H, N, filesChanged, baseLabel }) {
   const skipped = N.skipped?.length ? ` · skipped: ${skippedText(N.skipped)}` : '';
   out.push(`base: ${baseLabel} (${moved}) · files in review: ${N.files.length}${delta ? ` (${delta > 0 ? '+' : ''}${delta})` : ''}${skipped}`);
   if (r.git?.commit) out.push(`git: committed ${String(r.git.commit).slice(0, 12)}`);
-  if (!r.dryRun) out.push(`reviewer notified. next: run \`specreview wait ${r.ref}\` in the background`);
+  if (!r.dryRun) out.push(`reviewer notified. next: run \`suiko wait ${r.ref}\` in the background`);
   return `${out.join('\n')}\n`;
 }
 

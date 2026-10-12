@@ -1,6 +1,6 @@
 // @ts-check
-// WP4 Claude Code hook tests: `specreview hook pre-write` and `specreview hook prompt` run as real processes
-// (bin/specreview.js) against a store written by the real WP1 Store: the fast path without .specreview, the deny
+// WP4 Claude Code hook tests: `suiko hook pre-write` and `suiko hook prompt` run as real processes
+// (bin/suiko.js) against a store written by the real WP1 Store: the fast path without .specreview, the deny
 // JSON for a whole-file Write, warn/off modes, the prompt-injection text for undelivered and unacknowledged
 // reviews, live waiters, garbage stdin (never throws, always exit 0) and cold-start timing.
 
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-hooks-'));
 process.env.SPECREVIEW_HOME = HOME;
-const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/specreview.js');
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/suiko.js');
 
 const { makeWorkspace, SPEC_MD, tempDir } = await import('./helpers/cli-harness.js');
 const { changedLineRatio, runHook } = await import('../../src/cli/hooks.js');
@@ -116,9 +116,9 @@ describe('hook pre-write', () => {
     assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
     assert.equal(
       out.hookSpecificOutput.permissionDecisionReason,
-      'docs/specs/token-service.md is under SpecReview (v1, 1 open thread, L1 locked); this Write would replace 100% of its lines. ' +
-        'Use Edit for targeted changes (or specreview apply/edit). If the user explicitly asked for a full rewrite, use ' +
-        '`specreview revise --allow-rewrite` after writing with Edit.',
+      'docs/specs/token-service.md is under Suiko (v1, 1 open thread, L1 locked); this Write would replace 100% of its lines. ' +
+        'Use Edit for targeted changes (or suiko apply/edit). If the user explicitly asked for a full rewrite, use ' +
+        '`suiko revise --allow-rewrite` after writing with Edit.',
     );
   });
 
@@ -178,7 +178,7 @@ describe('hook prompt', () => {
     assert.equal(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
     assert.match(
       out.hookSpecificOutput.additionalContext,
-      /^specreview: review rv1 on token-service \(2 threads, CHANGES REQUESTED\) was submitted at \d\d:\d\d and not delivered\. Run `specreview feedback token-service` and address it per the spec-review skill\.$/,
+      /^suiko: review rv1 on token-service \(2 threads, CHANGES REQUESTED\) was submitted at \d\d:\d\d and not delivered\. Run `suiko feedback token-service` and address it per the spec-review skill\.$/,
     );
   });
 
@@ -193,7 +193,7 @@ describe('hook prompt', () => {
     assert.match(hook('prompt', payload()).stdout, /not delivered/);
   });
 
-  test('a doc of a kind this version does not know (a newer SpecReview made it) is ignored, not taken for a file', () => {
+  test('a doc of a kind this version does not know (a newer Suiko made it) is ignored, not taken for a file', () => {
     const file = path.join(ws.root, '.specreview', 'docs', 'token-service', 'doc.json');
     const text = fs.readFileSync(file, 'utf8');
     try {
@@ -211,7 +211,7 @@ describe('hook prompt', () => {
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     await ws.store.saveReview('token-service', review({ deliveredTo: { claude: old } }));
     const out = JSON.parse(hook('prompt', payload()).stdout);
-    assert.match(out.hookSpecificOutput.additionalContext, /^specreview: review rv1 on token-service \(2 threads, CHANGES REQUESTED\) was delivered to claude at \d\d:\d\d but not acted on yet\./);
+    assert.match(out.hookSpecificOutput.additionalContext, /^suiko: review rv1 on token-service \(2 threads, CHANGES REQUESTED\) was delivered to claude at \d\d:\d\d but not acted on yet\./);
     await ws.store.saveReview('token-service', review({ deliveredTo: { claude: old }, ackedBy: { claude: old } }));
     assert.equal(hook('prompt', payload()).stdout, '');
     await ws.store.saveReview('token-service', review());
@@ -264,11 +264,11 @@ describe('hook prompt', () => {
       };
       assert.equal(
         ctx(),
-        `specreview: review rv1 on plan (1 thread, CHANGES REQUESTED) was submitted at ${ctx().match(/at (\d\d:\d\d)/)?.[1]} and not delivered. ` +
-          "Run `specreview feedback plan --workspace 'notes/team'\\''s specs'` and address it per the spec-review skill.",
+        `suiko: review rv1 on plan (1 thread, CHANGES REQUESTED) was submitted at ${ctx().match(/at (\d\d:\d\d)/)?.[1]} and not delivered. ` +
+          "Run `suiko feedback plan --workspace 'notes/team'\\''s specs'` and address it per the spec-review skill.",
       );
       // from a folder in between, the flag is relative to that folder
-      assert.match(JSON.parse(hook('prompt', payloadFor(path.join(proj, 'notes'))).stdout).hookSpecificOutput.additionalContext, /`specreview feedback plan --workspace 'team'\\''s specs'`/);
+      assert.match(JSON.parse(hook('prompt', payloadFor(path.join(proj, 'notes'))).stdout).hookSpecificOutput.additionalContext, /`suiko feedback plan --workspace 'team'\\''s specs'`/);
       // a live wait on that workspace's doc silences it, as for the cwd's own workspace
       const w = await a.store.registerWaiter('plan', { agent: 'claude' });
       assert.equal(ctx(), '');
@@ -278,13 +278,13 @@ describe('hook prompt', () => {
       await sub('other/unregistered', false);
       const both = ctx().split('\n');
       assert.equal(both.length, 2);
-      assert.match(both[0], /`specreview feedback plan --workspace drafts`/);
-      assert.match(both[1], /`specreview feedback plan --workspace 'notes\/team'\\''s specs'`/);
+      assert.match(both[0], /`suiko feedback plan --workspace drafts`/);
+      assert.match(both[1], /`suiko feedback plan --workspace 'notes\/team'\\''s specs'`/);
       // a sibling project never sees them; inside a workspace only its own store counts
       const sibling = tempDir('nogit-sibling');
       assert.equal(hook('prompt', payloadFor(sibling)).stdout, '');
       fs.rmSync(sibling, { recursive: true, force: true });
-      assert.match(JSON.parse(hook('prompt', payloadFor(path.join(proj, 'drafts'))).stdout).hookSpecificOutput.additionalContext, /^specreview: review rv1 on plan .*`specreview feedback plan` and address it/);
+      assert.match(JSON.parse(hook('prompt', payloadFor(path.join(proj, 'drafts'))).stdout).hookSpecificOutput.additionalContext, /^suiko: review rv1 on plan .*`suiko feedback plan` and address it/);
     } finally {
       fs.rmSync(proj, { recursive: true, force: true });
     }
@@ -327,7 +327,7 @@ describe('hooks on untrusted committed store files', () => {
       const ctx = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
       assert.match(
         ctx,
-        /^specreview: review rv1 on token-service \(1 thread\) was submitted at \d\d:\d\d and not delivered\. Run `specreview feedback token-service` and address it per the spec-review skill\.$/,
+        /^suiko: review rv1 on token-service \(1 thread\) was submitted at \d\d:\d\d and not delivered\. Run `suiko feedback token-service` and address it per the spec-review skill\.$/,
       );
       assert.doesNotMatch(ctx, /IGNORE|PWNED|readme|notes/i);
 
@@ -336,7 +336,7 @@ describe('hooks on untrusted committed store files', () => {
         path.join(repo.store.reviewsDir('token-service'), 'rv1.json'),
         JSON.stringify(review({ id: 'something-else', verdict: 'approved' })),
       );
-      assert.match(JSON.parse(hook('prompt', payloadFor(repo.root)).stdout).hookSpecificOutput.additionalContext, /^specreview: review rv1 on token-service \(2 threads, APPROVED\)/);
+      assert.match(JSON.parse(hook('prompt', payloadFor(repo.root)).stdout).hookSpecificOutput.additionalContext, /^suiko: review rv1 on token-service \(2 threads, APPROVED\)/);
 
       // inherited properties are not verdicts or deliveries
       fs.writeFileSync(
@@ -344,7 +344,7 @@ describe('hooks on untrusted committed store files', () => {
         JSON.stringify(review({ verdict: 'constructor' })),
       );
       const ctx2 = JSON.parse(hook('prompt', payloadFor(repo.root), { SPECREVIEW_AGENT: 'constructor' }).stdout).hookSpecificOutput.additionalContext;
-      assert.match(ctx2, /^specreview: review rv1 on token-service \(2 threads\) was submitted at \d\d:\d\d and not delivered\./);
+      assert.match(ctx2, /^suiko: review rv1 on token-service \(2 threads\) was submitted at \d\d:\d\d and not delivered\./);
       assert.doesNotMatch(ctx2, /function|native code/);
     } finally {
       repo.cleanup();

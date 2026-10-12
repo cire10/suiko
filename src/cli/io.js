@@ -12,7 +12,7 @@
  * @property {number} exit process exit code (EXIT in src/shared/protocol.js)
  * @property {string} [text] human text for stdout (without trailing newline handling: printed as is + '\n')
  * @property {unknown} [json] structured form (printed with --json; MCP structuredContent)
- * @property {string[]} [stderr] extra 'specreview: ...' lines for stderr (warnings, waiting notes)
+ * @property {string[]} [stderr] extra 'suiko: ...' lines for stderr (warnings, waiting notes)
  * @property {boolean} [printed] true when the command already wrote its stdout output itself (wait/feedback)
  */
 

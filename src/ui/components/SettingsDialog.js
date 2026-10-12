@@ -6,7 +6,7 @@
 //   Keyboard    Single-letter shortcuts on / off (off: c, j, b, 1, ? ... do nothing, in the UI and in the doc).
 //   Behaviour   When the agent records a new version: toast / switch to Changes; Ask before Send now; the default
 //               verdict when nothing is blocking.
-//   About       SpecReview version, workspace root, spec path, the UI / content ports, and the "tell the agent"
+//   About       Suiko version, workspace root, spec path, the UI / content ports, and the "tell the agent"
 //               prompt to copy.
 
 import { html } from 'preact-htm';
@@ -119,7 +119,7 @@ export function SettingsDialog() {
       <section class="settings-section" aria-labelledby="sr-set-h-about" data-setting="about">
         <h3 id="sr-set-h-about">About</h3>
         <dl class="about">
-          <dt>SpecReview</dt><dd data-about="version">${s.about?.version ? `v${s.about.version}` : '…'}</dd>
+          <dt>Suiko</dt><dd data-about="version">${s.about?.version ? `v${s.about.version}` : '…'}</dd>
           ${s.onDoc ? html`
             <dt>Workspace</dt><dd class="mono" data-about="root">${s.root || '…'}</dd>
             <dt>Spec</dt><dd class="mono" data-about="path">${s.path}</dd>` : null}

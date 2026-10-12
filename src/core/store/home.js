@@ -1,5 +1,5 @@
 // @ts-check
-// The per-user SpecReview home (SPECREVIEW_HOME, default ~/.specreview): daemon info, the workspace registry and
+// The per-user Suiko home (SPECREVIEW_HOME, default ~/.specreview): daemon info, the workspace registry and
 // all volatile runtime state (BUILD_AMENDMENTS 2.1). Layout:
 //   <home>/daemon.json (0600)   {pid, uiPort, contentPort, token, secret, version, startedAt}
 //   <home>/workspaces.json      {schema:1, workspaces: {<wsId>: {root, addedAt}}}
@@ -21,7 +21,7 @@ const DAEMON_FILE = 'daemon.json';
 const WORKSPACES_FILE = 'workspaces.json';
 
 /**
- * Absolute path of the SpecReview home. Not created here (see ensureHome).
+ * Absolute path of the Suiko home. Not created here (see ensureHome).
  * @returns {string}
  */
 export function homeDir() {

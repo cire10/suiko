@@ -11,7 +11,7 @@
 // - Listeners: `onConnection(fn)` sees every state change, and `onReconnect(fn)` runs after recovery so the app can
 //   refetch its state and reopen the event stream.
 
-const TOKEN_KEY = 'specreview.token';
+const TOKEN_KEY = 'suiko.token';
 const REQUEST_TIMEOUT_MS = 30000;
 const HEALTH_TIMEOUT_MS = 3000;
 /** The daemon's picker gives up after 120 s; the request outlives it so the daemon's answer always arrives. */
@@ -143,7 +143,7 @@ export function waitForServer(reason = 'reconnecting') {
       try {
         fn();
       } catch (err) {
-        console.error('specreview: reconnect listener failed', err);
+        console.error('suiko: reconnect listener failed', err);
       }
     }
   })();
@@ -202,7 +202,7 @@ export async function request(method, path, body, opts = {}) {
         await wait;
         continue;
       }
-      throw new ApiError(0, 'Connection to SpecReview lost', null, true);
+      throw new ApiError(0, 'Connection to Suiko lost', null, true);
     }
     if (res.status === 401 || res.status === 502 || res.status === 503 || res.status === 504) {
       const wait = waitForServer(res.status === 401 ? 'unauthorized' : 'reconnecting');
@@ -210,7 +210,7 @@ export async function request(method, path, body, opts = {}) {
         await wait;
         continue;
       }
-      throw new ApiError(res.status, res.status === 401 ? 'Access token rejected' : 'SpecReview is unavailable', null, true);
+      throw new ApiError(res.status, res.status === 401 ? 'Access token rejected' : 'Suiko is unavailable', null, true);
     }
     const text = await res.text();
     /** @type {any} */

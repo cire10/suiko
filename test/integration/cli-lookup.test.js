@@ -2,7 +2,7 @@
 // Doc lookup when the agent does not run from the workspace root (src/cli/runtime.js openContext / docContext /
 // relatedWorkspaceRoots) and the `next:` hint of `open` (src/cli/commands/open.js docRef), against the real engine
 // and store. Without git, `.specreview/` lives next to the spec (e.g. docs/.specreview) while the agent runs
-// `specreview wait my-spec` from the project root:
+// `suiko wait my-spec` from the project root:
 //   - an id is found from the parent dir for wait / status / feedback / revise;
 //   - the same id in two related workspaces is a UsageError naming both;
 //   - unrelated registered workspaces (siblings, a prefix-sharing sibling) are never matched;
@@ -118,12 +118,12 @@ describe('lookup from a directory above the workspace root', () => {
   test('open from the parent dir prints the path relative to the cwd in the next: hint', async () => {
     const r = await cli(PROJ, ['open', 'docs/my-spec.md', '--browser', 'none']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^next: run `specreview wait docs\/my-spec\.md` in the background$/m, r.stdout);
+    assert.match(r.stdout, /^next: run `suiko wait docs\/my-spec\.md` in the background$/m, r.stdout);
     const j = await cli(PROJ, ['open', 'docs/my-spec.md', '--json']);
     assert.equal(JSON.parse(j.stdout).ref, 'docs/my-spec.md');
     // from the workspace root itself (and below it) the id is enough
     const fromRoot = await cli(DOCS, ['open', 'my-spec.md']);
-    assert.match(fromRoot.stdout, /^next: run `specreview wait my-spec` in the background$/m, fromRoot.stdout);
+    assert.match(fromRoot.stdout, /^next: run `suiko wait my-spec` in the background$/m, fromRoot.stdout);
   });
 
   test('relatedWorkspaceRoots matches through the symlinked tmp dir', async () => {
@@ -166,7 +166,7 @@ describe('lookup from a directory above the workspace root', () => {
   test('a timed-out wait <path> repeats the path in its retry hint', async () => {
     const t = await cli(PROJ, ['wait', 'docs/my-spec.md', '--timeout', '1s']);
     assert.equal(t.code, 2, t.stderr);
-    assert.match(t.stdout, /no review yet for my-spec after 1s\. Run `specreview wait docs\/my-spec\.md` again/, t.stdout);
+    assert.match(t.stdout, /no review yet for my-spec after 1s\. Run `suiko wait docs\/my-spec\.md` again/, t.stdout);
   });
 
   test('revise <id> records a version from the parent dir', async () => {
@@ -182,7 +182,7 @@ describe('lookup from a directory above the workspace root', () => {
     });
     const r = await cli(PROJ, ['revise', 'my-spec', '--replies', '-'], { input: replies });
     assert.equal(r.code, 0, `${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /^specreview: recorded v2 for my-spec /m, r.stdout);
+    assert.match(r.stdout, /^suiko: recorded v2 for my-spec /m, r.stdout);
     const log = await cli(PROJ, ['log', 'my-spec']);
     assert.match(log.stdout, /^v2 /m);
   });
@@ -235,7 +235,7 @@ describe('several related workspaces', () => {
 
   test('open hints the path for each doc (the id would be ambiguous from here)', async () => {
     const r = await cli(MULTI, ['open', 'a/spec.md', '--browser', 'none']);
-    assert.match(r.stdout, /^next: run `specreview wait a\/spec\.md` in the background$/m, r.stdout);
+    assert.match(r.stdout, /^next: run `suiko wait a\/spec\.md` in the background$/m, r.stdout);
   });
 });
 
@@ -259,7 +259,7 @@ describe('unrelated registered workspaces', () => {
       for (const argv of [['status', 'other-spec'], ['wait', 'other-spec', '--timeout', '1s'], ['feedback', 'other-spec'], ['revise', 'other-spec', '-m', 'x']]) {
         const r = await cli(cwd, argv);
         assert.equal(r.code, 4, `${argv.join(' ')} from ${cwd}: ${r.stderr}`);
-        assert.match(r.stderr, /no SpecReview workspace found/);
+        assert.match(r.stderr, /no Suiko workspace found/);
       }
       const w = await cli(cwd, ['wait', '--timeout', '1s']);
       assert.equal(w.code, 4, w.stderr);
@@ -278,7 +278,7 @@ describe('unrelated registered workspaces', () => {
   test('open from an unrelated dir hints the relative path, and that path works from there', async () => {
     const r = await cli(SIB, ['open', '../proj-other/docs/other-spec.md', '--browser', 'none']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^next: run `specreview wait \.\.\/proj-other\/docs\/other-spec\.md` in the background$/m, r.stdout);
+    assert.match(r.stdout, /^next: run `suiko wait \.\.\/proj-other\/docs\/other-spec\.md` in the background$/m, r.stdout);
     const s = await cli(SIB, ['status', '../proj-other/docs/other-spec.md']);
     assert.equal(s.code, 0, s.stderr);
     assert.match(s.stdout, /^other-spec /m);
@@ -296,7 +296,7 @@ describe('open hint with an explicit --workspace above a nearer store', () => {
     assert.equal(inner.code, 0, inner.stderr);
     const r = await cli(away, ['open', '../nest/inner/outer-doc.md', '--workspace', '../nest', '--browser', 'none']); // store at nest
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^next: run `specreview wait outer-doc --workspace \.\.\/nest` in the background$/m, r.stdout);
+    assert.match(r.stdout, /^next: run `suiko wait outer-doc --workspace \.\.\/nest` in the background$/m, r.stdout);
     const s = await cli(away, ['status', 'outer-doc', '--workspace', '../nest']);
     assert.equal(s.code, 0, s.stderr);
     assert.match(s.stdout, /^outer-doc /m);
@@ -309,7 +309,7 @@ describe('open hint quoting', () => {
     writeSpec(path.join(dir, 'my docs', "it's.md"));
     const r = await cli(dir, ['open', "my docs/it's.md", '--browser', 'none']);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^next: run `specreview wait 'my docs\/it'\\''s\.md'` in the background$/m, r.stdout);
+    assert.match(r.stdout, /^next: run `suiko wait 'my docs\/it'\\''s\.md'` in the background$/m, r.stdout);
     const s = await cli(dir, ['status', "my docs/it's.md"]);
     assert.equal(s.code, 0, s.stderr);
   });

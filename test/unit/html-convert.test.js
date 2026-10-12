@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview snapshot <url>` conversion (cli/html-convert.js): the allowlist sanitizer against a bypass corpus
+// `suiko snapshot <url>` conversion (cli/html-convert.js): the allowlist sanitizer against a bypass corpus
 // (scripts, event handlers, javascript: URLs in their obfuscated forms, forms and formaction, meta refresh, base,
 // preload links, SVG and MathML, template, iframes, objects), the Markdown output (no raw HTML node when parsed the
 // way the renderer parses it; `$` escaped; structure kept), --as-html output, and fetched Markdown losing its HTML.

@@ -76,7 +76,7 @@ export async function findWorkspace(fileOrDir, { create = false, explicitRoot = 
       if (!explicitRoot) {
         const what = root === path.parse(root).root ? 'the filesystem root' : 'your home directory';
         throw new RefusedError(
-          `refusing to use ${what} (${root}) as the SpecReview workspace for ${target}; ` +
+          `refusing to use ${what} (${root}) as the Suiko workspace for ${target}; ` +
             'pass --workspace <dir> to choose the workspace explicitly',
           { details: { root, path: target } },
         );
