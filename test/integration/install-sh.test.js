@@ -57,9 +57,9 @@ console.log('stub suiko ' + process.argv.slice(2).join(' '));
  * A stub Suiko checkout (package.json named suiko, bin/suiko.js logging its argv, install.sh).
  * @param {string} [dir]
  */
-function stubCheckout(dir = tmp('checkout')) {
+function stubCheckout(dir = tmp('checkout'), name = '@cire10/suiko') {
   fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'package.json'), '{\n  "name": "suiko",\n  "version": "0.0.0-test"\n}\n');
+  fs.writeFileSync(path.join(dir, 'package.json'), `{\n  "name": "${name}",\n  "version": "0.0.0-test"\n}\n`);
   fs.writeFileSync(path.join(dir, 'bin', 'suiko.js'), STUB_CLI, { mode: 0o755 });
   fs.copyFileSync(SCRIPT, path.join(dir, 'install.sh'));
   fs.chmodSync(path.join(dir, 'install.sh'), 0o755);
@@ -108,6 +108,19 @@ describe('install.sh', { skip }, () => {
     const sc = spawnSync('shellcheck', ['-s', 'sh', SCRIPT], { encoding: 'utf8' });
     if (sc.error) return; // shellcheck not installed
     assert.equal(sc.status, 0, sc.stdout);
+  });
+
+  test('a checkout is recognised by its package name: @scope/suiko or suiko, not a lookalike', () => {
+    for (const [name, ok] of /** @type {Array<[string, boolean]>} */ ([['@cire10/suiko', true], ['suiko', true], ['suiko-fork', false], ['@x/not-suiko', false]])) {
+      const s = sandbox();
+      const src = stubCheckout(tmp('named'), name);
+      const r = s.run([], { script: path.join(src, 'install.sh') });
+      if (ok) assert.match(r.stdout, new RegExp(`Suiko checkout: ${src}`), name);
+      else {
+        assert.equal(r.code, 1, name);
+        assert.match(r.stderr, /not run from a Suiko checkout/, name);
+      }
+    }
   });
 
   test('checkout: npm ci, npm link fails -> shim in ~/.local/bin, then a dry run of suiko install', () => {

@@ -1,5 +1,5 @@
 {
-  "name": "suiko",
+  "name": "@cire10/suiko",
   "version": "0.1.0",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown specs",
   "keywords": [
@@ -73,5 +73,6 @@
   "devDependencies": {
     "@playwright/test": "1.64.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": { "access": "public" }
 }
