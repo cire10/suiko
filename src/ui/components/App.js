@@ -67,9 +67,9 @@ function ScreenSnipHint() {
 function ReconnectBanner({ conn }) {
   return html`<div class="banner banner-conn" role="alert">
     <span class="spinner" aria-hidden="true"></span>
-    <strong>Reconnecting to SpecReview...</strong>
+    <strong>Reconnecting to Suiko...</strong>
     ${conn === 'unauthorized'
-      ? html`<span>The access token was rejected. Reopen the review link printed by <code>specreview open</code>.</span>`
+      ? html`<span>The access token was rejected. Reopen the review link printed by <code>suiko open</code>.</span>`
       : html`<span>Your work is kept; it will continue when the daemon answers.</span>`}
   </div>`;
 }

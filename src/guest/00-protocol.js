@@ -1,4 +1,4 @@
-// SpecReview guest, part 00: protocol constants.
+// Suiko guest, part 00: protocol constants.
 //
 // The guest is a classic script (no ES modules), so it cannot import src/shared/protocol.js. This part is a
 // verbatim copy of the subset of constants the guest needs. test/guest/build.test.mjs evaluates this file and

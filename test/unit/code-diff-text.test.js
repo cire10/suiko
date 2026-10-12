@@ -65,15 +65,15 @@ describe('file kinds', () => {
     // texts hold the decoded sides
     assert.equal(s.texts.get(byPath['fresh.js'].new), 'export const fresh = 1;\n');
     // the text: header, skipped, one block per file sorted by path
-    assert.match(s.text, /^specreview code review · uncommitted HEAD [0-9a-f]{12} \.\. working tree\nfiles: 6 · \+\d+ -\d+ · skipped: \.env \(excluded: looks like a secret\), img\/logo\.png \(binary\), keys\/deploy\.pem \(excluded: looks like a secret\)\n/);
-    const heads = s.text.split('\n').filter((l) => l.startsWith('diff --specreview '));
+    assert.match(s.text, /^suiko code review · uncommitted HEAD [0-9a-f]{12} \.\. working tree\nfiles: 6 · \+\d+ -\d+ · skipped: \.env \(excluded: looks like a secret\), img\/logo\.png \(binary\), keys\/deploy\.pem \(excluded: looks like a secret\)\n/);
+    const heads = s.text.split('\n').filter((l) => l.startsWith('diff --suiko '));
     assert.deepEqual(heads, [
-      'diff --specreview a/bin/run.sh b/bin/run.sh',
-      'diff --specreview a/fresh.js b/fresh.js',
-      'diff --specreview a/gone.txt b/gone.txt',
-      'diff --specreview a/img/logo.png b/img/logo.png',
-      'diff --specreview a/src/a.js b/src/a.js',
-      'diff --specreview a/src/old name.js b/src/new name.js',
+      'diff --suiko a/bin/run.sh b/bin/run.sh',
+      'diff --suiko a/fresh.js b/fresh.js',
+      'diff --suiko a/gone.txt b/gone.txt',
+      'diff --suiko a/img/logo.png b/img/logo.png',
+      'diff --suiko a/src/a.js b/src/a.js',
+      'diff --suiko a/src/old name.js b/src/new name.js',
     ]);
     assert.match(s.text, /status: M\nmode: 100644 -> 100755/);
     assert.match(s.text, /--- \/dev\/null\n\+\+\+ b\/fresh\.js\n@@ -0,0 \+1 @@\n\+export const fresh = 1;/);
@@ -186,8 +186,8 @@ describe('canonical text', () => {
     }
     const after = await snap({ mode: 'uncommitted' });
     assert.equal(after.text, before.text);
-    assert.ok(after.text.includes('diff --specreview a/naïve "q".txt b/naïve "q".txt'));
-    assert.ok(after.text.includes('diff --specreview a/src/old name.js b/src/moved name.js'));
+    assert.ok(after.text.includes('diff --suiko a/naïve "q".txt b/naïve "q".txt'));
+    assert.ok(after.text.includes('diff --suiko a/src/old name.js b/src/moved name.js'));
     assert.ok(!/\x1b\[/.test(after.text));
     // and twice in a row: the same bytes
     assert.deepEqual((await snap({ mode: 'uncommitted' })).buf, after.buf);

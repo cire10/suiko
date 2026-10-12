@@ -108,7 +108,7 @@ function levelItems(level, s) {
   try {
     return level.items(s) || [];
   } catch (err) {
-    console.warn('specreview: palette list failed', level.id, err);
+    console.warn('suiko: palette list failed', level.id, err);
     return [];
   }
 }
@@ -231,7 +231,7 @@ export function CommandPalette() {
     try {
       row.run();
     } catch (err) {
-      console.error('specreview: command failed', row.key, err);
+      console.error('suiko: command failed', row.key, err);
     }
   };
 

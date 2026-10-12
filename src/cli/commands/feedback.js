@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` (design 3.13 / 9.2).
+// `suiko feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` (design 3.13 / 9.2).
 // The same packet as `wait`, without blocking. Unless --peek, the engine acknowledges earlier deliveries and marks
 // the pending reviews delivered; like `wait` it receives a write(text) callback, so the delivery is recorded only
 // after the packet reached stdout (with --json the packet object is rebuilt for that write; see delivery.js).

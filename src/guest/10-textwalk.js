@@ -1,4 +1,4 @@
-// SpecReview guest, part 10: the rendered-text model (TextWalk).
+// Suiko guest, part 10: the rendered-text model (TextWalk).
 //
 // Builds a text stream for a DOM scope that follows the shared TEXT_EXCLUDE rule (same rule as the server's text
 // stream): text under script/style/noscript/template/textarea/title, class katex-mathml, [data-sr-ignore],

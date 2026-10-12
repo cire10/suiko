@@ -1,9 +1,9 @@
 // @ts-check
 // MCP tool table (design 9.7, agent-protocol 15). Every tool maps its arguments onto the input of the matching CLI
 // command module and runs the same execute(), so the tool's text content is the CLI text and its structuredContent
-// is the CLI's --json value. Additive tools beyond the design table: specreview_ask, specreview_threads.
-// specreview_snapshot is the only tool that uses the network (public hosts only: no allow_private, reader or as_html).
-// specreview_revise deliberately has no `force` (only a user at a terminal should force a refused revision).
+// is the CLI's --json value. Additive tools beyond the design table: suiko_ask, suiko_threads.
+// suiko_snapshot is the only tool that uses the network (public hosts only: no allow_private, reader or as_html).
+// suiko_revise deliberately has no `force` (only a user at a terminal should force a refused revision).
 
 import path from 'node:path';
 import * as z from 'zod/v4';
@@ -40,7 +40,7 @@ const fileArg = z.string().min(1).describe('Code reviews only: the repo file the
 /** @type {ToolDef[]} */
 export const TOOLS = [
   {
-    name: 'specreview_open',
+    name: 'suiko_open',
     title: 'Open a spec for review',
     description:
       'Track an HTML/Markdown spec (recording v1 if new), make sure the local review server runs, open the review UI in the default browser (unless SPECREVIEW_BROWSER is pane or none), and return its URL. Write the spec once before calling this; afterwards only make targeted edits.',
@@ -50,10 +50,10 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_review',
+    name: 'suiko_review',
     title: 'Open a code review of your changes',
     description:
-      'Snapshot your changes in the git repository as a code review (round v1, or a new round when the files changed since the last one), make sure the local review server runs, open the review UI, and return its URL. mode: since-base (default: merge-base with the default branch up to the working tree, untracked included), uncommitted, staged, branch (with base: committed changes only), range (with range "A..B" or "A...B") or commit (with commit). Then wait for the review; after editing the files, record the round with specreview_revise.',
+      'Snapshot your changes in the git repository as a code review (round v1, or a new round when the files changed since the last one), make sure the local review server runs, open the review UI, and return its URL. mode: since-base (default: merge-base with the default branch up to the working tree, untracked included), uncommitted, staged, branch (with base: committed changes only), range (with range "A..B" or "A...B") or commit (with commit). Then wait for the review; after editing the files, record the round with suiko_revise.',
     schema: z.object({
       mode: z.enum(['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit']).optional().describe('Default: since-base, else uncommitted'),
       base: z.string().min(1).optional().describe('Base ref for since-base / branch, e.g. "main"'),
@@ -68,10 +68,10 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_snapshot',
+    name: 'suiko_snapshot',
     title: 'Snapshot a web page for review',
     description:
-      'Fetch a public web page once (uses the network), record it as a doc for review (scripts never run; the HTML becomes Markdown), open the review UI and return its URL. Calling it again for the same URL records a new version when the page changed. Public hosts only: a page on localhost or a private network needs the CLI (`specreview snapshot <url> --allow-private`). Refused when the network is turned off (SPECREVIEW_OFFLINE=1, or network.allow false in the user config).',
+      'Fetch a public web page once (uses the network), record it as a doc for review (scripts never run; the HTML becomes Markdown), open the review UI and return its URL. Calling it again for the same URL records a new version when the page changed. Public hosts only: a page on localhost or a private network needs the CLI (`suiko snapshot <url> --allow-private`). Refused when the network is turned off (SPECREVIEW_OFFLINE=1, or network.allow false in the user config).',
     schema: z.object({ url: z.string().min(1).describe('The http(s) URL of the page'), title: z.string().optional(), workspace: workspaceArg }),
     command: 'snapshot',
     // no allow_private, reader or as_html (design 2.12): public pages through the user's default reader only
@@ -79,7 +79,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
-    name: 'specreview_wait',
+    name: 'suiko_wait',
     title: 'Wait for the review',
     description:
       'Block until the reviewer submits a review (or closes the session), up to timeout_sec (default 50, max 600). Returns the feedback packet, {"status":"waiting"} (call it again), or {"status":"closed"} (stop waiting).',
@@ -101,7 +101,7 @@ export const TOOLS = [
     wait: true,
   },
   {
-    name: 'specreview_feedback',
+    name: 'suiko_feedback',
     title: 'Get the feedback packet now',
     description:
       'Return the feedback packet without blocking (marks the reviews delivered unless peek). include_drafts also lists unsubmitted drafts (never act on them).',
@@ -117,7 +117,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_apply',
+    name: 'suiko_apply',
     title: 'Apply suggestions verbatim',
     description:
       'Apply suggestion threads verbatim to the working copy (staged until revise). Do Edit-tool edits first; re-read the file afterwards. A conflict means: treat the thread as a normal comment.',
@@ -127,7 +127,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_edit',
+    name: 'suiko_edit',
     title: 'Thread-tagged exact replace',
     description:
       'Replace old_string with new_string in the working copy, tagged to the given threads (old_string must occur exactly once unless replace_all). Use the packet\'s src> text as old_string.',
@@ -144,7 +144,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_reply',
+    name: 'suiko_reply',
     title: 'Reply on a thread',
     description: 'Reply on a thread without recording a version (status: answered, declined, needs_input or addressed).',
     schema: z.object({
@@ -161,7 +161,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_revise',
+    name: 'suiko_revise',
     title: 'Record a revision with replies',
     description:
       'Record the working copy as a new version with one reply per thread of the packet. threads: {"t1":{"status":"addressed","reply":"...","at":"L90-91"}}; other: [{"at":"L12"|"L12-14"|"del:h6"|"h6","why":"..."}] explains changes no thread asked for. A refusal (isError) records nothing: follow its fix lines. Never use break_locks or allow_rewrite unless the user explicitly asked.',
@@ -186,7 +186,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_revert',
+    name: 'suiko_revert',
     title: 'Revert a hunk or a lock',
     description: 'Undo one unrecorded hunk (hunk: "h5") or restore the agreed text of a lock (lock: "L1") in the working copy. Never revert changes you did not make.',
     schema: z.object({ doc: docArg, hunk: z.string().regex(/^h\d+$/).optional(), lock: z.string().regex(/^L\d+$/).optional(), workspace: workspaceArg }),
@@ -195,7 +195,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_reanchor',
+    name: 'suiko_reanchor',
     title: "Move a thread's anchor",
     description: "Move a thread's anchor to other lines (\"42-46\") or to an exact quote of the current file. In a code review: file + lines of that file.",
     schema: z.object({ doc: docArg, thread_id: threadId, lines: linesArg.optional(), quote: z.string().optional(), file: fileArg.optional(), workspace: workspaceArg }),
@@ -210,7 +210,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_ask',
+    name: 'suiko_ask',
     title: 'Ask the reviewer a question',
     description: 'Create an agent-question thread anchored on a quote or lines of the doc (in a code review: file + lines, or neither for the whole review); the answer arrives in a later packet as ANSWER.',
     schema: z.object({ doc: docArg, quote: z.string().optional(), lines: linesArg.optional(), file: fileArg.optional(), body: z.string().min(1), workspace: workspaceArg }),
@@ -225,7 +225,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_threads',
+    name: 'suiko_threads',
     title: 'List threads',
     description: 'List the threads of a doc, one line each (status: open, addressed, answered, declined, needs_input, resolved, outdated, active (default) or all).',
     schema: z.object({ doc: docArg, status: z.string().optional(), workspace: workspaceArg }),
@@ -234,7 +234,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_diff',
+    name: 'suiko_diff',
     title: 'Diff two versions',
     description: 'What changed between two versions (default: last reviewed..head). format "stat" (default) or "unified".',
     schema: z.object({
@@ -254,7 +254,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_log',
+    name: 'suiko_log',
     title: 'Version and review timeline',
     description: 'Timeline of versions and reviews of a doc (doc optional when only one is tracked).',
     schema: z.object({ doc: docArg.optional(), workspace: workspaceArg }),
@@ -263,7 +263,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_status',
+    name: 'suiko_status',
     title: 'Review status',
     description: 'Docs, head versions, thread counts, undelivered reviews, listening agents and working-copy state.',
     schema: z.object({ doc: docArg.optional(), workspace: workspaceArg }),
@@ -272,7 +272,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
-    name: 'specreview_show',
+    name: 'suiko_show',
     title: 'Show a thread or old source',
     description: 'A thread with its full timeline (thread_id), or the exact source of a version (version + lines); in a code review, a repo file of a round (file, side, version).',
     schema: z.object({
@@ -296,7 +296,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, openWorldHint: false },
   },
   {
-    name: 'specreview_final',
+    name: 'suiko_final',
     title: 'Finalize an approved spec',
     description: 'After an APPROVED packet: check the working copy equals the final version and (decisions: true) write <name>.decisions.md.',
     schema: z.object({ doc: docArg, decisions: z.boolean().optional(), out_dir: z.string().optional(), workspace: workspaceArg }),

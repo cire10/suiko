@@ -231,7 +231,7 @@ export async function ask(ctx, ref, input) {
       const working = await readWorkingState(ctx, doc, head);
       const lines = toRange(input.lines);
       if (lines && working.dirty) {
-        throw new RefusedError('the working copy differs from head; record it with specreview revise first, or ask with --quote');
+        throw new RefusedError('the working copy differs from head; record it with suiko revise first, or ask with --quote');
       }
       const render = await ctx.render(doc, head.v);
       const env = envOf(doc, ctx.config);
@@ -273,7 +273,7 @@ export async function ask(ctx, ref, input) {
 }
 
 /**
- * Agent override of a thread's anchor (`specreview reanchor`).
+ * Agent override of a thread's anchor (`suiko reanchor`).
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {string} tid

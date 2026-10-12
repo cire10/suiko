@@ -5,8 +5,8 @@
 //   listDocsAcrossWorkspaces(ctx?)              -> [{ ws, root, id, path, title, format, head, state, openThreads,
 //                                                    undelivered, listening, final }]
 //   docsByActivity(ctx?, { roots? })            -> [{ ws, root, id, path, title, state, head, activeAt }], most
-//                                                  recently active first (`specreview snip` without a doc)
-//   status(ctx, doc?)                           -> { docs: [...] } (`specreview status`)
+//                                                  recently active first (`suiko snip` without a doc)
+//   status(ctx, doc?)                           -> { docs: [...] } (`suiko status`)
 //   log(ctx, doc)                               -> { doc, entries, final } (versions and reviews, newest first)
 //   sourceLines(ctx, doc, { version, from, to }) -> { v, startLine, lines, total } (version number or 'live')
 //   closeSession(ctx, doc)                      -> { ok, doc, state } (waiters exit 5)
@@ -258,7 +258,7 @@ async function lastActivity(store, doc) {
 }
 
 /**
- * `specreview status [<doc>]`.
+ * `suiko status [<doc>]`.
  * @param {Ctx} ctx
  * @param {string | Doc | null} [ref]
  */
@@ -332,7 +332,7 @@ export async function status(ctx, ref = null) {
 }
 
 /**
- * `specreview log <doc>`: versions and reviews interleaved, newest first.
+ * `suiko log <doc>`: versions and reviews interleaved, newest first.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  */

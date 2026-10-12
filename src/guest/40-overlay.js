@@ -1,4 +1,4 @@
-// SpecReview guest, part 40: the overlay.
+// Suiko guest, part 40: the overlay.
 //
 // One <sr-overlay data-sr-ignore> element appended to <html> (the only node the guest ever adds to the author's DOM)
 // with a CLOSED shadow root. The host is forced to a full-viewport, pointer-events:none box via inline !important
@@ -642,7 +642,7 @@ const Overlay = (() => {
       layers.ui.appendChild(el);
       setTimeout(() => el.remove(), 1400);
     },
-    /** Debug snapshot of what is drawn (used by tests through window.__specreviewGuest.inspect()). */
+    /** Debug snapshot of what is drawn (used by tests through window.__suikoGuest.inspect()). */
     inspect() {
       /** @param {Element} e */
       const r = (e) => rectJSON(e.getBoundingClientRect());

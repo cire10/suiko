@@ -1,8 +1,8 @@
 // @ts-check
 // Consistent reads of files that another process (the agent's editor) may be writing right now, plus the
-// byte <-> text codec used for every spec source in SpecReview.
+// byte <-> text codec used for every spec source in Suiko.
 //
-// Decoding rule (all offsets in SpecReview are UTF-16 code units into the decoded string):
+// Decoding rule (all offsets in Suiko are UTF-16 code units into the decoded string):
 //   - UTF-8 BOM (EF BB BF)  -> encoding 'utf8-bom', the BOM is NOT part of the text;
 //   - UTF-16 LE/BE BOM      -> encoding 'utf16le' / 'utf16be', BOM stripped;
 //   - anything else         -> encoding 'utf8' (other legacy charsets are decoded as UTF-8, lossy).

@@ -98,7 +98,7 @@ describe('document CSP (UIR-2)', () => {
 
       const violations = await d.frame.evaluate(() => /** @type {any} */ (window).__cspViolations);
       assert.deepEqual(violations.filter((/** @type {string} */ v) => /style/.test(v)), []);
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
     } finally {
       await d.close();
     }
@@ -141,7 +141,7 @@ describe('navigation away from the doc (UIR-6)', () => {
    */
   async function assertStillReviewing(d, hash = '') {
     assert.equal(d.frame.url(), harness.docUrl('links') + hash);
-    assert.equal(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.connected), true);
+    assert.equal(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.connected), true);
     assert.equal((await msgsOf(d.page, 'hello')).length, 1, 'no second page load');
     await send(d.page, 'setHidden', { hidden: true });
     await settle(d.frame);
@@ -199,7 +199,7 @@ describe('navigation away from the doc (UIR-6)', () => {
       }, harness.docUrl('prose'));
       const hello = await waitMsg(d.page, 'hello', from);
       assert.equal(hello.target, 'ws1/prose/v1');
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
     } finally {
       await d.close();
     }
@@ -289,7 +289,7 @@ describe('modal dialogs (UIR-8)', () => {
       await d.frame.evaluate(() => /** @type {HTMLDialogElement} */ (document.getElementById('terms')).showModal());
       await settle(d.frame, 100);
       assert.equal((await inspect(d.frame)).parent, 'dialog');
-      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.errors()), []);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
       assert.deepEqual(d.pageErrors, []);
     } finally {
       await d.close();
@@ -358,7 +358,7 @@ describe('page errors (UIR-10)', () => {
       const atLeast = /** @type {(m: any) => boolean} */ (new Function('m', `return m.count >= ${first.count + 8};`));
       const later = await waitMsg(d.page, 'pageError', 0, atLeast, 4000);
       assert.match(later.last, /drawFrame/);
-      const guestCount = await d.frame.evaluate(() => /** @type {any} */ (window).__specreviewGuest.inspect().pageErrors.count);
+      const guestCount = await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.inspect().pageErrors.count);
       assert.ok(guestCount - later.count < 15, `the UI lags at most ~1 s behind (${later.count} of ${guestCount})`);
     } finally {
       await d.close();

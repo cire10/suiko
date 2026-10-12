@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview revise <doc> [-m <summary>] [--replies <file|->] [--dry-run] [--break-lock L1="why"]...
+// `suiko revise <doc> [-m <summary>] [--replies <file|->] [--dry-run] [--break-lock L1="why"]...
 //  [--allow-rewrite] [--force] [--json]` (design 3.8 / 8.1 / 9.5).
 // Records the working copy as a new version with one reply per thread. The replies JSON is validated with the
 // ReviseInput zod schema (unknown keys rejected); -m overrides its summary; --break-lock pairs are merged into

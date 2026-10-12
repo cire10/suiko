@@ -212,7 +212,7 @@ test('defaultVerdict: Request changes with a blocking new thread or a reopen of 
   assert.equal(defaultVerdict(ds, 'changes_requested'), 'changes_requested');
   assert.equal(defaultVerdict(ds, 'comment'), 'comment');
   assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'thread', severity: 'blocking' }]), 'comment'), 'changes_requested');
-  assert.equal(agentPrompt(ds), 'Run `specreview feedback spec` and address it.');
+  assert.equal(agentPrompt(ds), 'Run `suiko feedback spec` and address it.');
 });
 
 test('changes: the only H1 leaves the group titles; hunk source text; readable word diffs', () => {

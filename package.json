@@ -1,9 +1,9 @@
 {
-  "name": "specreview",
+  "name": "suiko",
   "version": "0.1.0",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown specs",
   "type": "module",
-  "bin": { "specreview": "bin/specreview.js" },
+  "bin": { "suiko": "bin/suiko.js", "specreview": "bin/specreview.js" },
   "engines": { "node": ">=20.19" },
   "files": ["bin", "src", "integrations", ".claude-plugin", "README.md", "docs"],
   "scripts": {

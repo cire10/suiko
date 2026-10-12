@@ -89,7 +89,7 @@ export function createDelivery(rt, engine, { signal, packetFor } = {}) {
   return {
     write: (payload, packetArg) => {
       if (closed || signal?.aborted) {
-        return Promise.reject(new Error('specreview: the waiting command has finished; not delivering'));
+        return Promise.reject(new Error('suiko: the waiting command has finished; not delivering'));
       }
       const p = doWrite(payload, packetArg);
       inflight = p;

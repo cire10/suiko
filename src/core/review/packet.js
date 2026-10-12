@@ -4,11 +4,11 @@
 // prints the objects they are made from.
 //   formatPacket(packet)          feedback packet (wait / feedback), capped at LIMITS.packetChars
 //   formatReviseReport(report)    revise result, dry run, refusal (with fix hints), replies-only
-//   formatStatus(status)          `specreview status`
-//   formatLog(log)                `specreview log`
-//   formatDiffStat(changes)       `specreview diff --stat`
-//   formatThread(show)            `specreview show <doc> <tid>`
-//   formatThreads(list)           `specreview threads`
+//   formatStatus(status)          `suiko status`
+//   formatLog(log)                `suiko log`
+//   formatDiffStat(changes)       `suiko diff --stat`
+//   formatThread(show)            `suiko show <doc> <tid>`
+//   formatThreads(list)           `suiko threads`
 //   formatApply / formatEdit / formatRevert / formatFinal / formatSourceLines / formatReply / formatAsk
 // Output is deterministic: no clocks, no locale-dependent formatting except `hhmm` (local time of day).
 
@@ -47,11 +47,11 @@ export function attachmentLine(absPath, kind) {
 }
 
 const PROTOCOL = [
-  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.',
+  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
   '  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.',
 ];
 
-/** The protocol reminder of a snapshot doc (no working file: no `specreview apply`, no Edit of a workspace file). */
+/** The protocol reminder of a snapshot doc (no working file: no `suiko apply`, no Edit of a workspace file). */
 const SNAPSHOT_PROTOCOL = [
   'PROTOCOL: change only what the threads ask for and keep the rest of the text as it is; src> lines quote the current version.',
   '  Questions: answer in the reply; change the text only if the answer belongs in it. Unsure: status needs_input.',
@@ -60,7 +60,7 @@ const SNAPSHOT_PROTOCOL = [
 /** The protocol reminder of a web-page snapshot of a page you build (a private host): change its sources. */
 const PAGE_SOURCES_PROTOCOL = [
   'PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page (only what the threads ask for), then snapshot it again.',
-  '  src> lines quote SpecReview\'s conversion of the page. Questions: answer in the reply. Unsure: status needs_input.',
+  '  src> lines quote Suiko\'s conversion of the page. Questions: answer in the reply. Unsure: status needs_input.',
 ];
 
 /** The protocol reminder of a public web page's snapshot: there is nothing to edit; threads get replies. */
@@ -78,7 +78,7 @@ const PLAN_PROTOCOL = [
 /** The protocol reminder of a code review: repo files, paths relative to the repo root. */
 const CODE_PROTOCOL = [
   'PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.',
-  '  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.',
+  '  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.',
 ];
 
 /** @param {string | null | undefined} v */
@@ -234,7 +234,7 @@ function assemble(head, items, footer, maxChars, ref) {
   }
   if (overflow.length) {
     blocks.push(
-      [`(${plural(overflow.length, 'more thread')} - packet size cap; run the commands to see them)`, ...overflow.map((t) => `${itemHeader(t)} · specreview show ${ref} ${t.id}`)].join('\n'),
+      [`(${plural(overflow.length, 'more thread')} - packet size cap; run the commands to see them)`, ...overflow.map((t) => `${itemHeader(t)} · suiko show ${ref} ${t.id}`)].join('\n'),
     );
   }
   const parts = [headText];
@@ -260,7 +260,7 @@ export function formatPlanFeedback(packet, opts = {}) {
   const on = versions.length ? ` on v${versions[versions.length - 1]}` : '';
   const what = p.verdict === 'changes_requested' ? 'the reviewer requested changes' : 'the reviewer commented on it';
   /** @type {string[]} */
-  const head = [`YOUR PLAN WAS NOT APPROVED: ${what} (SpecReview ${ids || 'review'}${on}).`];
+  const head = [`YOUR PLAN WAS NOT APPROVED: ${what} (Suiko ${ids || 'review'}${on}).`];
   head.push(file ? `Plan file: ${file}   (line numbers below are lines of this file)` : `The plan has no plan file: line numbers below are lines of the plan text you submitted.`);
   for (const r of p.reviews) {
     if (!r.body?.trim()) continue;
@@ -330,12 +330,12 @@ function utcMinute(iso) {
 function lineBasis(p) {
   if (p.kind === 'snapshot' && p.origin === 'url' && p.page) {
     const when = utcMinute(p.page.fetchedAt);
-    return `Line numbers = lines of SpecReview's ${p.page.format === 'html' ? 'HTML' : 'Markdown'} snapshot of ${p.page.finalUrl}${when ? ` (fetched ${when})` : ''}; there is no file for you to edit.`;
+    return `Line numbers = lines of Suiko's ${p.page.format === 'html' ? 'HTML' : 'Markdown'} snapshot of ${p.page.finalUrl}${when ? ` (fetched ${when})` : ''}; there is no file for you to edit.`;
   }
   if (p.kind === 'snapshot') {
     return p.origin === 'plan' && p.file
       ? `Line numbers = lines of the plan file as submitted (v${p.head}).`
-      : `Line numbers = v${p.head} of this ${originInfo(p.origin ?? '').noun} (\`specreview show ${p.ref ?? p.doc}\` prints it).`;
+      : `Line numbers = v${p.head} of this ${originInfo(p.origin ?? '').noun} (\`suiko show ${p.ref ?? p.doc}\` prints it).`;
   }
   if (p.working === 'missing') return `Line numbers = v${p.head} (the working copy is missing; restore it before editing).`;
   if (p.working === 'dirty') return `Line numbers = current file on disk (working copy differs from v${p.head}: lines mapped).`;
@@ -494,7 +494,7 @@ export function formatPacketThread(t, docId) {
   const kind = t.attachmentKind ?? (t.label.includes('region') ? 'region' : 'image');
   for (const a of t.attachments ?? []) out.push(attachmentLine(a, kind));
   // One older comment is the reviewer's original request, which the agent already acted on (design 3.11).
-  if (t.earlier >= 2) out.push(`  (+${t.earlier} earlier, specreview show ${docId} ${t.id})`);
+  if (t.earlier >= 2) out.push(`  (+${t.earlier} earlier, suiko show ${docId} ${t.id})`);
   for (const c of t.comments) {
     const body = String(c.body ?? '').trim() ? `: ${indentBody(c.body, '    ')}` : '';
     if (c.kind === 'agent') {
@@ -538,17 +538,17 @@ export function formatReviseReport(r) {
   const doc = r.doc;
   const ref = r.ref ?? doc;
   const same = r.snapshot ? `the text is identical to v${r.from}` : `working copy matches v${r.from}`;
-  if (r.nothing) return `specreview: nothing to record (${same}, no replies)\n`;
+  if (r.nothing) return `suiko: nothing to record (${same}, no replies)\n`;
   /** @type {string[]} */
   const out = [];
   if (r.repliesOnly) {
-    out.push(`specreview: ${same}; posted ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
+    out.push(`suiko: ${same}; posted ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
     for (const rep of r.replies) out.push(`  ${rep.thread} ${rep.status}`);
-    out.push(`next: specreview wait ${ref} (background)`);
+    out.push(`next: suiko wait ${ref} (background)`);
     return `${out.join('\n')}\n`;
   }
   if (r.refused) {
-    out.push(r.dryRun ? 'specreview: dry run - would be REFUSED (exit 3)' : 'specreview: REFUSED - nothing recorded (exit 3)');
+    out.push(r.dryRun ? 'suiko: dry run - would be REFUSED (exit 3)' : 'suiko: REFUSED - nothing recorded (exit 3)');
     for (const e of r.guards.errors) {
       out.push(`  ERR ${e.code}: ${e.message}`);
       if (e.fix) out.push(`      fix: ${e.fix}`);
@@ -560,8 +560,8 @@ export function formatReviseReport(r) {
   const stats = `+${r.stats.added} -${r.stats.removed} lines, ${plural(r.stats.hunks, 'hunk')}`;
   const responds = r.respondsTo ? ` · responds to ${r.respondsTo}` : '';
   out.push(r.dryRun
-    ? `specreview: dry run - would record v${r.version} for ${doc} (${stats})${responds}; nothing recorded`
-    : `specreview: recorded v${r.version} for ${doc} (${stats})${responds}`);
+    ? `suiko: dry run - would record v${r.version} for ${doc} (${stats})${responds}; nothing recorded`
+    : `suiko: recorded v${r.version} for ${doc} (${stats})${responds}`);
   out.push(...hunkTable(r.hunks, r.replies));
   for (const a of r.assets ?? []) out.push(`  asset ${a.path} changed${a.threads?.length ? ` -> ${a.threads.join(', ')}` : ''}`);
   const linked = new Set((r.hunks ?? []).flatMap((/** @type {any} */ h) => h.threads));
@@ -578,7 +578,7 @@ export function formatReviseReport(r) {
   }
   if (r.git?.commit) out.push(`git: committed ${String(r.git.commit).slice(0, 12)}`);
   else if (r.git?.error) out.push(`git: auto-commit failed: ${oneLine(r.git.error, 200)}`);
-  if (!r.dryRun) out.push(`reviewer notified. next: specreview wait ${ref} (background)`);
+  if (!r.dryRun) out.push(`reviewer notified. next: suiko wait ${ref} (background)`);
   return `${out.join('\n')}\n`;
 }
 
@@ -640,7 +640,7 @@ function guardsLine(r) {
  * @returns {string}
  */
 export function formatStatus(s) {
-  if (!s.docs.length) return 'specreview: no tracked docs in this workspace (run specreview open <file>)\n';
+  if (!s.docs.length) return 'suiko: no tracked docs in this workspace (run suiko open <file>)\n';
   /** @type {string[]} */
   const out = [];
   for (const d of s.docs) {

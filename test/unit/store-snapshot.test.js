@@ -285,11 +285,11 @@ describe('snapshot packets', () => {
     assert.equal(packet.file, null);
     assert.equal(packet.ref, doc.id);
     assert.ok(packet.threads.every((t) => t.apply === null));
-    assert.equal(packet.next, `write the complete revised text to a file -> specreview revise ${doc.id} --source <file> --replies - -> specreview wait ${doc.id} (background)`);
+    assert.equal(packet.next, `write the complete revised text to a file -> suiko revise ${doc.id} --source <file> --replies - -> suiko wait ${doc.id} (background)`);
     const text = formatPacket(packet);
     assert.doesNotMatch(text, /^File:/m);
     assert.match(text, new RegExp(`^SPECREVIEW FEEDBACK · ${doc.id} \\(agent message\\)`, 'm'));
-    assert.match(text, /^Line numbers = v1 of this message \(`specreview show [a-z0-9-]+` prints it\)\.$/m);
+    assert.match(text, /^Line numbers = v1 of this message \(`suiko show [a-z0-9-]+` prints it\)\.$/m);
   });
 
   test('a plan snapshot packet and the plan feedback cite the real plan file', async () => {
@@ -308,7 +308,7 @@ describe('snapshot packets', () => {
 
     const msg = formatPlanFeedback(packet);
     const lines = msg.split('\n');
-    assert.equal(lines[0], 'YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (SpecReview rv1 on v1).');
+    assert.equal(lines[0], 'YOUR PLAN WAS NOT APPROVED: the reviewer requested changes (Suiko rv1 on v1).');
     assert.equal(lines[1], `Plan file: ${planFile}   (line numbers below are lines of this file)`);
     assert.equal(lines[2], 'Reviewer summary: Close, but not yet.');
     assert.match(msg, /\[t1\] .*L6/);

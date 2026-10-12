@@ -1,14 +1,14 @@
 // @ts-check
-// The canonical diff text of a round (design 4.5): the version source of a code doc. SpecReview generates it from the
+// The canonical diff text of a round (design 4.5): the version source of a code doc. Suiko generates it from the
 // file sides (never from `git diff`), so its bytes depend only on the contents, the spec and the base: no timestamps,
 // no repo config (colours, prefixes, external diff), files sorted by path. "Nothing changed" is the existing check
 // that its sha256 equals head's; a moved base changes the header, so it records a round even when the per-file
 // diffs are identical.
 //
-//   specreview code review · since-base origin/main (merge-base 1a2b3c4d5e6f) .. working tree
+//   suiko code review · since-base origin/main (merge-base 1a2b3c4d5e6f) .. working tree
 //   files: 5 · +120 -30 · skipped: assets/logo.png (binary)
 //
-//   diff --specreview a/src/auth/refresh.js b/src/auth/refresh.js
+//   diff --suiko a/src/auth/refresh.js b/src/auth/refresh.js
 //   status: M
 //   --- a/src/auth/refresh.js
 //   +++ b/src/auth/refresh.js
@@ -63,7 +63,7 @@ export function codeStats(files) {
  */
 export function canonicalText(spec, code, textOf) {
   const st = codeStats(code.files);
-  const head = [`specreview code review · ${specLabel(spec, code, { abbrev: 12 })}`];
+  const head = [`suiko code review · ${specLabel(spec, code, { abbrev: 12 })}`];
   head.push(`files: ${st.files} · +${st.added} -${st.removed}${code.skipped.length ? ` · skipped: ${skippedText(code.skipped)}` : ''}`);
   const blocks = [head.join('\n')];
   const files = [...code.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -90,7 +90,7 @@ function shortId(id) {
 function fileBlock(f, context, textOf, skipped) {
   const oldName = f.status === 'A' ? null : (f.oldPath ?? f.path);
   const newName = f.status === 'D' ? null : f.path;
-  const out = [`diff --specreview a/${oldName ?? f.path} b/${newName ?? f.path}`, `status: ${f.status}`];
+  const out = [`diff --suiko a/${oldName ?? f.path} b/${newName ?? f.path}`, `status: ${f.status}`];
   if (f.mode?.old && f.mode?.new && f.mode.old !== f.mode.new) out.push(`mode: ${f.mode.old} -> ${f.mode.new}`);
   else if (f.status === 'A' && f.mode?.new && f.mode.new !== '100644') out.push(`mode: ${f.mode.new}`);
   const skip = skipped.find((s) => s.path === f.path);

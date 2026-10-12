@@ -1,5 +1,5 @@
 // @ts-check
-// `<name>.decisions.md`, written by `specreview final --decisions` (design 8.9): for every decision and every
+// `<name>.decisions.md`, written by `suiko final --decisions` (design 8.9): for every decision and every
 // resolved thread, the decision, the quoted context, the resolution (the agent's last reply) and the version and
 // hunk that changed it. Pure: renderDecisionsMarkdown returns the text; ops/final.js writes it atomically.
 

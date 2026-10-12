@@ -1,8 +1,8 @@
 // @ts-check
-// `specreview doctor [--fix] [--json]` (design 9.2): checks the installation, the review server and the
+// `suiko doctor [--fix] [--json]` (design 9.2): checks the installation, the review server and the
 // workspace store, printing one line per check:
 //   ok    node v24.12.0
-//   WARN  review server not running (it starts with `specreview open`)
+//   WARN  review server not running (it starts with `suiko open`)
 //   ERR   src/daemon/main.js is missing
 //   fixed removed 1 uncommitted version source of token-service
 // Checks: Node version; SPECREVIEW_HOME writable and daemon.json private (0600); server health and version;
@@ -10,7 +10,7 @@
 // (or --workspace): config readable, and per doc: working copy present, versions sequential and matching
 // doc.head, leftovers of interrupted writes (fixed with --fix via the store's recoverDoc), unrecorded edits.
 // --fix also chmods daemon.json to 0600 and (re)starts a missing or outdated server.
-// Last, the agent integrations: per detected (or configured) agent, whether `specreview install` configured it and
+// Last, the agent integrations: per detected (or configured) agent, whether `suiko install` configured it and
 // whether that configuration is current (a dry run of the installer; nothing is written).
 // Exit 0 when no ERR remains, else 1.
 
@@ -91,8 +91,8 @@ export async function execute(rt, input) {
 function checkNode(add) {
   const [major, minor] = process.versions.node.split('.').map(Number);
   const ok = major > 20 || (major === 20 && minor >= 19);
-  add(ok ? 'ok' : 'err', 'node', `node v${process.versions.node}${ok ? '' : ' (SpecReview needs Node >= 20.19)'}`);
-  add('ok', 'version', `specreview ${packageVersion()} at ${PACKAGE_ROOT}`);
+  add(ok ? 'ok' : 'err', 'node', `node v${process.versions.node}${ok ? '' : ' (Suiko needs Node >= 20.19)'}`);
+  add('ok', 'version', `suiko ${packageVersion()} at ${PACKAGE_ROOT}`);
 }
 
 /**
@@ -166,7 +166,7 @@ async function checkServer(rt, add, fix) {
     return;
   }
   const ports = status.info ? ` (last ports ${status.info.uiPort}/${status.info.contentPort})` : '';
-  add('warn', 'server', `review server not running${ports}; it starts automatically with \`specreview open\``);
+  add('warn', 'server', `review server not running${ports}; it starts automatically with \`suiko open\``);
 }
 
 /**
@@ -192,7 +192,7 @@ async function checkWorkspaces(add) {
 }
 
 /**
- * Which agents have SpecReview configured (user scope), from a dry run of the multi-agent installer. Skipped when the
+ * Which agents have Suiko configured (user scope), from a dry run of the multi-agent installer. Skipped when the
  * home directory is unknown (the installer never guesses it).
  * @param {import('../runtime.js').Runtime} rt
  * @param {(level: Check['level'], check: string, message: string) => void} add
@@ -203,16 +203,16 @@ async function checkIntegrations(rt, add) {
     const { buildContext, integrationStatus } = await import('../install/multi.js');
     const list = integrationStatus(buildContext(rt, { scope: 'user' }));
     if (!list.length) {
-      add('ok', 'integrations', 'agents: none detected (`specreview install --only <agent>` configures one anyway)');
+      add('ok', 'integrations', 'agents: none detected (`suiko install --only <agent>` configures one anyway)');
       return;
     }
     for (const s of list) {
       const check = `integration:${s.id}`;
       if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
-      else if (s.plugin) add('ok', check, `${s.name}: SpecReview plugin installed (${s.plugin})`);
-      else if (s.configured && s.upToDate) add('ok', check, `${s.name}: SpecReview configured`);
-      else if (s.configured) add('warn', check, `${s.name}: SpecReview configuration is incomplete or outdated (run \`specreview install --only ${s.id} --apply\`)`);
-      else add('ok', check, `${s.name}: detected, SpecReview not configured (\`specreview install --only ${s.id}\` shows what it would add)`);
+      else if (s.plugin) add('ok', check, `${s.name}: Suiko plugin installed (${s.plugin})`);
+      else if (s.configured && s.upToDate) add('ok', check, `${s.name}: Suiko configured`);
+      else if (s.configured) add('warn', check, `${s.name}: Suiko configuration is incomplete or outdated (run \`suiko install --only ${s.id} --apply\`)`);
+      else add('ok', check, `${s.name}: detected, Suiko not configured (\`suiko install --only ${s.id}\` shows what it would add)`);
     }
   } catch (err) {
     add('warn', 'integrations', `could not check the agent integrations: ${/** @type {Error} */ (err).message}`);

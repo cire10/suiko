@@ -1,4 +1,4 @@
-// SpecReview guest, part 25: layout scheduling and DOM observation.
+// Suiko guest, part 25: layout scheduling and DOM observation.
 //
 // Two kinds of work:
 //   - "layout" (cheap, rAF-throttled): measure resolved targets / change marks and redraw the overlay, then post

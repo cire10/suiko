@@ -1,6 +1,6 @@
 // @ts-check
 // Path helpers: doc-id slugs, POSIX normalisation, the asset deny-list, symlink-safe containment checks and
-// extension/format detection. Doc paths are stored workspace-relative in POSIX form everywhere in SpecReview.
+// extension/format detection. Doc paths are stored workspace-relative in POSIX form everywhere in Suiko.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +31,7 @@ export function slugify(name) {
 
 /**
  * Converts platform separators to '/'. (On POSIX this only rewrites backslashes, which never occur in
- * paths SpecReview produces.)
+ * paths Suiko produces.)
  * @param {string} p
  * @returns {string}
  */

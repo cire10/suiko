@@ -158,7 +158,7 @@ describe('symlinks and stores', () => {
     assert.equal(rep.version, 2);
   });
 
-  test('nested and root SpecReview stores are never part of a review', async () => {
+  test('nested and root Suiko stores are never part of a review', async () => {
     r.write('docs/.specreview/docs/x/doc.json', '{"x":1}\n');
     r.write('docs/spec.md', '# spec\n');
     const ctx = await r.ctx();

@@ -1,7 +1,7 @@
 // @ts-check
-// The CLI / MCP seams of code reviews (design 2.11, 4.2, WP0b): `specreview review` parses its final spec into the
+// The CLI / MCP seams of code reviews (design 2.11, 4.2, WP0b): `suiko review` parses its final spec into the
 // ReviewInput that openCodeReview takes (exit 1 outside a git repository);
-// MCP specreview_review maps onto the same input; `revise` replies and `reply --at` accept the repo-file forms
+// MCP suiko_review maps onto the same input; `revise` replies and `reply --at` accept the repo-file forms
 // (canonicalised), while a spec doc refuses them before anything is written.
 
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -23,7 +23,7 @@ async function parseReview(argv, env = {}) {
   return review.parse(parseCommandArgs('review', argv, review.spec.options), /** @type {any} */ ({ env }));
 }
 
-describe('specreview review: spec and parsing', () => {
+describe('suiko review: spec and parsing', () => {
   test('registered in the loop group; --help names every flag of the spec', async () => {
     assert.equal(COMMANDS.review.group, 'loop');
     const mod = await COMMANDS.review.load();
@@ -72,8 +72,8 @@ describe('specreview review: spec and parsing', () => {
   });
 });
 
-describe('MCP specreview_review', () => {
-  const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'specreview_review'));
+describe('MCP suiko_review', () => {
+  const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'suiko_review'));
 
   test('runs the review command with the same ReviewInput', async () => {
     assert.ok(tool);
@@ -92,12 +92,12 @@ describe('MCP specreview_review', () => {
   test('ask / reanchor / show take the code-review file (and side) and pass them to the command input', async () => {
     const rt = /** @type {any} */ ({ env: {}, cwd: '/' });
     const byName = (/** @type {string} */ n) => /** @type {any} */ (TOOLS.find((t) => t.name === n));
-    const ask = byName('specreview_ask');
+    const ask = byName('suiko_ask');
     assert.deepEqual(await ask.toInput(ask.schema.parse({ doc: 'cr-x', file: 'src/a.js', lines: '3-4', body: 'why?' }), rt), { doc: 'cr-x', quote: undefined, lines: [3, 4], file: 'src/a.js', body: 'why?' });
     assert.ok(!('file' in (await ask.toInput(ask.schema.parse({ doc: 'spec', lines: '3', body: 'b' }), rt))), 'no file key for a spec');
-    const re = byName('specreview_reanchor');
+    const re = byName('suiko_reanchor');
     assert.equal((await re.toInput(re.schema.parse({ doc: 'cr-x', thread_id: 't1', file: 'src/a.js', lines: '7-9' }), rt)).file, 'src/a.js');
-    const show = byName('specreview_show');
+    const show = byName('suiko_show');
     const input = await show.toInput(show.schema.parse({ doc: 'cr-x', file: 'src/a.js', side: 'old', version: 2 }), rt);
     assert.deepEqual([input.file, input.side, input.version], ['src/a.js', 'old', 2]);
     assert.throws(() => show.schema.parse({ doc: 'cr-x', file: 'src/a.js', side: 'both' }));

@@ -136,7 +136,7 @@ export async function resolveSpec(repo, input, config) {
       const str = (/** @type {unknown} */ v) => typeof v === 'string' && v.length > 0 && v.length <= 255 && !/[\0-\x1f\x7f]/.test(v);
       if (!pr || !REPO_RE.test(String(pr.repo)) || !Number.isSafeInteger(pr.number) || pr.number < 1
         || !OID_RE.test(String(pr.headOid)) || !OID_RE.test(String(pr.mergeBase)) || !str(pr.headRefName) || !str(pr.baseRefName)) {
-        throw new UsageError('review: a PR review needs a resolved PR (`specreview review --pr <n>`)');
+        throw new UsageError('review: a PR review needs a resolved PR (`suiko review --pr <n>`)');
       }
       const { repo: slug, number, url, title, baseRefName, headRefName, headOid, mergeBase } = pr;
       return { ...spec, mode: 'pr', pr: { repo: slug, number, url: String(url ?? ''), title: String(title ?? ''), baseRefName, headRefName, headOid, mergeBase } };

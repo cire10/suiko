@@ -12,12 +12,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Set once in the runner process; workers inherit it (the config is re-evaluated there and keeps the value).
-if (!process.env.SPECREVIEW_HOME) process.env.SPECREVIEW_HOME = mkdtempSync(join(tmpdir(), 'specreview-e2e-home-'));
+if (!process.env.SPECREVIEW_HOME) process.env.SPECREVIEW_HOME = mkdtempSync(join(tmpdir(), 'suiko-e2e-home-'));
 
 export default defineConfig({
   testDir: './test/e2e',
   testMatch: /.*\.spec\.mjs$/,
-  outputDir: join(tmpdir(), 'specreview-e2e-results'),
+  outputDir: join(tmpdir(), 'suiko-e2e-results'),
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

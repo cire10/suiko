@@ -1,7 +1,7 @@
 // @ts-check
-// `specreview install [--only a,b] [--skip a,b] [--user|--project] [--with-plan-gate] [--apply]`   detect agents, configure each
-// `specreview install claude [--user|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]`
-// `specreview install agents-md [--file AGENTS.md] [--apply]`
+// `suiko install [--only a,b] [--skip a,b] [--user|--project] [--with-plan-gate] [--apply]`   detect agents, configure each
+// `suiko install claude [--user|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply]`
+// `suiko install agents-md [--file AGENTS.md] [--apply]`
 // Without --apply nothing is written: the exact files, entries and blocks that would change are printed (design 3.0,
 // amendments 5). The single-target plan/apply logic lives in src/cli/install.js, the multi-agent installer in
 // src/cli/install/ (agents.js: what each agent gets; multi.js: detection, selection, dedup, report).
@@ -19,7 +19,7 @@ export const spec = {
   name: 'install',
   usage:
     'install [--only a,b] [--skip a,b] [--user|--project] [--with-plan-gate] [--apply] | install claude [--user|--project] [--with-hooks] [--with-plan-gate] [--with-mcp] [--apply] | install agents-md [--file F] [--apply]',
-  summary: 'Configure SpecReview for the coding agents found on this machine. Prints the changes unless --apply.',
+  summary: 'Configure Suiko for the coding agents found on this machine. Prints the changes unless --apply.',
   options: {
     user: { type: 'boolean' },
     project: { type: 'boolean' },
@@ -36,9 +36,9 @@ export const spec = {
     'would write. --apply writes them (one-time <file>.specreview-backup of any existing file it modifies).',
     '--only claude,codex configures those agents even when they are not detected; --skip leaves agents out.',
     '--user (default) writes the user-level config; --project writes the project-level files where an agent has them.',
-    '--with-plan-gate also reviews Claude Code plans: ExitPlanMode opens the plan in SpecReview (opt-in; a gate already',
-    'installed is kept). Without it, plan mode is left alone: you open reviews yourself (/review-spec, specreview open).',
-    'Undo with `specreview uninstall`. Re-running is idempotent.',
+    '--with-plan-gate also reviews Claude Code plans: ExitPlanMode opens the plan in Suiko (opt-in; a gate already',
+    'installed is kept). Without it, plan mode is left alone: you open reviews yourself (/review-spec, suiko open).',
+    'Undo with `suiko uninstall`. Re-running is idempotent.',
     '',
     'claude --user (default): ~/.claude/skills/spec-review/ and ~/.claude/commands/ ($CLAUDE_CONFIG_DIR is honoured)',
     'claude --project: <project>/.claude/...; --with-mcp then writes <project>/.mcp.json',
@@ -72,7 +72,7 @@ export async function parse({ values, positionals }) {
   if (target !== 'claude' && target !== 'agents-md') {
     throw new UsageError(`install: unknown target "${target}" (expected claude or agents-md, or no target to configure every detected agent; pick agents with --only)`);
   }
-  if (values.only || values.skip) throw new UsageError(`install ${target}: --only/--skip apply to the agent installer (\`specreview install\` with no target)`);
+  if (values.only || values.skip) throw new UsageError(`install ${target}: --only/--skip apply to the agent installer (\`suiko install\` with no target)`);
   if (target === 'agents-md' && (values.user || values.project || values['with-hooks'] || values['with-plan-gate'] || values['with-mcp'])) {
     throw new UsageError('install agents-md: only --file and --apply apply');
   }
@@ -109,7 +109,7 @@ export async function execute(rt, input) {
   if (input.target === 'agents') {
     const ctx = buildContext(rt, { scope: input.scope, planGate: input.planGate });
     const report = runInstaller(ctx, { mode: 'install', only: input.only, skip: input.skip, apply: input.apply });
-    const refused = report.agents.flatMap((a) => a.refusals.map((x) => `specreview: refused ${x.file}: ${x.message}`));
+    const refused = report.agents.flatMap((a) => a.refusals.map((x) => `suiko: refused ${x.file}: ${x.message}`));
     return { exit: reportExit(report), text: describeReport(report), json: reportJson(report), stderr: refused };
   }
   const claudeHome = rt.deps.claudeHome ?? claudeConfigDir(rt);
@@ -121,7 +121,7 @@ export async function execute(rt, input) {
     input.target === 'claude'
       ? planClaude({
           scope: input.scope, withHooks: input.withHooks, withPlanGate: input.withPlanGate, withMcp: input.withMcp, cwd: rt.cwd, claudeHome,
-          cliOnPath: isOnPath('specreview', rt.env.PATH ?? ''), manifest: loadManifest(manifest),
+          cliOnPath: isOnPath('suiko', rt.env.PATH ?? ''), manifest: loadManifest(manifest),
         })
       : planAgentsMd({ cwd: rt.cwd, file: input.file });
   const written = input.apply ? applyPlan(plan, { manifest }) : [];

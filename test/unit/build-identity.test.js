@@ -18,13 +18,13 @@ function makePackage(name) {
   fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
   fs.mkdirSync(path.join(root, 'src', 'cli'), { recursive: true });
   fs.mkdirSync(path.join(root, 'node_modules', 'dep'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"specreview","version":"0.1.0"}\n');
-  fs.writeFileSync(path.join(root, 'bin', 'specreview.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"suiko","version":"0.1.0"}\n');
+  fs.writeFileSync(path.join(root, 'bin', 'suiko.js'), '#!/usr/bin/env node\n');
   fs.writeFileSync(path.join(root, 'src', 'cli', 'main.js'), 'export const x = 1;\n');
   fs.writeFileSync(path.join(root, 'node_modules', 'dep', 'index.js'), 'module.exports = 1;\n');
   fs.writeFileSync(path.join(root, 'README.md'), '# readme\n');
   const t = new Date('2026-01-01T00:00:00Z');
-  for (const rel of ['package.json', 'bin/specreview.js', 'src/cli/main.js', 'node_modules/dep/index.js', 'README.md']) {
+  for (const rel of ['package.json', 'bin/suiko.js', 'src/cli/main.js', 'node_modules/dep/index.js', 'README.md']) {
     fs.utimesSync(path.join(root, rel), t, t);
   }
   return root;

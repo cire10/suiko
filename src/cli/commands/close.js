@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview close <doc> [--json]` (design 9.2): ends the review session; running waits exit 5.
+// `suiko close <doc> [--json]` (design 9.2): ends the review session; running waits exit 5.
 
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
@@ -30,7 +30,7 @@ export async function execute(rt, input) {
   const res = await callOp(engine, 'closeSession', ctx, docId);
   return {
     exit: EXIT.OK,
-    text: `specreview: closed the review session for ${docId}; running waits exit 5`,
+    text: `suiko: closed the review session for ${docId}; running waits exit 5`,
     json: { doc: docId, closed: true, ...(res && typeof res === 'object' ? res : {}) },
   };
 }

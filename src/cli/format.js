@@ -291,7 +291,7 @@ const VERDICT_TEXT = /** @type {Record<string, string>} */ ({
 const WHY_LABEL = /** @type {Record<string, string>} */ ({ reopened: 'REOPENED', reply: 'REPLY', answer: 'ANSWER' });
 
 const PROTOCOL_LINES = [
-  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.',
+  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
   '  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.',
 ];
 
@@ -332,11 +332,11 @@ function formatPacket(p) {
   for (const t of threads) {
     const block = formatPacketThread(p, t);
     if (used + block.length + 2 > LIMITS.packetChars && overflow.length === 0 && out.length > 4) {
-      overflow.push(`[${t.id}] ${packetThreadHeader(p, t)} · specreview show ${p.doc} ${t.id}`);
+      overflow.push(`[${t.id}] ${packetThreadHeader(p, t)} · suiko show ${p.doc} ${t.id}`);
       continue;
     }
     if (overflow.length) {
-      overflow.push(`[${t.id}] ${packetThreadHeader(p, t)} · specreview show ${p.doc} ${t.id}`);
+      overflow.push(`[${t.id}] ${packetThreadHeader(p, t)} · suiko show ${p.doc} ${t.id}`);
       continue;
     }
     out.push('', block);
@@ -414,7 +414,7 @@ function packetThreadHeader(p, t) {
   if (section) parts.push(section);
   if (t.target && t.target !== 'text' && t.label) parts.push(t.label);
   if (t.type === 'suggestion' && t.suggestion && t.suggestion.status !== 'applied') {
-    parts.push(`apply verbatim: ${t.apply ?? `specreview apply ${p.doc} ${t.id}`}`);
+    parts.push(`apply verbatim: ${t.apply ?? `suiko apply ${p.doc} ${t.id}`}`);
   }
   return parts.join(' · ');
 }
@@ -427,7 +427,7 @@ function packetThreadHeader(p, t) {
 function formatPacketThread(p, t) {
   const out = [`[${t.id}] ${packetThreadHeader(p, t)}`];
   if (t.anchorState === 'changed') out.push('  (outdated: text changed)');
-  if (t.anchorState === 'orphaned') out.push(`  (orphaned: reanchor with specreview reanchor ${p.doc} ${t.id} --lines A-B)`);
+  if (t.anchorState === 'orphaned') out.push(`  (orphaned: reanchor with suiko reanchor ${p.doc} ${t.id} --lines A-B)`);
   if (t.on && (!t.target || t.target === 'text')) out.push(`  on: "${excerpt(t.on, 120)}"`);
   if (t.type === 'suggestion' && t.suggestion) {
     for (const line of String(t.suggestion.old ?? '').split('\n')) out.push(`  - ${line}`);
@@ -454,7 +454,7 @@ function formatReviseReport(r) {
   const errors = r?.guards?.errors ?? [];
   const warnings = r?.guards?.warnings ?? [];
   if (r?.refused) {
-    out.push('specreview: REFUSED - nothing recorded (exit 3)');
+    out.push('suiko: REFUSED - nothing recorded (exit 3)');
     for (const e of errors) out.push(`  ERR ${typeof e === 'string' ? e : e.message ?? JSON.stringify(e)}`);
     for (const w of warnings) out.push(`  WARN ${typeof w === 'string' ? w : w.message ?? JSON.stringify(w)}`);
     out.push('working copy left untouched. Preview with --dry-run.');
@@ -463,9 +463,9 @@ function formatReviseReport(r) {
   const added = r?.stats?.added;
   const removed = r?.stats?.removed;
   const stats = added !== undefined ? `+${added} -${removed} lines, ${hunks.length} hunk${hunks.length === 1 ? '' : 's'}` : `${hunks.length} hunk${hunks.length === 1 ? '' : 's'}`;
-  if (r?.dryRun) out.push(`specreview: dry run - would record v${r.version ?? '?'} (${stats}); nothing recorded`);
-  else if (r?.version) out.push(`specreview: recorded v${r.version}${r.doc ? ` for ${r.doc}` : ''} (${stats})${r.respondsTo ? ` · responds to ${r.respondsTo}` : ''}`);
-  else out.push('specreview: nothing to record (working copy equals head)');
+  if (r?.dryRun) out.push(`suiko: dry run - would record v${r.version ?? '?'} (${stats}); nothing recorded`);
+  else if (r?.version) out.push(`suiko: recorded v${r.version}${r.doc ? ` for ${r.doc}` : ''} (${stats})${r.respondsTo ? ` · responds to ${r.respondsTo}` : ''}`);
+  else out.push('suiko: nothing to record (working copy equals head)');
   for (const h of hunks) {
     const target = h.other ? `other: ${h.other}` : h.threads?.length ? `${h.threads.join(' ')}${h.linkedBy ? `  (${h.linkedBy})` : ''}` : 'unlinked';
     out.push(`  ${h.id} ${rangeText(h.newRange ?? h.oldRange) || '-'}  ${sectionText(h.section)}  -> ${target}`);
@@ -477,7 +477,7 @@ function formatReviseReport(r) {
   out.push(`guards: ${errors.length || warnings.length ? '' : 'ok'}${[...errors.map((/** @type {any} */ e) => `ERR ${e}`), ...warnings.map((/** @type {any} */ w) => `WARN ${w}`)].join(' · ')}`);
   const a = r?.anchors;
   if (a) out.push(`anchors: ${a.exact ?? 0} exact, ${a.moved ?? 0} moved, ${a.edited ?? 0} edited, ${a.changed ?? 0} changed, ${a.orphaned ?? 0} orphaned`);
-  if (r?.version && !r?.dryRun) out.push(`reviewer notified${r.notified ? '' : ' (no UI open)'}. next: specreview wait ${r.doc ?? '<doc>'} (background)`);
+  if (r?.version && !r?.dryRun) out.push(`reviewer notified${r.notified ? '' : ' (no UI open)'}. next: suiko wait ${r.doc ?? '<doc>'} (background)`);
   return out.join('\n');
 }
 

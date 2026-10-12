@@ -156,7 +156,7 @@ export function runGuards(p) {
       lock: lock.id,
       hunk: lock.hunks[0],
       message: `${hunkText} changes ${lock.id} ${lock.label} (${agreed})`,
-      fix: `specreview revert ${doc} --hunk ${lock.hunks[0]}   or   --break-lock ${lock.id}="<reason>"`,
+      fix: `suiko revert ${doc} --hunk ${lock.hunks[0]}   or   --break-lock ${lock.id}="<reason>"`,
     });
   }
 
@@ -179,7 +179,7 @@ export function runGuards(p) {
         code: /** @type {GuardCode} */ ('deletion'),
         hunk: h.id,
         message: `${h.id} ${what} (${where(h)}) outside the text of ${h.threads.join(', ')} it is linked to (${h.linkedBy})`,
-        fix: `specreview revert ${doc} --hunk ${h.id}   or   add "other":[{"at":"${otherAt}","why":"..."}]`,
+        fix: `suiko revert ${doc} --hunk ${h.id}   or   add "other":[{"at":"${otherAt}","why":"..."}]`,
       };
       (cfg.unexplainedDeletion === 'refuse' ? errors : warnings).push(issue);
       continue;
@@ -196,7 +196,7 @@ export function runGuards(p) {
         code: /** @type {GuardCode} */ ('deletion'),
         hunk: h.id,
         message: `${h.id} ${what} (${where(h)}) linked to no thread`,
-        fix: `specreview revert ${doc} --hunk ${h.id}   or   add "other":[{"at":"${otherAt}","why":"..."}]`,
+        fix: `suiko revert ${doc} --hunk ${h.id}   or   add "other":[{"at":"${otherAt}","why":"..."}]`,
       };
       (cfg.unexplainedDeletion === 'refuse' ? errors : warnings).push(issue);
     } else {
@@ -210,7 +210,7 @@ export function runGuards(p) {
     errors.push({
       code: 'rewrite',
       message: `rewrites ${pct(ratio)} of v${p.headVersion} (limit ${pct(cfg.maxRewriteRatio)})`,
-      fix: `make targeted edits (undo with specreview revert ${doc} --hunk hN)   or   --allow-rewrite (only if the user asked for a rewrite)`,
+      fix: `make targeted edits (undo with suiko revert ${doc} --hunk hN)   or   --allow-rewrite (only if the user asked for a rewrite)`,
     });
   }
 

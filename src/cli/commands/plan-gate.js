@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview plan-gate [--timeout 30m] [--browser system|none]`: the Claude Code plan-mode gate, run as a
+// `suiko plan-gate [--timeout 30m] [--browser system|none]`: the Claude Code plan-mode gate, run as a
 // PermissionRequest hook with matcher ExitPlanMode (integrations/claude-code/hooks/hooks.json, timeout 345600 s).
 //
 // 1. Reads the hook JSON on stdin ({session_id, cwd, tool_name: "ExitPlanMode", tool_input: {plan, planFilePath}}).
@@ -41,7 +41,7 @@ import { externalsLines, recordSnapshotDoc, snapshotWorkspace } from '../snapsho
 export const spec = {
   name: 'plan-gate',
   usage: 'plan-gate [--timeout 30m] [--browser system|none]   (reads the PermissionRequest hook JSON on stdin)',
-  summary: 'Claude Code plan-mode gate: review the plan of ExitPlanMode in SpecReview, then allow it or send the feedback back.',
+  summary: 'Claude Code plan-mode gate: review the plan of ExitPlanMode in Suiko, then allow it or send the feedback back.',
   // parsed by the command itself (never fails: a hook must fail open)
   raw: true,
   options: {
@@ -49,7 +49,7 @@ export const spec = {
     browser: { type: 'string' },
   },
   details: [
-    'Hook: {"PermissionRequest":[{"matcher":"ExitPlanMode","hooks":[{"type":"command","command":"specreview plan-gate","timeout":345600}]}]}',
+    'Hook: {"PermissionRequest":[{"matcher":"ExitPlanMode","hooks":[{"type":"command","command":"suiko plan-gate","timeout":345600}]}]}',
     'Each ExitPlanMode of the same plan file in a session is recorded as a new version of one snapshot doc, so the reviewer sees a diff.',
     'Approve -> ExitPlanMode is allowed. Request changes or Comment -> it is denied with the feedback: threads citing the',
     '  plan file and its line numbers, and the instruction to make targeted Edit-tool changes and call ExitPlanMode again.',
@@ -177,11 +177,11 @@ async function gate(rt, input) {
   const info = await rt.ensureDaemon();
   if (rt.signal?.aborted) return;
   const url = rt.reviewUrl(info, t.wsId, t.doc.id);
-  note(rt, `specreview: review the plan (${t.doc.id} v${gateVersion}) at ${url}`);
-  for (const line of externalsLines(t.externalHosts)) note(rt, `specreview: ${line}`);
+  note(rt, `suiko: review the plan (${t.doc.id} v${gateVersion}) at ${url}`);
+  for (const line of externalsLines(t.externalHosts)) note(rt, `suiko: ${line}`);
   if (await superseded(t, gateVersion)) return;
   if (input.browser !== 'none') {
-    await rt.openBrowser(url).catch((err) => note(rt, `specreview: could not open the system browser: ${err?.message ?? err}`));
+    await rt.openBrowser(url).catch((err) => note(rt, `suiko: could not open the system browser: ${err?.message ?? err}`));
   }
 
   const controller = new AbortController();
@@ -217,7 +217,7 @@ async function gate(rt, input) {
       heartbeatMs: rt.heartbeatMs,
       ...(rt.deps.pollMs ? { pollMs: rt.deps.pollMs } : {}),
     });
-    if (res?.status !== 'delivered') note(rt, `specreview: plan gate ended without a review (${res?.aborted ? 'interrupted' : res?.status ?? 'unknown'}); Claude Code decides`);
+    if (res?.status !== 'delivered') note(rt, `suiko: plan gate ended without a review (${res?.aborted ? 'interrupted' : res?.status ?? 'unknown'}); Claude Code decides`);
   } finally {
     if (timer) clearTimeout(timer);
     rt.signal?.removeEventListener('abort', onSignal);

@@ -1,5 +1,5 @@
 // @ts-check
-// Docs stay in sync with the real CLI (integration): every `specreview <command> ...` written in a code span or code
+// Docs stay in sync with the real CLI (integration): every `suiko <command> ...` written in a code span or code
 // block of README.md, docs/agent-protocol.md, docs/user-guide.md and integrations/**/*.md must name a real command
 // (or `hook` / `install` subcommand) and only flags that command's parseArgs spec accepts (plus the global ones).
 // Also checks that relative Markdown links in those files resolve. Ported from WP8's checker, but the allowlist is
@@ -18,7 +18,7 @@ const { GLOBAL_OPTIONS } = await import('../../src/cli/args.js');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SUBCOMMANDS = { hook: ['pre-write', 'prompt'], install: ['claude', 'agents-md'] };
-/** Commands whose subcommand is optional: `specreview install --apply` runs the agent installer. */
+/** Commands whose subcommand is optional: `suiko install --apply` runs the agent installer. */
 const OPTIONAL_SUB = new Set(['install']);
 /** Words that end a documented command (prose or shell glue after it). */
 const STOP = new Set(['or', '->', '|', 'then', '&&', 'and', '·', '/', ';']);
@@ -65,7 +65,7 @@ function codeSnippets(text) {
   return out;
 }
 
-test('every documented specreview command and flag exists in the CLI', async () => {
+test('every documented suiko command and flag exists in the CLI', async () => {
   /** @type {Record<string, Set<string>>} */
   const allowed = {};
   for (const [name, c] of Object.entries(COMMANDS)) allowed[name] = flagsOf((await c.load()).spec.options ?? {});
@@ -75,11 +75,11 @@ test('every documented specreview command and flag exists in the CLI', async () 
   for (const file of FILES) {
     const rel = path.relative(ROOT, file);
     for (const snip of codeSnippets(fs.readFileSync(file, 'utf8'))) {
-      for (const m of snip.matchAll(/(?:^|[\s$(`"'])specreview\s+([a-z][a-z-]*)([^`\n]*)/g)) {
+      for (const m of snip.matchAll(/(?:^|[\s$(`"'])suiko\s+([a-z][a-z-]*)([^`\n]*)/g)) {
         const cmd = m[1];
         const toks = m[2].trim().split(/\s+/).filter(Boolean);
         if (!allowed[cmd]) {
-          errors.push(`${rel}: unknown command "specreview ${cmd}" in: ${snip.trim().slice(0, 100)}`);
+          errors.push(`${rel}: unknown command "suiko ${cmd}" in: ${snip.trim().slice(0, 100)}`);
           continue;
         }
         let i = 0;
@@ -89,7 +89,7 @@ test('every documented specreview command and flag exists in the CLI', async () 
           if (subs.includes(sub)) i = 1;
           else if (OPTIONAL_SUB.has(cmd) && (sub === '' || /^[-[]/.test(sub) || STOP.has(sub) || sub.startsWith('#'))) i = 0;
           else {
-            errors.push(`${rel}: unknown subcommand "specreview ${cmd} ${sub}"`);
+            errors.push(`${rel}: unknown subcommand "suiko ${cmd} ${sub}"`);
             continue;
           }
         }
@@ -98,7 +98,7 @@ test('every documented specreview command and flag exists in the CLI', async () 
           const t = toks[i];
           if (STOP.has(t) || t.startsWith('#')) break;
           const f = t.replace(/^[[(]+/, '').match(/^(--?[a-zA-Z][\w-]*)/);
-          if (f && !allowed[cmd].has(f[1])) errors.push(`${rel}: flag ${f[1]} is not accepted by "specreview ${cmd}" in: ${snip.trim().slice(0, 120)}`);
+          if (f && !allowed[cmd].has(f[1])) errors.push(`${rel}: flag ${f[1]} is not accepted by "suiko ${cmd}" in: ${snip.trim().slice(0, 120)}`);
         }
       }
     }

@@ -1,7 +1,7 @@
 // @ts-check
 // The code-review engine (doc kind 'code'): one import point for the ops, the kind adapter and the daemon.
 //
-//   review.js   openCodeReview                       `specreview review`, MCP specreview_review
+//   review.js   openCodeReview                       `suiko review`, MCP suiko_review
 //   round.js    reviseCode, recordCodeRound          `revise` on a code doc; UI Re-snapshot / apply rounds
 //   state.js    codeWorkingState                     the dirty state (kind adapter workingState)
 //   capture.js  resolveCodeCapture, codeSuggestionFor  captures and suggestions (kind adapter capture)

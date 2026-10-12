@@ -1,7 +1,7 @@
 // @ts-check
-// `specreview show <doc> <tid>` text against the REAL engine: the thread must carry the working-copy `src>` lines
+// `suiko show <doc> <tid>` text against the REAL engine: the thread must carry the working-copy `src>` lines
 // (an Edit old_string) and the `crop:` path of an image region, like a packet item does. Packet overflow lines
-// ("specreview show <doc> t21") and the skill ("the user mentions t4") send the agent to `show`, so without them
+// ("suiko show <doc> t21") and the skill ("the user mentions t4") send the agent to `show`, so without them
 // the agent had only the rendered `on:` quote and could not see the region the reviewer drew. Also covers the
 // MCP tool (same execute()) and withThreadSource() on its own (no duplicates when a formatter already prints them).
 
@@ -119,10 +119,10 @@ describe('show <doc> <tid> prints src> and crop like a packet item', { skip: HAS
     }
   });
 
-  test('MCP specreview_show returns the same text (src> and crop:)', async () => {
+  test('MCP suiko_show returns the same text (src> and crop:)', async () => {
     const { TOOLS } = await import('../../src/mcp/tools.js');
     const { callTool } = await import('../../src/mcp/server.js');
-    const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'specreview_show'));
+    const tool = /** @type {any} */ (TOOLS.find((t) => t.name === 'suiko_show'));
     const res = await callTool(tool, { doc: DOC, thread_id: 't2' }, null, { cwd: ws.root, env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
     assert.equal(res.isError, undefined, res.content[0].text);
     assert.match(res.content[0].text, /^ {2}src> !\[System overview\]/m);

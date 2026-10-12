@@ -2,7 +2,7 @@
 // What the multi-agent installer writes, built from the integration files at run time:
 //   - the protocol block (integrations/agents-md/AGENTS.snippet.md) for global instruction files (AGENTS.md, GEMINI.md,
 //     copilot-instructions.md, ...), with the "not on PATH" invocation note after its begin marker when needed;
-//   - the agent-neutral skill (integrations/agent-skills/specreview-review/SKILL.md + the protocol);
+//   - the agent-neutral skill (integrations/agent-skills/suiko-review/SKILL.md + the protocol);
 //   - per-agent command files (Gemini CLI TOML, OpenCode Markdown) and the Kiro steering file;
 //   - the Codex config.toml block registering the MCP server.
 // Every builder returns { template, content }: `template` is the text without the invocation note (used to recognise
@@ -12,13 +12,13 @@ import path from 'node:path';
 import { AGENTS_SNIPPET, INTEGRATIONS_DIR, invocationNote, readText, withInvocationNote } from '../install.js';
 import { TOML_BEGIN, TOML_END } from './files.js';
 
-export const SKILL_NAME = 'specreview-review';
+export const SKILL_NAME = 'suiko-review';
 export const SKILL_TEMPLATE = path.join(INTEGRATIONS_DIR, 'agent-skills', SKILL_NAME, 'SKILL.md');
 export const GEMINI_COMMAND = path.join(INTEGRATIONS_DIR, 'gemini', 'commands', `${SKILL_NAME}.toml`);
 export const OPENCODE_COMMAND = path.join(INTEGRATIONS_DIR, 'opencode', 'commands', `${SKILL_NAME}.md`);
 export { AGENTS_SNIPPET };
 
-/** Seconds Codex may spend in one MCP tool call: specreview_wait's maximum (600 s) plus a margin. */
+/** Seconds Codex may spend in one MCP tool call: suiko_wait's maximum (600 s) plus a margin. */
 export const CODEX_TOOL_TIMEOUT_SEC = 660;
 
 /**
@@ -32,7 +32,7 @@ export function protocolSnippet() {
 }
 
 /**
- * The protocol block for a global instructions file; when `specreview` is not on PATH, the invocation note follows
+ * The protocol block for a global instructions file; when `suiko` is not on PATH, the invocation note follows
  * the begin marker (inside the block, so reinstall/uninstall handle it too).
  * @param {ContentCtx} c
  * @returns {Built}
@@ -99,8 +99,8 @@ export function kiroSteering(c) {
  */
 export function codexTomlBlock(c) {
   return [
-    `${TOML_BEGIN} (managed by \`specreview install\`; edits inside this block are replaced on reinstall)`,
-    '[mcp_servers.specreview]',
+    `${TOML_BEGIN} (managed by \`suiko install\`; edits inside this block are replaced on reinstall)`,
+    '[mcp_servers.suiko]',
     `command = ${tomlString(c.execPath)}`,
     `args = [${tomlString(c.binPath)}, "mcp"]`,
     `tool_timeout_sec = ${CODEX_TOOL_TIMEOUT_SEC}`,

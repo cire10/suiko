@@ -1,4 +1,4 @@
-// SpecReview guest, part 65: snip mode (drag a box over ANY area of the doc -> SnipCapture + PNG crop).
+// Suiko guest, part 65: snip mode (drag a box over ANY area of the doc -> SnipCapture + PNG crop).
 //
 // Entered with setTool {tool:'snip'} from the UI, or by pressing `b` in the document (85-keys.js; the guest then
 // posts toolChanged {tool:'snip'} and the key is not forwarded). Like pick mode it lays the transparent glass

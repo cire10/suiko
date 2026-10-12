@@ -4,7 +4,7 @@ Line numbers = files in your working tree now (all identical to v1).
 Reviewer summary: Mostly good. Fix the reuse race before merging.
 4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
 
-[t2] suggestion · src/auth/refresh.js:L88 · apply verbatim: specreview apply cr-feat-token-refresh t2
+[t2] suggestion · src/auth/refresh.js:L88 · apply verbatim: suiko apply cr-feat-token-refresh t2
   - const ttlSec = 30 * 24 * 3600;
   + const ttlSec = config.refreshTtlSec;
   Eric: Read it from config.
@@ -28,5 +28,5 @@ Reviewer summary: Mostly good. Fix the reuse race before merging.
 
 DECISIONS to keep true: (none yet)
 PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
-  Suggestions: `specreview apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
-NEXT: edit the files -> specreview revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> specreview wait cr-feat-token-refresh (background)
+  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> suiko wait cr-feat-token-refresh (background)

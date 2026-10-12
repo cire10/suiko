@@ -56,7 +56,7 @@
   text-decoration: none;
 }
 
-/* "SpecReview / Notification Service": a GitHub-style breadcrumb, the slash between brand and title. */
+/* "Suiko / Notification Service": a GitHub-style breadcrumb, the slash between brand and title. */
 .brand::after {
   content: "/";
   margin-left: 4px;

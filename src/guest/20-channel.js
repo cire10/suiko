@@ -1,4 +1,4 @@
-// SpecReview guest, part 20: the message channel to the reviewer UI.
+// Suiko guest, part 20: the message channel to the reviewer UI.
 //
 // Handshake (amendments section 7 / protocol.js MSG):
 //   1. guest -> window.parent.postMessage({sr:1, type:'hello', ...}, origin) once for each allowed UI origin

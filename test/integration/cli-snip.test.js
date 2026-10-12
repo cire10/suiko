@@ -1,8 +1,8 @@
 // @ts-check
-// `specreview snip` against the real engine and store (in-process main(), plus real `bin/specreview.js` processes
+// `suiko snip` against the real engine and store (in-process main(), plus real `bin/suiko.js` processes
 // for the waiting agent): a screen snip becomes a reviewer DRAFT (GENERAL comment or question with the image
 // attached, drafts.changed {source:'snip'}), --file skips the picker, --send submits a one-item review that wakes a
-// background `specreview wait` whose packet names the image's absolute path, Esc cancels (exit 0, nothing added),
+// background `suiko wait` whose packet names the image's absolute path, Esc cancels (exit 0, nothing added),
 // no picker is exit 1, and without <doc> the doc is the workspace's only one, else the most recently active.
 // The real macOS picker is NEVER run: SPECREVIEW_SCREENCAPTURE always points at the fake command of
 // test/fixtures/snip/capture.js (or at a path that does not exist). SPECREVIEW_HOME is a temp dir.
@@ -17,7 +17,7 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BIN = path.resolve(HERE, '../../bin/specreview.js');
+const BIN = path.resolve(HERE, '../../bin/suiko.js');
 const DOC = 'kitchen-sink';
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-cli-snip-')));
 // never the real /usr/sbin/screencapture, even if a test forgets to pick a fake
@@ -90,12 +90,12 @@ async function until(cond, ms = 8000) {
   }
 }
 
-describe('specreview snip', () => {
+describe('suiko snip', () => {
   test('picker -> a GENERAL draft comment with the screenshot attached; the UI is told (drafts.changed source snip)', async () => {
     const before = fake.calls().length;
     const r = await cli(['snip', DOC, '-m', 'The header overlaps the logo']);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stdout, 'specreview: added a screenshot to kitchen-sink as draft d1 - open the review UI to comment and submit\n');
+    assert.equal(r.stdout, 'suiko: added a screenshot to kitchen-sink as draft d1 - open the review UI to comment and submit\n');
     assert.equal(r.stderr, '', 'an explicit doc is not announced');
     const calls = fake.calls();
     assert.equal(calls.length, before + 1, 'the picker ran once');
@@ -155,7 +155,7 @@ describe('specreview snip', () => {
 
     const missing = await cli(['snip', DOC, '--file', 'nope.png'], { mode: 'fail' });
     assert.equal(missing.code, 4);
-    assert.match(missing.stderr, /^specreview: snip --file: no such file: .*nope\.png$/m);
+    assert.match(missing.stderr, /^suiko: snip --file: no such file: .*nope\.png$/m);
     fs.writeFileSync(path.join(ws.root, 'notes.txt'), 'not an image');
     const notImage = await cli(['snip', DOC, '--file', 'notes.txt'], { mode: 'fail' });
     assert.equal(notImage.code, 1);
@@ -169,7 +169,7 @@ describe('specreview snip', () => {
     const eventCount = (await events()).length;
     const r = await cli(['snip', DOC, '-m', 'never mind'], { mode: 'cancel' });
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stdout, 'specreview: snip cancelled; nothing was added\n');
+    assert.equal(r.stdout, 'suiko: snip cancelled; nothing was added\n');
     const j = JSON.parse((await cli(['snip', DOC, '--json'], { mode: 'cancel' })).stdout);
     assert.equal(j.cancelled, true);
     assert.equal((await ctx.store.getDrafts(DOC)).items.length, drafts);
@@ -181,7 +181,7 @@ describe('specreview snip', () => {
     const drafts = (await ctx.store.getDrafts(DOC)).items.length;
     const r = await cli(['snip', DOC], { capture: path.join(TMP, 'no-such-capture-command') });
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /^specreview: screen snips need .*no-such-capture-command, which does not exist\. Attach an existing image with --file <png>/m);
+    assert.match(r.stderr, /^suiko: screen snips need .*no-such-capture-command, which does not exist\. Attach an existing image with --file <png>/m);
     assert.equal(r.stdout, '');
     const j = await cli(['snip', DOC, '--json'], { capture: path.join(TMP, 'no-such-capture-command') });
     assert.equal(j.code, 1);
@@ -189,7 +189,7 @@ describe('specreview snip', () => {
     assert.equal((await ctx.store.getDrafts(DOC)).items.length, drafts);
   });
 
-  test('--send wakes a background `specreview wait`: the packet item is GENERAL and names the absolute image path', async () => {
+  test('--send wakes a background `suiko wait`: the packet item is GENERAL and names the absolute image path', async () => {
     // the drafts of the earlier tests stay drafts: --send submits only its own one
     const draftsBefore = (await ctx.store.getDrafts(DOC)).items.map((/** @type {any} */ d) => d.id);
     const waiter = spawn(process.execPath, [BIN, 'wait', DOC], {
@@ -206,7 +206,7 @@ describe('specreview snip', () => {
       await until(async () => (await ctx.store.listWaiters(DOC)).some((/** @type {any} */ w) => w.pid === waiter.pid));
       const r = await cli(['snip', DOC, '--send', '-m', 'This is the login page today']);
       assert.equal(r.code, 0, r.stderr);
-      assert.equal(r.stdout, 'specreview: sent a screenshot to claude as review rv1 on kitchen-sink\n');
+      assert.equal(r.stdout, 'suiko: sent a screenshot to claude as review rv1 on kitchen-sink\n');
       const code = await done;
       assert.equal(code, 0, stderr);
     } finally {
@@ -241,13 +241,13 @@ describe('specreview snip', () => {
     assert.equal(j.review, 'rv2');
     assert.deepEqual(j.listening, []);
     const t = await cli(['snip', DOC, '--send']);
-    assert.match(t.stdout, /^specreview: sent a screenshot to the agent as review rv3 on kitchen-sink \(nobody is waiting right now; it is delivered by the next `specreview wait`\)$/m);
+    assert.match(t.stdout, /^suiko: sent a screenshot to the agent as review rv3 on kitchen-sink \(nobody is waiting right now; it is delivered by the next `suiko wait`\)$/m);
   });
 
-  test('MCP specreview_feedback carries the snipped images: absolute paths in the text and the structured packet', async () => {
+  test('MCP suiko_feedback carries the snipped images: absolute paths in the text and the structured packet', async () => {
     const { TOOLS } = await import('../../src/mcp/tools.js');
     const { callTool } = await import('../../src/mcp/server.js');
-    const tool = /** @type {any} */ (TOOLS.find((x) => x.name === 'specreview_feedback'));
+    const tool = /** @type {any} */ (TOOLS.find((x) => x.name === 'suiko_feedback'));
     const res = await callTool(tool, { doc: DOC, peek: true }, null, { cwd: ws.root, env: { SPECREVIEW_HOME: process.env.SPECREVIEW_HOME, CLAUDECODE: '1' } });
     assert.equal(res.isError, undefined, res.content[0].text);
     const text = res.content[0].text;
@@ -263,7 +263,7 @@ describe('specreview snip', () => {
   });
 });
 
-describe('specreview snip without <doc>', () => {
+describe('suiko snip without <doc>', () => {
   /** @type {Array<{ root: string, id: string, ctx: any }>} */
   const extra = [];
 
@@ -303,8 +303,8 @@ describe('specreview snip without <doc>', () => {
     await touch('beta');
     const r = await cli(['snip'], { cwd: path.join(TMP, 'multi') });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^specreview: added a screenshot to beta as draft d1/);
-    assert.match(r.stderr, /^specreview: no doc given; snipping to beta, the most recently active of 2 tracked docs \(pass the doc to choose\)$/m);
+    assert.match(r.stdout, /^suiko: added a screenshot to beta as draft d1/);
+    assert.match(r.stderr, /^suiko: no doc given; snipping to beta, the most recently active of 2 tracked docs \(pass the doc to choose\)$/m);
     const viaFlag = await cli(['snip', '--workspace', path.join(TMP, 'multi'), '--json'], { cwd: TMP });
     assert.equal(JSON.parse(viaFlag.stdout).doc, 'beta');
   });
@@ -319,7 +319,7 @@ describe('specreview snip without <doc>', () => {
     assert.equal(j.doc, 'gamma');
     assert.equal(j.chosen, 'recent');
     assert.equal(j.root, path.join(TMP, 'solo'));
-    assert.match(r.stderr, new RegExp(`^specreview: no doc given; snipping to gamma in ${path.join(TMP, 'solo').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, the most recently active of \\d+ tracked docs`, 'm'));
+    assert.match(r.stderr, new RegExp(`^suiko: no doc given; snipping to gamma in ${path.join(TMP, 'solo').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, the most recently active of \\d+ tracked docs`, 'm'));
     const drafts = await extra.find((x) => x.id === 'gamma')?.ctx.store.getDrafts('gamma');
     assert.equal(drafts.items.at(-1).attachments.length, 1);
 

@@ -45,7 +45,7 @@ export function parseCommandArgs(command, argv, options = {}) {
   } catch (err) {
     const e = /** @type {NodeJS.ErrnoException} */ (err);
     if (typeof e.code === 'string' && e.code.startsWith('ERR_PARSE_ARGS')) {
-      throw new UsageError(`${command}: ${e.message.replace(/\.$/, '')} (see: specreview ${command} --help)`);
+      throw new UsageError(`${command}: ${e.message.replace(/\.$/, '')} (see: suiko ${command} --help)`);
     }
     throw err;
   }
@@ -60,9 +60,9 @@ export function parseCommandArgs(command, argv, options = {}) {
  * @param {string} usage
  */
 export function expectPositionals(command, positionals, min, max, usage) {
-  if (positionals.length < min) throw new UsageError(`${command}: missing argument (usage: specreview ${usage})`);
+  if (positionals.length < min) throw new UsageError(`${command}: missing argument (usage: suiko ${usage})`);
   if (positionals.length > max) {
-    throw new UsageError(`${command}: unexpected argument "${positionals[max]}" (usage: specreview ${usage})`);
+    throw new UsageError(`${command}: unexpected argument "${positionals[max]}" (usage: suiko ${usage})`);
   }
 }
 

@@ -1,6 +1,6 @@
 // @ts-check
-// The one network path of the CLI besides `install.sh`: `specreview snapshot <url>` (design 6.2, D9). Running the
-// command is the consent; nothing else in SpecReview fetches (the daemon and the UI never do).
+// The one network path of the CLI besides `install.sh`: `suiko snapshot <url>` (design 6.2, D9). Running the
+// command is the consent; nothing else in Suiko fetches (the daemon and the UI never do).
 //
 //   networkRefusal(env)       -> string | null   why the network may not be used (SPECREVIEW_OFFLINE=1, or
 //                                                  network.allow: false in the user config $SPECREVIEW_HOME/config.json;
@@ -27,7 +27,7 @@
 //     reader jina (only when asked): https://r.jina.ai/<url without query and fragment>, which renders the page
 //     with JavaScript; refused for a non-public host.
 // Errors: RefusedError (exit 3) for policy refusals (offline, non-public host, user info, scheme, too large,
-// unsupported type); NotFoundError (exit 4) when the host does not resolve; a NETWORK SpecReviewError (exit 1) for
+// unsupported type); NotFoundError (exit 4) when the host does not resolve; a NETWORK SuikoError (exit 1) for
 // connection failures, timeouts, too many redirects and HTTP statuses of 400 and above.
 
 import dns from 'node:dns';
@@ -37,7 +37,7 @@ import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { NotFoundError, RefusedError, SpecReviewError, UsageError } from '../core/store/errors.js';
+import { NotFoundError, RefusedError, SuikoError, UsageError } from '../core/store/errors.js';
 import { homeDir } from '../core/store/home.js';
 import { prescanMetaCharset, sniffBom } from '../core/render/charset.js';
 import { EXIT, LIMITS } from '../shared/protocol.js';
@@ -299,7 +299,7 @@ async function resolveChecked(hostname, { lookup, allowPrivate, why = '' }) {
  * @param {Record<string, unknown>} [details]
  */
 function networkError(message, details = {}) {
-  return new SpecReviewError(message, { exit: EXIT.ERROR, code: 'NETWORK', details });
+  return new SuikoError(message, { exit: EXIT.ERROR, code: 'NETWORK', details });
 }
 
 /**
@@ -344,7 +344,7 @@ export async function fetchForSnapshot(input, opts = {}) {
       anyPrivate ||= resolved.private;
       const markdownWanted = reader === 'jina' || MD_HOSTS.has(url.hostname) || MD_PATH_RE.test(url.pathname);
       const headers = {
-        'User-Agent': `specreview/${packageVersion()}`,
+        'User-Agent': `suiko/${packageVersion()}`,
         Accept: markdownWanted ? 'text/markdown, text/plain;q=0.9, */*;q=0.1' : 'text/markdown, text/html;q=0.9, */*;q=0.1',
         'Accept-Encoding': 'gzip, deflate, br',
         ...(reader === 'jina' ? { 'X-Return-Format': 'markdown' } : {}),

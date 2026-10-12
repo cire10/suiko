@@ -21,7 +21,7 @@ export function Home() {
   const docs = home.docs;
   return html`<div class="home">
     <header class="home-head">
-      <h1><span class="logo" aria-hidden="true"><${Icon} name="comment" size=${18} /></span> SpecReview</h1>
+      <h1><span class="logo" aria-hidden="true"><${Icon} name="comment" size=${18} /></span> Suiko</h1>
       <div class="home-tools">
         <${PaletteButton} />
         <button type="button" class="icon-btn" aria-label=${`Theme: ${theme}. Change theme`} title="Theme (t)" onClick=${cycleTheme}>
@@ -40,7 +40,7 @@ export function Home() {
         </ul>
         ${docs.length === 0 ? html`<div class="empty">
           <p><strong>No documents yet.</strong></p>
-          <p>Ask your agent to run <code>specreview open path/to/spec.md</code>, or run it yourself, and the spec appears here.</p>
+          <p>Ask your agent to run <code>suiko open path/to/spec.md</code>, or run it yourself, and the spec appears here.</p>
         </div>` : null}`}
     </main>
   </div>`;

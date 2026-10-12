@@ -1,4 +1,4 @@
-// SpecReview guest, part 50: text selection -> capture + selection mini-toolbar.
+// Suiko guest, part 50: text selection -> capture + selection mini-toolbar.
 //
 // On a settled selection change (selectionchange debounced 120 ms, deferred while a pointer button is down) the guest
 // computes the FROZEN text capture

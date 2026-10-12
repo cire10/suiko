@@ -11,7 +11,7 @@
 // kind 'snip' anchor on the whole source lines of the stamped blocks under the box, with `snip` {label, covers, text,
 // region, container}; a box over nothing stamped is a general anchor that keeps `snip`. Its DomTarget is the box on
 // the container ({kind:'element', srid, region}) or the covered blocks ({kind:'source', srid, endSrid}).
-// `addSnipDraft` does what `specreview snip` does (a draft with the screenshot attached and the drafts.changed
+// `addSnipDraft` does what `suiko snip` does (a draft with the screenshot attached and the drafts.changed
 // {source:'snip'} hint).
 
 import { createHash } from 'node:crypto';
@@ -873,9 +873,9 @@ export class MockDoc {
   }
 
   /**
-   * What `specreview snip` does: stores the screenshot, adds it as a draft general comment, and appends the
+   * What `suiko snip` does: stores the screenshot, adds it as a draft general comment, and appends the
    * drafts.changed {source:'snip', draft} hint the UI toasts. With `send` the draft is submitted at once (verdict
-   * comment), like `specreview snip --send`.
+   * comment), like `suiko snip --send`.
    * @param {{ dataUrl: string, body?: string, send?: boolean }} p
    */
   addSnipDraft(p) {

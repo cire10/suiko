@@ -1,5 +1,5 @@
 // @ts-check
-// SpecReview reviewer UI entry point (no build step: Preact + htm via the import map in index.html).
+// Suiko reviewer UI entry point (no build step: Preact + htm via the import map in index.html).
 // Boot order: move the ?k= token into sessionStorage, apply the saved theme, track the narrow (< 900 px) and medium
 // (900-1199 px) layouts, install the keyboard map, render the app, then load the route (/ = all docs,
 // /d/:ws/:doc = one doc).
@@ -29,7 +29,7 @@ installKeys();
 window.addEventListener('popstate', applyRoute);
 for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, markSeen, { capture: true, passive: true });
 window.addEventListener('focus', () => setTimeout(markSeen, 1500));
-window.addEventListener('unhandledrejection', (ev) => console.error('specreview: unhandled rejection', ev.reason));
+window.addEventListener('unhandledrejection', (ev) => console.error('suiko: unhandled rejection', ev.reason));
 
 const root = document.getElementById('app');
 if (root) {

@@ -60,7 +60,7 @@ export class EventStream {
     try {
       es = new EventSource(eventsUrl({ ws, doc, lastEventId: this.lastId }));
     } catch (err) {
-      console.error('specreview: cannot open the event stream', err);
+      console.error('suiko: cannot open the event stream', err);
       this.scheduleRetry();
       return;
     }
@@ -103,7 +103,7 @@ export class EventStream {
     try {
       this.opts.onEvent(name, data, ev.lastEventId || null);
     } catch (err) {
-      console.error('specreview: event handler failed', name, err);
+      console.error('suiko: event handler failed', name, err);
     }
   }
 }

@@ -10,7 +10,7 @@
 //                  VENDOR_DOC (the snip rasteriser, modern-screenshot, is imported from there, like on the daemon);
 //                  /img/*.png - PNGs generated in memory (plain zlib, no deps); /raw/<name>.html - the same fixture
 //                  without the guest (baseline for observe-only checks).
-// Both servers bind 127.0.0.1 on port 0 by default (never the default SpecReview ports).
+// Both servers bind 127.0.0.1 on port 0 by default (never the default Suiko ports).
 
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';

@@ -9,7 +9,7 @@
 // (busy), its buttons are disabled so a double click cannot send it twice.
 // A draft made on another version than the one shown says so: it is not painted on this version (the daemon carries
 // it forward when the review is submitted), and its line numbers refer to its own version.
-// Screenshots attached to a thread or draft (snips, picked regions, pasted images, `specreview snip`) show as
+// Screenshots attached to a thread or draft (snips, picked regions, pasted images, `suiko snip`) show as
 // thumbnails served by the daemon under DocState.attachmentBase; a click shows one full size.
 
 import { html, useEffect, useRef, useState } from 'preact-htm';

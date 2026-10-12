@@ -5,7 +5,7 @@
 // Why parse at all: Codex itself rewrites config.toml with toml_edit (project trust on onboarding, `codex mcp add`),
 // and toml_edit keeps a trailing comment as document decor, so a table Codex adds lands BEFORE our `# specreview:end`
 // line. "Everything between the markers" is therefore not ours. Ours is exactly: the begin marker line, the
-// [mcp_servers.specreview] table (and its sub-tables) with its key lines, and the end marker line. Any other table
+// [mcp_servers.suiko] table (and its sub-tables) with its key lines, and the end marker line. Any other table
 // found between the markers is kept: install moves it below the block, uninstall leaves it in place.
 //
 // The scanner follows TOML 1.0 closely enough to know where every statement starts and ends (basic, literal and
@@ -269,7 +269,7 @@ const startsWith = (p, prefix) => Boolean(p && p.length >= prefix.length && pref
  * Locates our block in a scanned document. More than one begin marker is ambiguous: InstallRefusal-worthy, so this
  * throws a plain Error with a message for the caller to wrap.
  * @param {string} text
- * @param {string[]} ours the table path we own, e.g. ['mcp_servers', 'specreview']
+ * @param {string[]} ours the table path we own, e.g. ['mcp_servers', 'suiko']
  * @returns {TomlBlock}
  */
 export function findTomlBlock(text, ours) {
@@ -280,7 +280,7 @@ export function findTomlBlock(text, ours) {
   const ends = comments.filter((s) => END_RE.test(/** @type {string} */ (s.text)));
   /** @type {TomlBlock} */
   const r = { statements, region: null, own: new Set(), keepBefore: [], foreign: [], foreignTables: [], strayEnds: [], ownTable: false };
-  if (begins.length > 1) throw new Error(`it has ${begins.length} "# specreview:begin" lines; SpecReview manages one block`);
+  if (begins.length > 1) throw new Error(`it has ${begins.length} "# specreview:begin" lines; Suiko manages one block`);
   if (!begins.length) {
     r.strayEnds = ends.map((s) => s.start);
     return r;
@@ -331,8 +331,8 @@ export function findTomlBlock(text, ours) {
 }
 
 /**
- * Where the document defines something under `ours` outside our block: e.g. a [mcp_servers.specreview] header, a
- * `specreview = {...}` / `specreview.command = ...` key under [mcp_servers], or a root `mcp_servers.specreview...`
+ * Where the document defines something under `ours` outside our block: e.g. a [mcp_servers.suiko] header, a
+ * `suiko = {...}` / `suiko.command = ...` key under [mcp_servers], or a root `mcp_servers.suiko...`
  * dotted key. `container` reports a parent that cannot take our table (an inline `mcp_servers = {...}` or an array of
  * tables [[mcp_servers]]).
  * @param {TomlBlock} blk

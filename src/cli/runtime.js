@@ -13,7 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { NotFoundError, SpecReviewError, UsageError } from '../core/store/errors.js';
+import { NotFoundError, SuikoError, UsageError } from '../core/store/errors.js';
 import { isWithin } from '../core/util/paths.js';
 import { isGated } from '../core/store/snapshot.js';
 import { loadEngine } from './engine.js';
@@ -145,7 +145,7 @@ export async function openContext(rt, opts = {}) {
     if (related.length === 0) throw err;
     if (related.length > 1) {
       throw new UsageError(
-        `no SpecReview workspace at ${rt.cwd}, and several below it (${related.join(', ')}); ` +
+        `no Suiko workspace at ${rt.cwd}, and several below it (${related.join(', ')}); ` +
           'pass the doc (its file path) or --workspace <dir>',
         { details: { workspaces: related } },
       );
@@ -189,7 +189,7 @@ export async function relatedWorkspaceRoots(cwd) {
  * Resolves `<doc>` (an id or a path) to its workspace context and Doc. Throws NotFoundError (exit 4).
  * A path is resolved from the file (its workspace is discovered from it). An id is looked up in the cwd's own
  * workspace first; when it is not tracked there (or the cwd has none), in the registered workspaces related to the
- * cwd (see relatedWorkspaceRoots), so `specreview wait my-spec` works from the project root while the store is in
+ * cwd (see relatedWorkspaceRoots), so `suiko wait my-spec` works from the project root while the store is in
  * docs/.specreview. An id tracked in several related workspaces is a UsageError naming them. --workspace disables
  * the fallback.
  * @param {Runtime} rt
@@ -259,7 +259,7 @@ export async function resolveDoc(engine, ctx, key, shown = key) {
   }
   if (!doc) {
     const tracked = await listDocIds(ctx);
-    const hint = tracked.length ? ` (tracked: ${tracked.slice(0, 10).join(', ')}${tracked.length > 10 ? ', ...' : ''})` : ' (no docs are tracked here; run `specreview open <file>`)';
+    const hint = tracked.length ? ` (tracked: ${tracked.slice(0, 10).join(', ')}${tracked.length > 10 ? ', ...' : ''})` : ' (no docs are tracked here; run `suiko open <file>`)';
     throw new NotFoundError(`doc not found: ${shown}${hint}`, { details: { doc: shown } });
   }
   return doc;
@@ -303,7 +303,7 @@ export async function defaultDocId(rt) {
  */
 export async function callOp(engine, name, ...args) {
   const fn = engine.ops[name];
-  if (typeof fn !== 'function') throw new SpecReviewError(`the review engine does not implement ${name}()`);
+  if (typeof fn !== 'function') throw new SuikoError(`the review engine does not implement ${name}()`);
   return fn.apply(engine.ops, args);
 }
 

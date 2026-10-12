@@ -1,5 +1,5 @@
 // @ts-check
-// Opening a code review (`specreview review`, MCP specreview_review; design 4.2): resolves the spec, takes round 1
+// Opening a code review (`suiko review`, MCP suiko_review; design 4.2): resolves the spec, takes round 1
 // and creates the code doc, or reopens the existing doc of the same spec (identity: its origin key) and records a
 // new round when the snapshot changed.
 //

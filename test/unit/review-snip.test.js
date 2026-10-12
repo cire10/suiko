@@ -1,7 +1,7 @@
 // @ts-check
 // Snips through the review engine (in-process, kitchen-sink.md): a doc-area snip (key `b`) and a snip boxed in the
 // mermaid diagram become drafts (preview "Agent will see: L29-39 §... snip (image + diagram + quote)", DomTargets:
-// outlined blocks / a boxed element), next to a GENERAL screenshot (key `B` / `specreview snip`) and an image region
+// outlined blocks / a boxed element), next to a GENERAL screenshot (key `B` / `suiko snip`) and an image region
 // crop; after submit the packet prints every attachment as an ABSOLUTE path with its Read hint (golden
 // test/fixtures/packets/snips.txt; the JSON packet keeps the absolute paths and says what they are), `show` does
 // too, and an edit above re-anchors the snips ('moved', still boxed). Set UPDATE_GOLDEN=1 to rewrite the golden.

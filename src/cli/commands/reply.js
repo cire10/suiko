@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview reply <doc> <tid> -m <md> [--status answered|declined|needs_input|addressed] [--at L42-46]
+// `suiko reply <doc> <tid> -m <md> [--status answered|declined|needs_input|addressed] [--at L42-46]
 //  [--decision "text"] [--json]` (design 9.2). Posts an agent reply on a thread without recording a version.
 // On a code review `--at` names repo files: `--at src/a.js:L42-46` (a bare `L42-46` means the thread's file).
 // Exit 0; 4 when the doc or thread does not exist.

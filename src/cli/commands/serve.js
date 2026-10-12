@@ -1,11 +1,11 @@
 // @ts-check
-// `specreview serve [--foreground] [--port N]` (design 9.2 / 10.1).
+// `suiko serve [--foreground] [--port N]` (design 9.2 / 10.1).
 // --foreground runs the daemon in this process (src/daemon/main.js startDaemon; this is what ensureDaemon spawns)
 // and returns only when it has closed.
 // Without it, the daemon is started in the background if needed and its address is printed.
 // --port N sets the UI port (content port = N + 1); in the background mode it is passed as SPECREVIEW_PORT.
 
-import { SpecReviewError, UsageError } from '../../core/store/errors.js';
+import { SuikoError, UsageError } from '../../core/store/errors.js';
 import { EXIT } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
 
@@ -49,7 +49,7 @@ export async function execute(rt, input) {
   const info = await rt.ensureDaemon({ env });
   return {
     exit: EXIT.OK,
-    text: `specreview: review server running at http://127.0.0.1:${info.uiPort} (content port ${info.contentPort}, pid ${info.pid})`,
+    text: `suiko: review server running at http://127.0.0.1:${info.uiPort} (content port ${info.contentPort}, pid ${info.pid})`,
     json: { uiPort: info.uiPort, contentPort: info.contentPort, pid: info.pid, version: info.version },
   };
 }
@@ -61,7 +61,7 @@ async function loadDaemon() {
   } catch (err) {
     const e = /** @type {NodeJS.ErrnoException} */ (err);
     const missing = e.code === 'ERR_MODULE_NOT_FOUND' && String(e.message).includes('daemon/main.js');
-    throw new SpecReviewError(
+    throw new SuikoError(
       missing ? 'the review server is not installed (src/daemon/main.js is missing)' : `the review server failed to load: ${e.message}`,
       { cause: err },
     );

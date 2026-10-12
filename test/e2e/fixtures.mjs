@@ -50,9 +50,9 @@ export class Ui {
     for (let attempt = 0; ; attempt++) {
       try {
         const f = await this.frame();
-        return await f.evaluate(() => /** @type {any} */ (window).__specreviewGuest.inspect());
+        return await f.evaluate(() => /** @type {any} */ (window).__suikoGuest.inspect());
       } catch (err) {
-        const transient = /Execution context was destroyed|detached|__specreviewGuest|reading 'inspect'/.test(String(err));
+        const transient = /Execution context was destroyed|detached|__suikoGuest|reading 'inspect'/.test(String(err));
         if (!transient || attempt >= 20) throw err;
         await this.page.waitForTimeout(150);
       }

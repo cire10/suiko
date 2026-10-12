@@ -1,5 +1,5 @@
 // @ts-check
-// Fetched web content -> review text (`specreview snapshot <url>`, design 6.2 "Conversion"). Nothing a page carries
+// Fetched web content -> review text (`suiko snapshot <url>`, design 6.2 "Conversion"). Nothing a page carries
 // can run, load or submit anything in the review UI:
 //   htmlToMarkdown(html, { baseUrl })  -> { markdown, removed, textChars, title, hadScripts }   (default)
 //   sanitizeHtml(html, { baseUrl })    -> { html, removed, textChars, title, hadScripts }       (--as-html)

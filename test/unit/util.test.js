@@ -160,8 +160,8 @@ describe('log', () => {
       log.info('shown', { a: 1 });
       log.error('boom', new Error('bad'));
       assert.equal(lines.length, 2);
-      assert.equal(lines[0], 'specreview info [store] shown {"a":1}');
-      assert.match(lines[1], /^specreview error \[store\] boom Error: bad$/);
+      assert.equal(lines[0], 'suiko info [store] shown {"a":1}');
+      assert.match(lines[1], /^suiko error \[store\] boom Error: bad$/);
       assert.equal(log.child('x').enabled('info'), true);
     } finally {
       configureLogger({ sink: null, level: null });

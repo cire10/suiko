@@ -74,7 +74,7 @@ export function TopBar() {
       ${s.railToggle ? html`<button type="button" class="icon-btn nav-toggle" aria-label="Outline and history" aria-controls="sr-nav"
         aria-expanded=${s.narrow ? s.nav : s.rail} onClick=${toggleNav}><${Icon} name="menu" /></button>` : null}
       <a class="brand" href="/" title="All documents" onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); navigate('/'); }}>
-        <${Icon} name="comment" size=${16} /><span class="brand-text">SpecReview</span></a>
+        <${Icon} name="comment" size=${16} /><span class="brand-text">Suiko</span></a>
       <h1 class="doc-name" title=${ds.doc.path}>${ds.doc.title || ds.doc.id}</h1>
       <label class="sr-only" for="sr-version">Version</label>
       <select id="sr-version" class="select" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}>
@@ -140,7 +140,7 @@ export function TopBar() {
     </div>
     <div class="tb-row tb-sub">
       <span key="presence" data-testid=${TESTID.presence} class=${`presence tone-${presence.tone}`} data-presence=${presence.kind}
-        title=${presence.kind === 'none' ? `Tell ${agentName(ds)} to run specreview wait` : presence.label}>
+        title=${presence.kind === 'none' ? `Tell ${agentName(ds)} to run suiko wait` : presence.label}>
         <span class="dot" aria-hidden="true"></span>${presence.label}
       </span>
       <span key="round" class="round-status" hidden=${!round}>${round ? round.text : ''}</span>

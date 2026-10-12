@@ -1,5 +1,5 @@
 // @ts-check
-// Command registry: name -> lazy module loader + one-line summary for `specreview --help`.
+// Command registry: name -> lazy module loader + one-line summary for `suiko --help`.
 // Command modules export:
 //   spec    { name, usage, summary, options }          options are node:util parseArgs specs (global ones added)
 //   parse(parsed, rt) -> input                          argv -> normalised input (may read stdin)
@@ -35,7 +35,7 @@ export const COMMANDS = {
   mcp: { load: () => import('./mcp.js'), summary: 'Run the stdio MCP server', group: 'admin' },
   hook: { load: () => import('./hook.js'), summary: 'Claude Code hook entry points: hook pre-write | hook prompt', group: 'admin' },
   'plan-gate': { load: () => import('./plan-gate.js'), summary: 'Claude Code plan-mode gate (PermissionRequest hook for ExitPlanMode)', group: 'admin' },
-  install: { load: () => import('./install.js'), summary: 'Configure SpecReview for the agents found here (dry run; --apply writes). Also: install claude | agents-md', group: 'admin' },
+  install: { load: () => import('./install.js'), summary: 'Configure Suiko for the agents found here (dry run; --apply writes). Also: install claude | agents-md', group: 'admin' },
   uninstall: { load: () => import('./uninstall.js'), summary: 'Remove what install added, per agent (dry run; --apply removes)', group: 'admin' },
 };
 
@@ -51,9 +51,9 @@ export function topLevelHelp(version) {
     admin: 'Server and integrations',
   });
   const out = [
-    `specreview ${version}: iterative, commentable, versioned review of HTML/Markdown specs`,
+    `suiko ${version}: iterative, commentable, versioned review of HTML/Markdown specs`,
     '',
-    'Usage: specreview <command> [args] [--json] [--as <agent>] [--workspace <dir>]',
+    'Usage: suiko <command> [args] [--json] [--as <agent>] [--workspace <dir>]',
   ];
   for (const [group, title] of Object.entries(groups)) {
     out.push('', `${title}:`);
@@ -66,7 +66,7 @@ export function topLevelHelp(version) {
     '<doc> is a doc id or a file path. Line numbers are 1-based lines of the file on disk.',
     'Exit codes: 0 ok · 1 error · 2 timeout · 3 refused · 4 not found · 5 closed · 6 superseded.',
     'Agent name: --as <name>, else $SPECREVIEW_AGENT, else "claude" when $CLAUDECODE is set, else "agent".',
-    'Run `specreview <command> --help` for details.',
+    'Run `suiko <command> --help` for details.',
   );
   return out.join('\n');
 }
@@ -77,5 +77,5 @@ export function topLevelHelp(version) {
  * @returns {string}
  */
 export function commandHelp(spec) {
-  return [`Usage: specreview ${spec.usage}`, '', spec.summary, ...(spec.details?.length ? ['', ...spec.details] : [])].join('\n');
+  return [`Usage: suiko ${spec.usage}`, '', spec.summary, ...(spec.details?.length ? ['', ...spec.details] : [])].join('\n');
 }

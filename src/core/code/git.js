@@ -38,7 +38,7 @@ const SCRUB = [
   'GIT_PREFIX', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR',
 ];
 
-/** The pathspec that keeps every SpecReview store (the root one and nested ones) out of a review. */
+/** The pathspec that keeps every Suiko store (the root one and nested ones) out of a review. */
 export const STORE_EXCLUDE = ':(exclude,glob)**/.specreview/**';
 
 /** @type {string | null} */
@@ -47,7 +47,7 @@ let windowsHooksDir = null;
 /** An empty hooks location: /dev/null on POSIX, a fresh empty temp dir on Windows. */
 function hooksPath() {
   if (process.platform !== 'win32') return '/dev/null';
-  if (!windowsHooksDir) windowsHooksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specreview-nohooks-'));
+  if (!windowsHooksDir) windowsHooksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'suiko-nohooks-'));
   return windowsHooksDir;
 }
 
@@ -188,7 +188,7 @@ export async function checkGitVersion(cwd) {
   }
   const v = await p;
   if (compareVersions(v, GIT_MIN_VERSION) < 0) {
-    throw new UsageError(`git ${v} is too old for code reviews: SpecReview needs git ${GIT_MIN_VERSION} or newer (upgrade git)`, { details: { version: v, min: GIT_MIN_VERSION } });
+    throw new UsageError(`git ${v} is too old for code reviews: Suiko needs git ${GIT_MIN_VERSION} or newer (upgrade git)`, { details: { version: v, min: GIT_MIN_VERSION } });
   }
   return v;
 }
@@ -227,7 +227,7 @@ export async function openRepo(root, { allowSubdir = false } = {}) {
   const realRoot = await realpathOr(root);
   if (realTop !== realRoot && !allowSubdir) {
     throw new UsageError(
-      `code reviews live in the workspace at the repository root ${realTop}, not in ${realRoot}: run specreview review from the repository (or pass --workspace ${realTop})`,
+      `code reviews live in the workspace at the repository root ${realTop}, not in ${realRoot}: run suiko review from the repository (or pass --workspace ${realTop})`,
       { details: { root: realRoot, toplevel: realTop } },
     );
   }
@@ -665,7 +665,7 @@ export function parseRaw(buf) {
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 /**
- * A raw path as text, or null when SpecReview does not carry it (design 4.3 "File names"): not valid UTF-8, a
+ * A raw path as text, or null when Suiko does not carry it (design 4.3 "File names"): not valid UTF-8, a
  * control character (\x00-\x1f, \x7f), or a component beginning with '-'.
  * @param {Buffer} raw
  * @returns {string | null}

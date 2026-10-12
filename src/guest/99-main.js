@@ -1,4 +1,4 @@
-// SpecReview guest, part 99: wiring and startup.
+// Suiko guest, part 99: wiring and startup.
 //
 // On DOMContentLoaded (or immediately when the bundle runs later) the guest mounts the overlay, registers the layout
 // and DOM-change hooks in a fixed order, starts listening, opens the channel and posts `hello` to the allowed UI
@@ -12,7 +12,7 @@
 // Modes: 'review' (default) and 'changes' allow captures; 'readonly' (working-copy preview) disables the selection
 // toolbar, selection captures, pick mode and snip mode. Annotation painting is identical in all modes.
 //
-// Debugging: window.__specreviewGuest (non-enumerable, read-only) exposes inspect(), errors() and a few pure helper
+// Debugging: window.__suikoGuest (non-enumerable, read-only) exposes inspect(), errors() and a few pure helper
 // modules. It never exposes the channel.
 
 const Main = (() => {
@@ -306,7 +306,7 @@ const Main = (() => {
   });
 
   try {
-    Object.defineProperty(window, '__specreviewGuest', { value: debugApi, enumerable: false, configurable: true, writable: false });
+    Object.defineProperty(window, '__suikoGuest', { value: debugApi, enumerable: false, configurable: true, writable: false });
   } catch (err) {
     recordGuestError('debug-global', err);
   }

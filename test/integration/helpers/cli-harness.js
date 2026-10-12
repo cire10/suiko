@@ -94,7 +94,7 @@ export function samplePacket(docId = 'token-service') {
     decisions: [],
     drafts: null,
     counts: { actionable: 1, new: 1, reopened: 0, reply: 0, answer: 0, awaitingReviewer: 0, resolved: 0, outdated: 0 },
-    next: `targeted edits, then: specreview revise ${docId} --replies -`,
+    next: `targeted edits, then: suiko revise ${docId} --replies -`,
   };
 }
 

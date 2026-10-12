@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview show <doc> [<tid>] [--version N] [--lines A-B] [--json]` (design 9.2 / 9.6).
+// `suiko show <doc> [<tid>] [--version N] [--lines A-B] [--json]` (design 9.2 / 9.6).
 // A thread with its full timeline, or the exact source of a version (`--version 2 --lines 40-60`; `head`, or `live`
 // for the working copy via the engine's sourceLines()).
 // The engine's show(ctx, docId, { thread, version, lines }) result is printed as: its `text` when it has one;

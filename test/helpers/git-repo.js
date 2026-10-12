@@ -28,7 +28,7 @@ export function hermeticGitProcess() {
 /**
  * @typedef {object} TestRepo
  * @property {string} base the temp dir (removed by cleanup)
- * @property {string} root the repository top level (also the SpecReview workspace root)
+ * @property {string} root the repository top level (also the Suiko workspace root)
  * @property {string} home SPECREVIEW_HOME
  * @property {Record<string, string>} env the hermetic env of fixture git calls
  * @property {(...args: string[]) => string} git runs git in the repo (fixture identity and dates); stdout
@@ -53,7 +53,7 @@ export async function makeRepo({ files = {}, commit = Object.keys(files).length 
   hermeticGitProcess();
   const base = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'sr-code-')));
   const root = path.join(base, 'repo');
-  const home = path.join(base, 'specreview-home');
+  const home = path.join(base, 'suiko-home');
   await fsp.mkdir(root, { recursive: true });
   await fsp.mkdir(home, { recursive: true });
   process.env.SPECREVIEW_HOME = home;

@@ -1,4 +1,4 @@
-// SpecReview mermaid bootstrap (design 6.2). Classic script, loaded after the vendored mermaid.min.js at the end
+// Suiko mermaid bootstrap (design 6.2). Classic script, loaded after the vendored mermaid.min.js at the end
 // of <body> (Markdown shells, and HTML docs that contain .mermaid elements but do not load mermaid themselves).
 // - initialize({ startOnLoad: false, securityLevel: 'strict', theme }) with theme from prefers-color-scheme;
 // - renders every pre.mermaid / div.mermaid one by one; a diagram that fails to parse shows its error and source

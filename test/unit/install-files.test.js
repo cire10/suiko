@@ -30,7 +30,7 @@ const file = (/** @type {string} */ name, /** @type {string | null} */ text = nu
 };
 
 const MD_BLOCK = '<!-- specreview:begin (managed) -->\nnew protocol\n<!-- specreview:end -->';
-const TOML_BLOCK = '# specreview:begin\n[mcp_servers.specreview]\ncommand = "node"\n# specreview:end';
+const TOML_BLOCK = '# specreview:begin\n[mcp_servers.suiko]\ncommand = "node"\n# specreview:end';
 
 test('upsertBlock / removeBlock: append, replace in place, remove back to the original text', () => {
   const original = '# Mine\n\nBe nice.\n';
@@ -76,34 +76,34 @@ test('blockAction / removeBlockAction: create, update with a backup, unchanged; 
   const kept = removeBlockAction(ours, MD_MARKERS);
   assert.equal(kept?.action, 'update', 'a file install did not create stays, emptied');
   assert.equal(kept?.content, '');
-  assert.match(String(kept?.note), /it existed before SpecReview, so the file stays/);
+  assert.match(String(kept?.note), /it existed before Suiko, so the file stays/);
   assert.equal(removeBlockAction(file('none.md', '# x\n'), MD_MARKERS), null);
   assert.equal(removeBlockAction(file('missing.md'), MD_MARKERS), null);
 });
 
 test('jsonAction: structural compare, indentation and final newline kept, delete when only our entries were left (if install created it)', () => {
   const f = file('mcp.json', '{\n    "mcpServers": {\n        "other": { "command": "x" }\n    }\n}');
-  const add = jsonAction(f, (v) => setEntry(v, 'mcpServers', 'specreview', { command: 'node' }));
+  const add = jsonAction(f, (v) => setEntry(v, 'mcpServers', 'suiko', { command: 'node' }));
   assert.equal(add?.action, 'update');
   assert.equal(add?.backup, true);
-  assert.equal(add?.content, '{\n    "mcpServers": {\n        "other": {\n            "command": "x"\n        },\n        "specreview": {\n            "command": "node"\n        }\n    }\n}');
+  assert.equal(add?.content, '{\n    "mcpServers": {\n        "other": {\n            "command": "x"\n        },\n        "suiko": {\n            "command": "node"\n        }\n    }\n}');
   fs.writeFileSync(f, /** @type {string} */ (add?.content));
-  assert.equal(jsonAction(f, (v) => setEntry(v, 'mcpServers', 'specreview', { command: 'node' }))?.action, 'unchanged');
-  const rm = jsonAction(f, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true });
+  assert.equal(jsonAction(f, (v) => setEntry(v, 'mcpServers', 'suiko', { command: 'node' }))?.action, 'unchanged');
+  const rm = jsonAction(f, (v) => deleteEntry(v, 'mcpServers', 'suiko'), { deleteWhenEmpty: true });
   assert.equal(rm?.action, 'update');
   assert.deepEqual(JSON.parse(/** @type {string} */ (rm?.content)), { mcpServers: { other: { command: 'x' } } });
-  const onlyOurs = file('only.json', '{"mcpServers":{"specreview":{"command":"node"}}}\n');
-  const del = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true, manifest: manifestOf([onlyOurs]) });
+  const onlyOurs = file('only.json', '{"mcpServers":{"suiko":{"command":"node"}}}\n');
+  const del = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'suiko'), { deleteWhenEmpty: true, manifest: manifestOf([onlyOurs]) });
   assert.equal(del?.action, 'delete');
   assert.equal(del?.backup, undefined);
-  const keep = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true });
+  const keep = jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'suiko'), { deleteWhenEmpty: true });
   assert.equal(keep?.action, 'update', 'not created by install: kept as {}');
   assert.equal(keep?.content, '{}\n');
   // The pre-install backup had an empty container: it comes back.
   fs.writeFileSync(`${onlyOurs}.specreview-backup`, '{"mcpServers": {}, "x": 1}');
-  assert.deepEqual(JSON.parse(/** @type {string} */ (jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true })?.content)), { mcpServers: {} });
-  assert.equal(jsonAction(file('absent.json'), (v) => deleteEntry(v, 'mcpServers', 'specreview'), { deleteWhenEmpty: true }), null);
-  assert.equal(jsonAction(file('empty.json', ''), (v) => setEntry(v, 'mcp', 'specreview', {}))?.action, 'update');
+  assert.deepEqual(JSON.parse(/** @type {string} */ (jsonAction(onlyOurs, (v) => deleteEntry(v, 'mcpServers', 'suiko'), { deleteWhenEmpty: true })?.content)), { mcpServers: {} });
+  assert.equal(jsonAction(file('absent.json'), (v) => deleteEntry(v, 'mcpServers', 'suiko'), { deleteWhenEmpty: true }), null);
+  assert.equal(jsonAction(file('empty.json', ''), (v) => setEntry(v, 'mcp', 'suiko', {}))?.action, 'update');
 });
 
 test('jsonAction refuses invalid JSON, a non-object file and a non-object container', () => {
@@ -112,18 +112,18 @@ test('jsonAction refuses invalid JSON, a non-object file and a non-object contai
     assert.ok(e instanceof InstallRefusal);
     assert.equal(e.file, bad);
     assert.equal(e.fix, 'add it by hand');
-    assert.match(e.message, /is not valid JSON .*SpecReview never rewrites a file it cannot parse/);
+    assert.match(e.message, /is not valid JSON .*Suiko never rewrites a file it cannot parse/);
     return true;
   });
   assert.throws(() => jsonAction(file('arr.json', '[]'), (v) => v), /does not contain a JSON object/);
   const odd = file('odd.json', '{"mcpServers": ["x"]}');
-  assert.throws(() => jsonAction(odd, (v) => setEntry(v, 'mcpServers', 'specreview', {})), (/** @type {any} */ e) => {
+  assert.throws(() => jsonAction(odd, (v) => setEntry(v, 'mcpServers', 'suiko', {})), (/** @type {any} */ e) => {
     assert.ok(e instanceof InstallRefusal);
     assert.equal(e.file, odd);
-    assert.match(e.message, /"mcpServers" is not a JSON object; SpecReview does not replace it/);
+    assert.match(e.message, /"mcpServers" is not a JSON object; Suiko does not replace it/);
     return true;
   });
-  assert.deepEqual(deleteEntry({ mcp: 'x' }, 'mcp', 'specreview'), { mcp: 'x' }, 'deleteEntry leaves odd shapes alone');
+  assert.deepEqual(deleteEntry({ mcp: 'x' }, 'mcp', 'suiko'), { mcp: 'x' }, 'deleteEntry leaves odd shapes alone');
 });
 
 test('detectIndent / stringifyLike', () => {
@@ -134,10 +134,10 @@ test('detectIndent / stringifyLike', () => {
 });
 
 test('copies: recognised by content, template (any invocation note) or a manifest hash; others are backed up / kept', () => {
-  const template = '# Skill\n\nRun `specreview open`.\n';
-  const withNote = withInvocationNote(template, '"/a/node" "/a/specreview.js"');
+  const template = '# Skill\n\nRun `suiko open`.\n';
+  const withNote = withInvocationNote(template, '"/a/node" "/a/suiko.js"');
   assert.notEqual(withNote, template);
-  assert.equal(isOurCopy(file('x.md'), withInvocationNote(template, '"/old/node" "/old/specreview.js"'), withNote, { template }), true, 'a copy with another path in the note');
+  assert.equal(isOurCopy(file('x.md'), withInvocationNote(template, '"/old/node" "/old/suiko.js"'), withNote, { template }), true, 'a copy with another path in the note');
   const f = file('SKILL.md', template);
   assert.equal(isOurCopy(f, template, withNote, { template }), true);
   assert.equal(isOurCopy(f, 'old copy\n', template, { template, manifest: { schema: 1, created: [], files: { [f]: { sha256: [sha256('old copy\n')] } } } }), true);

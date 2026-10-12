@@ -1,4 +1,4 @@
-// SpecReview guest, part 85: keyboard forwarding (amendments section 7).
+// Suiko guest, part 85: keyboard forwarding (amendments section 7).
 //
 // While focus is inside the document iframe, the reviewer's shortcuts (c s q a e j k n p r f h t v d 1-4 [ ] \ ? ...)
 // would never reach the UI. The guest forwards `key {key, meta, ctrl, shift, alt}` to the UI when:

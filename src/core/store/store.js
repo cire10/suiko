@@ -96,11 +96,11 @@ export class Store {
     const storeDir = path.join(real, STORE_DIR);
     if (create) {
       if (isForbiddenRoot(real)) {
-        throw new RefusedError(`refusing to create a SpecReview store in ${real}`, { details: { root: real } });
+        throw new RefusedError(`refusing to create a Suiko store in ${real}`, { details: { root: real } });
       }
       await initStoreDir(real);
     } else if (!(await isDirectory(storeDir))) {
-      throw new NotFoundError(`no SpecReview store at ${storeDir}`, { details: { root: real } });
+      throw new NotFoundError(`no Suiko store at ${storeDir}`, { details: { root: real } });
     }
     let wsId;
     try {
@@ -290,7 +290,7 @@ export class Store {
 
   /**
    * Every tracked doc, sorted by id. Unreadable doc.json files, and docs of a kind this version does not know (made
-   * by a newer SpecReview), are skipped with a warning.
+   * by a newer Suiko), are skipped with a warning.
    * @returns {Promise<Doc[]>}
    */
   async listDocs() {
@@ -318,7 +318,7 @@ export class Store {
   /**
    * @param {string} docId
    * @returns {Promise<Doc | null>}
-   * @throws {RefusedError} the doc is of a kind this version does not know (made by a newer SpecReview)
+   * @throws {RefusedError} the doc is of a kind this version does not know (made by a newer Suiko)
    */
   async getDoc(docId) {
     if (typeof docId !== 'string' || !DOC_ID_RE.test(docId)) return null;
@@ -1209,7 +1209,7 @@ export class Store {
     // non-ASCII byte of the whole file with U+FFFD: refuse instead of corrupting it.
     if (typeof text === 'string' && !roundTrips(current.buf)) {
       throw new RefusedError(
-        `${doc.path} is not valid UTF-8 or UTF-16 (a legacy charset such as windows-1252?); SpecReview cannot rewrite it without corrupting its non-ASCII characters. Make the change with your editor, or convert the file to UTF-8 first.`,
+        `${doc.path} is not valid UTF-8 or UTF-16 (a legacy charset such as windows-1252?); Suiko cannot rewrite it without corrupting its non-ASCII characters. Make the change with your editor, or convert the file to UTF-8 first.`,
         { details: { path: doc.path, encoding: 'legacy' } },
       );
     }
@@ -1321,7 +1321,7 @@ export class Store {
       throw new UsageError('writeRepoFile requires the allowed file list');
     }
     if (!new Set(allowed).has(rel)) {
-      throw new RefusedError(`${rel} is not a file of this review; SpecReview only writes files listed in the reviewed round`, { details: { path: rel } });
+      throw new RefusedError(`${rel} is not a file of this review; Suiko only writes files listed in the reviewed round`, { details: { path: rel } });
     }
     const abs = /** @type {string} */ (await this.#repoFilePath(rel, { mustExist: true }));
     const missing = () => new NotFoundError(`${rel} is missing`, { details: { path: rel } });
@@ -1331,7 +1331,7 @@ export class Store {
     if (current.sha256 !== expect) throw conflict();
     if (typeof text === 'string' && !roundTrips(current.buf)) {
       throw new RefusedError(
-        `${rel} is not valid UTF-8 or UTF-16 (a legacy charset such as windows-1252?); SpecReview cannot rewrite it without corrupting its non-ASCII characters. Make the change with your editor, or convert the file to UTF-8 first.`,
+        `${rel} is not valid UTF-8 or UTF-16 (a legacy charset such as windows-1252?); Suiko cannot rewrite it without corrupting its non-ASCII characters. Make the change with your editor, or convert the file to UTF-8 first.`,
         { details: { path: rel, encoding: 'legacy' } },
       );
     }
@@ -1362,7 +1362,7 @@ export class Store {
       if (isMissing(err)) return null;
       throw err;
     }
-    const refuse = (/** @type {string} */ what) => new RefusedError(`${rel} is ${what}; SpecReview does not write it`, { details: { path: rel } });
+    const refuse = (/** @type {string} */ what) => new RefusedError(`${rel} is ${what}; Suiko does not write it`, { details: { path: rel } });
     if (st.isSymbolicLink()) throw refuse('a symlink');
     if (!st.isFile()) throw refuse('not a regular file');
     const read = await readNoFollow(abs);
@@ -1386,7 +1386,7 @@ export class Store {
       throw new RefusedError(`${rel} is not a plain path relative to the repository root`, { details: { path: rel } });
     }
     const refuseInternal = () =>
-      new RefusedError(`${rel} is inside .git or .specreview; SpecReview never reads or writes there`, { details: { path: rel } });
+      new RefusedError(`${rel} is inside .git or .specreview; Suiko never reads or writes there`, { details: { path: rel } });
     if (segs.some(isInternalSegment)) throw refuseInternal();
     const abs = path.join(this.root, ...segs);
     let realParent;
@@ -1514,7 +1514,7 @@ export function unknownDocKind(doc) {
  * @returns {string}
  */
 function newerKindMessage(docId, kind) {
-  return `${docId} is a ${JSON.stringify(kind)} doc, made by a newer SpecReview than this one (${DOC_KINDS.join(', ')}): run the specreview that made it, or update this one`;
+  return `${docId} is a ${JSON.stringify(kind)} doc, made by a newer Suiko than this one (${DOC_KINDS.join(', ')}): run the suiko that made it, or update this one`;
 }
 
 /** Warnings already logged by this process (listDocs runs on every listing). */

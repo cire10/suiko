@@ -1,7 +1,7 @@
 // @ts-check
 // WP4 MCP server tests. In-process: createMcpServer() with a stub engine, driven over the SDK's InMemoryTransport by
 // a minimal JSON-RPC client (initialize, tools/list, tools/call, progress, cancellation). Out-of-process: spawn
-// `specreview mcp` and speak JSON-RPC over stdio (stdout must carry JSON-RPC only).
+// `suiko mcp` and speak JSON-RPC over stdio (stdout must carry JSON-RPC only).
 
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +14,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-mcp-'));
 process.env.SPECREVIEW_HOME = HOME;
-const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/specreview.js');
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/suiko.js');
 
 const { makeWorkspace, packetText, samplePacket, stubEngine } = await import('./helpers/cli-harness.js');
 const { createMcpServer } = await import('../../src/mcp/server.js');
@@ -67,7 +67,7 @@ async function connect(overrides = {}, extraDeps = {}) {
       client.send({ jsonrpc: '2.0', id, method, params });
     });
   const init = await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
-  assert.equal(init.result.serverInfo.name, 'specreview');
+  assert.equal(init.result.serverInfo.name, 'suiko');
   await client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
   /** @param {string} name @param {any} args @param {any} [meta] */
   const call = async (name, args, meta) => (await request('tools/call', { name, arguments: args, ...(meta ? { _meta: meta } : {}) })).result;
@@ -80,40 +80,40 @@ describe('mcp (in-process)', () => {
     const res = await c.request('tools/list', {});
     const names = res.result.tools.map((/** @type {any} */ t) => t.name).sort();
     const expected = [
-      'specreview_apply', 'specreview_ask', 'specreview_diff', 'specreview_edit', 'specreview_feedback', 'specreview_final',
-      'specreview_log', 'specreview_open', 'specreview_reanchor', 'specreview_reply', 'specreview_revert', 'specreview_review', 'specreview_revise',
-      'specreview_show', 'specreview_snapshot', 'specreview_status', 'specreview_threads', 'specreview_wait',
+      'suiko_apply', 'suiko_ask', 'suiko_diff', 'suiko_edit', 'suiko_feedback', 'suiko_final',
+      'suiko_log', 'suiko_open', 'suiko_reanchor', 'suiko_reply', 'suiko_revert', 'suiko_review', 'suiko_revise',
+      'suiko_show', 'suiko_snapshot', 'suiko_status', 'suiko_threads', 'suiko_wait',
     ];
     assert.deepEqual(names, expected);
     assert.equal(TOOLS.length, expected.length);
-    const wait = res.result.tools.find((/** @type {any} */ t) => t.name === 'specreview_wait');
+    const wait = res.result.tools.find((/** @type {any} */ t) => t.name === 'suiko_wait');
     assert.equal(wait.inputSchema.properties.timeout_sec.maximum, 600);
-    const revise = res.result.tools.find((/** @type {any} */ t) => t.name === 'specreview_revise');
+    const revise = res.result.tools.find((/** @type {any} */ t) => t.name === 'suiko_revise');
     assert.deepEqual(revise.inputSchema.required.sort(), ['doc', 'summary', 'threads']);
     assert.equal(revise.inputSchema.properties.force, undefined);
     // the network tool: public hosts through the default reader only
-    const snap = res.result.tools.find((/** @type {any} */ t) => t.name === 'specreview_snapshot');
+    const snap = res.result.tools.find((/** @type {any} */ t) => t.name === 'suiko_snapshot');
     assert.deepEqual(Object.keys(snap.inputSchema.properties).sort(), ['title', 'url', 'workspace']);
     assert.equal(snap.annotations.openWorldHint, true);
     await c.close();
   });
 
-  test('specreview_snapshot refuses a private host and an offline environment without fetching', async () => {
+  test('suiko_snapshot refuses a private host and an offline environment without fetching', async () => {
     const c = await connect();
-    const priv = await c.call('specreview_snapshot', { url: 'http://127.0.0.1:9/spec.html' });
+    const priv = await c.call('suiko_snapshot', { url: 'http://127.0.0.1:9/spec.html' });
     assert.equal(priv.isError, true);
     assert.match(priv.content[0].text, /non-public address/);
     await c.close();
     const off = await connect({}, { env: { SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME, SPECREVIEW_OFFLINE: '1' } });
-    const r = await off.call('specreview_snapshot', { url: 'https://example.com/' });
+    const r = await off.call('suiko_snapshot', { url: 'https://example.com/' });
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, /network is turned off/);
     await off.close();
   });
 
-  test('specreview_feedback: CLI text as content, packet as structuredContent', async () => {
+  test('suiko_feedback: CLI text as content, packet as structuredContent', async () => {
     const c = await connect();
-    const r = await c.call('specreview_feedback', { doc: 'token-service', peek: true });
+    const r = await c.call('suiko_feedback', { doc: 'token-service', peek: true });
     assert.equal(r.isError, undefined);
     assert.match(r.content[0].text, /^SPECREVIEW FEEDBACK · token-service/);
     assert.equal(r.structuredContent.doc, 'token-service');
@@ -123,11 +123,11 @@ describe('mcp (in-process)', () => {
     await c.close();
   });
 
-  test('specreview_open returns {doc, version, url}', async () => {
+  test('suiko_open returns {doc, version, url}', async () => {
     const c = await connect({
       openDoc: async (/** @type {any} */ ctx) => ({ doc: await ctx.store.getDoc('token-service'), version: 1, created: false, workingDirty: false }),
     });
-    const r = await c.call('specreview_open', { path: ws.file });
+    const r = await c.call('suiko_open', { path: ws.file });
     assert.equal(r.isError, undefined, r.content[0].text);
     assert.equal(r.structuredContent.doc, 'token-service');
     assert.equal(r.structuredContent.version, 1);
@@ -136,9 +136,9 @@ describe('mcp (in-process)', () => {
     await c.close();
   });
 
-  test('specreview_revise maps arguments; a refusal is isError', async () => {
+  test('suiko_revise maps arguments; a refusal is isError', async () => {
     const c = await connect();
-    const ok = await c.call('specreview_revise', {
+    const ok = await c.call('suiko_revise', {
       doc: 'token-service',
       summary: 'rv1 fixes',
       threads: { t1: { status: 'addressed', reply: 'Done.', at: 'L5-7' } },
@@ -154,52 +154,52 @@ describe('mcp (in-process)', () => {
       breakLocks: { L1: 'user asked' },
       dryRun: true,
     });
-    const refused = await c.call('specreview_revise', { doc: 'token-service', summary: 'refuse-me', threads: {} });
+    const refused = await c.call('suiko_revise', { doc: 'token-service', summary: 'refuse-me', threads: {} });
     assert.equal(refused.isError, true);
-    assert.match(refused.content[0].text, /^specreview: REFUSED - nothing recorded/);
+    assert.match(refused.content[0].text, /^suiko: REFUSED - nothing recorded/);
     assert.equal(refused.structuredContent.refused, true);
     await c.close();
   });
 
   test('errors: not found and invalid arguments are isError', async () => {
     const c = await connect();
-    const nf = await c.call('specreview_reply', { doc: 'token-service', thread_id: 't404', body: 'x' });
+    const nf = await c.call('suiko_reply', { doc: 'token-service', thread_id: 't404', body: 'x' });
     assert.equal(nf.isError, true);
     assert.equal(nf.structuredContent.error.exit, 4);
-    assert.match(nf.content[0].text, /^specreview: thread not found: t404/);
-    const bad = await c.call('specreview_apply', { doc: 'token-service', thread_ids: [] });
+    assert.match(nf.content[0].text, /^suiko: thread not found: t404/);
+    const bad = await c.call('suiko_apply', { doc: 'token-service', thread_ids: [] });
     assert.equal(bad.isError, true);
-    const doc = await c.call('specreview_log', { doc: 'nope' });
+    const doc = await c.call('suiko_log', { doc: 'nope' });
     assert.equal(doc.isError, true);
     assert.equal(doc.structuredContent.error.code, 'NOT_FOUND');
     await c.close();
   });
 
-  test('specreview_log without doc uses the only doc', async () => {
+  test('suiko_log without doc uses the only doc', async () => {
     const c = await connect();
-    const r = await c.call('specreview_log', {});
+    const r = await c.call('suiko_log', {});
     assert.equal(r.isError, undefined, r.content[0].text);
     assert.equal(c.engine.calls.find((x) => x.name === 'log')?.args[1], 'token-service');
     await c.close();
   });
 
-  test('specreview_wait: default 50 s bound; timeout -> {status: waiting}; closed -> {status: closed}', async () => {
+  test('suiko_wait: default 50 s bound; timeout -> {status: waiting}; closed -> {status: closed}', async () => {
     const c = await connect({ waitForFeedback: async () => ({ status: 'timeout' }) });
-    const r = await c.call('specreview_wait', { doc: 'token-service' });
+    const r = await c.call('suiko_wait', { doc: 'token-service' });
     assert.equal(r.isError, undefined);
     assert.deepEqual(r.structuredContent, { status: 'waiting', hint: 'call again' });
     assert.equal(c.engine.calls.find((x) => x.name === 'waitForFeedback')?.args[1].timeoutMs, 50000);
-    const tooLong = await c.call('specreview_wait', { doc: 'token-service', timeout_sec: 601 });
+    const tooLong = await c.call('suiko_wait', { doc: 'token-service', timeout_sec: 601 });
     assert.equal(tooLong.isError, true);
     await c.close();
     const c2 = await connect({ waitForFeedback: async () => ({ status: 'closed', docId: 'token-service' }) });
-    const closed = await c2.call('specreview_wait', { timeout_sec: 5 });
+    const closed = await c2.call('suiko_wait', { timeout_sec: 5 });
     assert.equal(closed.isError, undefined);
     assert.equal(closed.structuredContent.status, 'closed');
     await c2.close();
   });
 
-  test('specreview_wait delivers the packet and sends progress notifications', async () => {
+  test('suiko_wait delivers the packet and sends progress notifications', async () => {
     const c = await connect(
       {
         waitForFeedback: async (/** @type {any} */ ctx, /** @type {any} */ opts) => {
@@ -211,7 +211,7 @@ describe('mcp (in-process)', () => {
       },
       { progressMs: 40 },
     );
-    const r = await c.call('specreview_wait', { doc: 'token-service', timeout_sec: 5 }, { progressToken: 'tok-1' });
+    const r = await c.call('suiko_wait', { doc: 'token-service', timeout_sec: 5 }, { progressToken: 'tok-1' });
     assert.equal(r.isError, undefined);
     assert.match(r.content[0].text, /^SPECREVIEW FEEDBACK · token-service/);
     assert.equal(r.structuredContent.doc, 'token-service');
@@ -221,7 +221,7 @@ describe('mcp (in-process)', () => {
     await c.close();
   });
 
-  test('a cancelled specreview_wait aborts the engine wait and delivers nothing', async () => {
+  test('a cancelled suiko_wait aborts the engine wait and delivers nothing', async () => {
     /** @type {AbortSignal | null} */
     let seen = null;
     /** @type {string | null} */
@@ -235,7 +235,7 @@ describe('mcp (in-process)', () => {
       },
     });
     const id = c.nextIdPeek();
-    c.call('specreview_wait', { doc: 'token-service', timeout_sec: 30 }); // never answered once cancelled
+    c.call('suiko_wait', { doc: 'token-service', timeout_sec: 30 }); // never answered once cancelled
     const t0 = Date.now();
     while (!seen && Date.now() - t0 < 2000) await new Promise((r) => setTimeout(r, 10));
     await c.client.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'user' } });
@@ -247,7 +247,7 @@ describe('mcp (in-process)', () => {
 });
 
 describe('mcp (stdio process)', () => {
-  test('`specreview mcp` answers initialize and tools/list; stdout is JSON-RPC only', async () => {
+  test('`suiko mcp` answers initialize and tools/list; stdout is JSON-RPC only', async () => {
     const child = spawn(process.execPath, [BIN, 'mcp'], {
       cwd: ws.root,
       env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME },
@@ -267,9 +267,9 @@ describe('mcp (stdio process)', () => {
     const code = await new Promise((resolve) => child.on('close', resolve));
     const lines = out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
     assert.equal(lines[0].id, 1);
-    assert.equal(lines[0].result.serverInfo.name, 'specreview');
+    assert.equal(lines[0].result.serverInfo.name, 'suiko');
     assert.equal(lines[1].id, 2);
-    assert.ok(lines[1].result.tools.some((/** @type {any} */ t) => t.name === 'specreview_wait'));
+    assert.ok(lines[1].result.tools.some((/** @type {any} */ t) => t.name === 'suiko_wait'));
     assert.equal(code, 0);
   });
 });

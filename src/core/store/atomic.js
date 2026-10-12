@@ -1,5 +1,5 @@
 // @ts-check
-// Crash-safe file writes and the canonical JSON format of every SpecReview file (design 5.3 / 5.4).
+// Crash-safe file writes and the canonical JSON format of every Suiko file (design 5.3 / 5.4).
 //
 // writeFileAtomic: write `<file>.tmp-<pid>-<rand>` (exclusive create), fsync, rename over the target, then fsync
 // the directory (best effort). Readers therefore see either the old or the new content, never a torn file.

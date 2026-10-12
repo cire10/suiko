@@ -52,12 +52,12 @@ describe('locks', () => {
     assert.equal(r.refused, true);
     assert.deepEqual(r.guards.errors.map((e) => e.code), ['lock']);
     assert.match(r.guards.errors[0].message, /^h1 L38 changes L1 §2 Architecture ".*" \(agreed in rv1\)$/);
-    assert.equal(r.guards.errors[0].fix, 'specreview revert kitchen-sink --hunk h1   or   --break-lock L1="<reason>"');
+    assert.equal(r.guards.errors[0].fix, 'suiko revert kitchen-sink --hunk h1   or   --break-lock L1="<reason>"');
     assert.equal((await ctx.store.getDoc(DOC))?.head, 1, 'no version recorded');
     assert.equal(ws.read(FILE), before, 'working copy untouched');
     const text = ops.formatReviseReport(r);
-    assert.match(text, /^specreview: REFUSED - nothing recorded \(exit 3\)\n {2}ERR lock: h1 L38 changes L1/);
-    assert.match(text, /^ {6}fix: specreview revert kitchen-sink --hunk h1 {3}or {3}--break-lock L1="<reason>"$/m);
+    assert.match(text, /^suiko: REFUSED - nothing recorded \(exit 3\)\n {2}ERR lock: h1 L38 changes L1/);
+    assert.match(text, /^ {6}fix: suiko revert kitchen-sink --hunk h1 {3}or {3}--break-lock L1="<reason>"$/m);
     assert.match(text, /working copy left untouched\. Preview with --dry-run\.\n$/);
   });
 
@@ -121,7 +121,7 @@ describe('unexplained deletions', () => {
     const err = r.guards.errors.find((e) => e.code === 'deletion');
     assert.ok(err, JSON.stringify(r.guards.errors));
     assert.match(err.message, /^h1 removes .* \(v1 L9-11, §Token Service Implementation Spec\) linked to no thread$/);
-    assert.equal(err.fix, 'specreview revert kitchen-sink --hunk h1   or   add "other":[{"at":"h1","why":"..."}]');
+    assert.equal(err.fix, 'suiko revert kitchen-sink --hunk h1   or   add "other":[{"at":"h1","why":"..."}]');
 
     const ok = await ops.revise(ctx, DOC, { threads: T1, other: [{ at: 'h1', why: 'Shortened the intro on request' }] });
     assert.equal(ok.refused, false);
@@ -212,7 +212,7 @@ describe('force, warnings and dry runs', () => {
     assert.equal(r.dryRun, true);
     assert.equal(r.version, 2);
     assert.equal((await ctx.store.getDoc(DOC))?.head, 1);
-    assert.match(ops.formatReviseReport(r), /^specreview: dry run - would record v2 for kitchen-sink/);
+    assert.match(ops.formatReviseReport(r), /^suiko: dry run - would record v2 for kitchen-sink/);
     assert.equal((await ctx.store.getThread(DOC, 't1'))?.comments.length, 1, 'no reply posted');
   });
 

@@ -26,7 +26,7 @@ afterEach(async () => {
   await ws.cleanup();
 });
 
-const REPLY_NEXT = /^NEXT: approved: answer each thread with specreview reply kitchen-sink <tid> -m <md> --status answered\|declined \(no edits, no new version\) -> specreview final kitchen-sink --decisions {3}\(then stop waiting\)$/m;
+const REPLY_NEXT = /^NEXT: approved: answer each thread with suiko reply kitchen-sink <tid> -m <md> --status answered\|declined \(no edits, no new version\) -> suiko final kitchen-sink --decisions {3}\(then stop waiting\)$/m;
 
 /** @param {Awaited<ReturnType<typeof engineCtx>>} ctx */
 const wait = async (ctx) => {
@@ -74,7 +74,7 @@ test('approved + final with a reopened thread: NEXT says reply with a status, th
   const w = await wait(ctx);
   assert.match(w.text, /^SPECREVIEW FEEDBACK · kitchen-sink · review rv2 on v2 · APPROVED · FINAL = v2$/m);
   assert.match(w.text, /^\[t1\] REOPENED /m);
-  assert.doesNotMatch(w.text, /specreview revise|^PROTOCOL:/m, w.text);
+  assert.doesNotMatch(w.text, /suiko revise|^PROTOCOL:/m, w.text);
   assert.match(w.text, /^APPROVED with FINAL = v2: reply to each thread; do not edit the spec/m);
   assert.match(w.text, REPLY_NEXT);
   assert.equal(w.packets[0].replyOnly, true);
@@ -82,15 +82,15 @@ test('approved + final with a reopened thread: NEXT says reply with a status, th
   // a lost packet: `feedback` without a new review keeps the reply-only guidance
   const again = await peek(ctx);
   assert.match(again, /no new review/);
-  assert.doesNotMatch(again, /specreview revise/, again);
+  assert.doesNotMatch(again, /suiko revise/, again);
   assert.match(again, REPLY_NEXT);
 
   // follow NEXT literally: the status clears the thread, nothing is left to act on, and final succeeds
   await ops.reply(ctx, DOC, 't1', { body: 'The summary table has no TTL column; left as is.', status: 'declined' });
   const after = await peek(ctx);
   assert.match(after, /^0 threads need action/m, after);
-  assert.doesNotMatch(after, /specreview revise/, after);
-  assert.match(after, /^NEXT: specreview final kitchen-sink --decisions {3}\(then stop waiting\)$/m);
+  assert.doesNotMatch(after, /suiko revise/, after);
+  assert.match(after, /^NEXT: suiko final kitchen-sink --decisions {3}\(then stop waiting\)$/m);
   const fin = await ops.finalize(ctx, DOC, { decisions: false });
   assert.equal(fin.final.version, 2);
   assert.equal(fin.workingMatches, true);
@@ -108,7 +108,7 @@ test('approved + final on the first packet with a new suggestion: no PROTOCOL li
   const w = await wait(ctx);
   assert.equal(w.packets[0].firstPacket, true);
   assert.match(w.text, /^\[t1\] suggestion /m);
-  assert.doesNotMatch(w.text, /apply verbatim|^PROTOCOL:|specreview apply|specreview revise/m, w.text);
+  assert.doesNotMatch(w.text, /apply verbatim|^PROTOCOL:|suiko apply|suiko revise/m, w.text);
   assert.equal(w.packets[0].threads[0].apply, null);
   assert.match(w.text, REPLY_NEXT);
 });
@@ -121,8 +121,8 @@ test('approved without a final version, with a reopened thread: the usual revise
   const w = await wait(ctx);
   assert.match(w.text, /^\[t1\] REOPENED /m);
   assert.equal(w.packets[0].replyOnly, false);
-  assert.doesNotMatch(w.text, /specreview final|no edits/, w.text);
-  assert.match(w.text, /^NEXT: edits -> specreview revise kitchen-sink --replies - -> specreview wait kitchen-sink \(background\)$/m);
+  assert.doesNotMatch(w.text, /suiko final|no edits/, w.text);
+  assert.match(w.text, /^NEXT: edits -> suiko revise kitchen-sink --replies - -> suiko wait kitchen-sink \(background\)$/m);
 });
 
 test('an older final version that is no longer head: an approval without "Mark final" never points at `final`', async () => {
@@ -137,6 +137,6 @@ test('an older final version that is no longer head: an approval without "Mark f
   assert.equal(r.version, 3);
   await ops.submitReview(ctx, DOC, { verdict: 'approved', body: '' });
   const w = await wait(ctx);
-  assert.doesNotMatch(w.text, /specreview final/, w.text);
+  assert.doesNotMatch(w.text, /suiko final/, w.text);
   assert.match(w.text, /^NEXT: approved \(no final version marked\); stop waiting unless the reviewer asks for more$/m);
 });

@@ -1,4 +1,4 @@
-/* SpecReview UI design tokens: colours (light + dark), type, radii, spacing and elevation.
+/* Suiko UI design tokens: colours (light + dark), type, radii, spacing and elevation.
    The palette follows GitHub Primer (the same values the in-document overlay uses), so the chrome and the
    annotations read as one product: neutral canvas, hairline borders, colour only where it carries meaning.
    Dark applies with prefers-color-scheme unless the user picked light (html[data-theme="light"]), and always with

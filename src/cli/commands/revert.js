@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview revert <doc> (--hunk hN | --lock L1) [--json]` (design 8.9).
+// `suiko revert <doc> (--hunk hN | --lock L1) [--json]` (design 8.9).
 // --hunk reverses one unrecorded head->working hunk in the working copy; --lock writes the agreed text of a lock
 // back over its mapped range. Nothing is recorded. Exit 0; 3 on conflict; 4 unknown hunk/lock.
 
@@ -15,7 +15,7 @@ export const spec = {
   usage: 'revert <doc> (--hunk hN | --lock L1) [--json]',
   summary: 'Undo one unrecorded hunk in the working copy, or restore the agreed text of a lock.',
   options: { hunk: { type: 'string' }, lock: { type: 'string' } },
-  details: ['Hunk ids (h1, h2...) are those printed by a refused `revise` or by `specreview diff <doc> head..live`.', 'Never revert a change you did not make.'],
+  details: ['Hunk ids (h1, h2...) are those printed by a refused `revise` or by `suiko diff <doc> head..live`.', 'Never revert a change you did not make.'],
 };
 
 /**

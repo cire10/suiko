@@ -1,8 +1,8 @@
 // @ts-check
 // install.sh (repo root): Node version check, checkout vs clone mode (SPECREVIEW_REPO), dependency install, `npm link`
-// with the ~/.local/bin shim fallback, and the hand-off to `specreview install` (dry run, or --apply with --yes).
+// with the ~/.local/bin shim fallback, and the hand-off to `suiko install` (dry run, or --apply with --yes).
 // No network and no real npm: every run gets a temp HOME and a PATH of a fake-bin dir (node -> this node, a fake npm
-// that logs its arguments) plus /usr/bin:/bin. Most runs use a stub checkout whose bin/specreview.js logs its argv;
+// that logs its arguments) plus /usr/bin:/bin. Most runs use a stub checkout whose bin/suiko.js logs its argv;
 // one runs the real checkout end to end (`--only codex --yes` into the temp HOME).
 
 import { after, describe, test } from 'node:test';
@@ -38,7 +38,7 @@ case "$1" in
     exit 0
     ;;
   link)
-    if [ -n "\${NPM_LINK_DIR:-}" ]; then ln -sf "$PWD/bin/specreview.js" "$NPM_LINK_DIR/specreview"; exit 0; fi
+    if [ -n "\${NPM_LINK_DIR:-}" ]; then ln -sf "$PWD/bin/suiko.js" "$NPM_LINK_DIR/suiko"; exit 0; fi
     echo 'npm error code EACCES' >&2
     exit 1
     ;;
@@ -50,17 +50,17 @@ const STUB_CLI = `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.appendFileSync(process.env.STUB_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
 if (process.env.STUB_ENV_LOG) fs.appendFileSync(process.env.STUB_ENV_LOG, (process.env.SPECREVIEW_NODE || '') + '\\n');
-console.log('stub specreview ' + process.argv.slice(2).join(' '));
+console.log('stub suiko ' + process.argv.slice(2).join(' '));
 `;
 
 /**
- * A stub SpecReview checkout (package.json named specreview, bin/specreview.js logging its argv, install.sh).
+ * A stub Suiko checkout (package.json named suiko, bin/suiko.js logging its argv, install.sh).
  * @param {string} [dir]
  */
 function stubCheckout(dir = tmp('checkout')) {
   fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'package.json'), '{\n  "name": "specreview",\n  "version": "0.0.0-test"\n}\n');
-  fs.writeFileSync(path.join(dir, 'bin', 'specreview.js'), STUB_CLI, { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, 'package.json'), '{\n  "name": "suiko",\n  "version": "0.0.0-test"\n}\n');
+  fs.writeFileSync(path.join(dir, 'bin', 'suiko.js'), STUB_CLI, { mode: 0o755 });
   fs.copyFileSync(SCRIPT, path.join(dir, 'install.sh'));
   fs.chmodSync(path.join(dir, 'install.sh'), 0o755);
   return dir;
@@ -95,7 +95,7 @@ function sandbox(o = {}) {
     home, bin, env, run,
     npmCalls: () => lines(npmLog),
     stubCalls: () => lines(stubLog).map((l) => JSON.parse(l)),
-    shim: path.join(home, '.local', 'bin', 'specreview'),
+    shim: path.join(home, '.local', 'bin', 'suiko'),
   };
 }
 
@@ -110,18 +110,18 @@ describe('install.sh', { skip }, () => {
     assert.equal(sc.status, 0, sc.stdout);
   });
 
-  test('checkout: npm ci, npm link fails -> shim in ~/.local/bin, then a dry run of specreview install', () => {
+  test('checkout: npm ci, npm link fails -> shim in ~/.local/bin, then a dry run of suiko install', () => {
     const s = sandbox();
     const src = stubCheckout();
     const r = s.run([], { script: path.join(src, 'install.sh') });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.stdout, new RegExp(`SpecReview checkout: ${src}`));
+    assert.match(r.stdout, new RegExp(`Suiko checkout: ${src}`));
     assert.deepEqual(s.npmCalls(), [`${src}|ci --no-audit --no-fund`, `${src}|link --no-audit --no-fund`]);
     assert.match(r.stdout, /npm link failed .* using a shim instead/);
     assert.match(r.stderr, /\.local\/bin is not on PATH/);
     assert.deepEqual(s.stubCalls(), [['install']]);
-    assert.match(r.stdout, /stub specreview install\n/);
-    assert.match(r.stdout, /To write these changes: '.*\/\.local\/bin\/specreview' install --apply {3}\(or: '.*install\.sh' --yes\)/);
+    assert.match(r.stdout, /stub suiko install\n/);
+    assert.match(r.stdout, /To write these changes: '.*\/\.local\/bin\/suiko' install --apply {3}\(or: '.*install\.sh' --yes\)/);
     // The shim runs the checkout's CLI with every argument.
     const shimText = fs.readFileSync(s.shim, 'utf8');
     assert.match(shimText, /^#!\/bin\/sh\n# specreview-shim: /);
@@ -144,9 +144,9 @@ describe('install.sh', { skip }, () => {
     assert.equal(r.code, 0, r.out);
     assert.match(r.stderr, /npm ci failed; trying npm install/);
     assert.ok(s.npmCalls().includes(`${src}|install --no-audit --no-fund`));
-    assert.match(r.stdout, /Linked specreview with npm link/);
+    assert.match(r.stdout, /Linked suiko with npm link/);
     assert.equal(fs.existsSync(s.shim), false);
-    assert.match(r.stdout, /To write these changes: specreview install --apply/);
+    assert.match(r.stdout, /To write these changes: suiko install --apply/);
   });
 
   test('npm prefix ~/.local: npm links into the shim directory; that link is left alone, and re-runs work', () => {
@@ -159,14 +159,14 @@ describe('install.sh', { skip }, () => {
     for (const round of [1, 2]) {
       const r = s.run([], { script: path.join(src, 'install.sh'), env });
       assert.equal(r.code, 0, `round ${round}: ${r.out}`);
-      assert.match(r.stdout, /Linked specreview with npm link/);
+      assert.match(r.stdout, /Linked suiko with npm link/);
       assert.doesNotMatch(r.out, /was not written by this installer/);
       assert.ok(fs.lstatSync(s.shim).isSymbolicLink(), 'npm\'s link is still there');
-      assert.equal(fs.realpathSync(s.shim), path.join(src, 'bin', 'specreview.js'));
-      assert.match(r.stdout, /To write these changes: specreview install --apply/);
+      assert.equal(fs.realpathSync(s.shim), path.join(src, 'bin', 'suiko.js'));
+      assert.match(r.stdout, /To write these changes: suiko install --apply/);
     }
     assert.deepEqual(s.stubCalls(), [['install'], ['install']]);
-    // install.sh hands the node it found on PATH (not its resolved path) to `specreview install`.
+    // install.sh hands the node it found on PATH (not its resolved path) to `suiko install`.
     assert.deepEqual(fs.readFileSync(envLog, 'utf8').trim().split('\n'), [path.join(s.bin, 'node'), path.join(s.bin, 'node')]);
   });
 
@@ -177,7 +177,7 @@ describe('install.sh', { skip }, () => {
     fs.writeFileSync(s.shim, '#!/bin/sh\necho mine\n');
     const r = s.run([], { script: path.join(src, 'install.sh') });
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /specreview exists and was not written by this installer/);
+    assert.match(r.stderr, /suiko exists and was not written by this installer/);
     assert.equal(fs.readFileSync(s.shim, 'utf8'), '#!/bin/sh\necho mine\n');
     assert.deepEqual(s.stubCalls(), []);
   });
@@ -199,16 +199,16 @@ describe('install.sh', { skip }, () => {
     assert.equal(r.code, 0, r.out);
     const app = path.join(s.home, '.specreview', 'app');
     assert.match(r.stdout, new RegExp(`Cloning ${repo} into ${app}`));
-    assert.ok(fs.existsSync(path.join(app, 'bin', 'specreview.js')));
+    assert.ok(fs.existsSync(path.join(app, 'bin', 'suiko.js')));
     assert.deepEqual(s.npmCalls(), [`${app}|ci --omit=dev --no-audit --no-fund`, `${app}|link --no-audit --no-fund`]);
-    assert.ok(fs.readFileSync(s.shim, 'utf8').includes(path.join(app, 'bin', 'specreview.js')));
+    assert.ok(fs.readFileSync(s.shim, 'utf8').includes(path.join(app, 'bin', 'suiko.js')));
     assert.deepEqual(s.stubCalls(), [['install', '--apply']]);
     assert.deepEqual(fs.readdirSync(cwd), [], 'nothing written to the current directory');
     // Re-run: the clone is updated (fast-forward), not re-cloned.
     const r2 = s.run([], { stdin: script, cwd, env });
     assert.equal(r2.code, 0, r2.out);
     assert.match(r2.stdout, new RegExp(`Updating ${app}`));
-    assert.match(r2.stdout, /To write these changes: '.*specreview' install --apply\n$/);
+    assert.match(r2.stdout, /To write these changes: '.*suiko' install --apply\n$/);
     // A clone of another repository is not touched.
     const r3 = s.run([], { stdin: script, cwd, env: { ...env, SPECREVIEW_REPO: `${repo}-other` } });
     assert.equal(r3.code, 1);
@@ -248,7 +248,7 @@ describe('install.sh', { skip }, () => {
     const s = sandbox();
     const r = s.run([], { stdin: fs.readFileSync(SCRIPT, 'utf8'), cwd: tmp('cwd') });
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /not run from a SpecReview checkout, and SPECREVIEW_REPO is not set/);
+    assert.match(r.stderr, /not run from a Suiko checkout, and SPECREVIEW_REPO is not set/);
     assert.deepEqual(s.npmCalls(), []);
   });
 
@@ -278,11 +278,11 @@ describe('install.sh', { skip }, () => {
     const r = s.run(['--only', 'codex', '--yes']);
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(s.npmCalls(), [`${PACKAGE_ROOT}|link --no-audit --no-fund`], 'node_modules present: only npm link (which fails here)');
-    assert.match(r.stdout, /SpecReview install: applied \(user scope\)/);
+    assert.match(r.stdout, /Suiko install: applied \(user scope\)/);
     assert.match(fs.readFileSync(path.join(s.home, '.codex', 'AGENTS.md'), 'utf8'), /^<!-- specreview:begin/);
-    assert.match(fs.readFileSync(path.join(s.home, '.codex', 'config.toml'), 'utf8'), /\[mcp_servers\.specreview\]/);
+    assert.match(fs.readFileSync(path.join(s.home, '.codex', 'config.toml'), 'utf8'), /\[mcp_servers\.suiko\]/);
     // ~/.local/bin is not on PATH, so the instructions carry the absolute invocation.
-    assert.match(fs.readFileSync(path.join(s.home, '.codex', 'AGENTS.md'), 'utf8'), /On this machine `specreview` is not on PATH/);
+    assert.match(fs.readFileSync(path.join(s.home, '.codex', 'AGENTS.md'), 'utf8'), /On this machine `suiko` is not on PATH/);
     const viaShim = spawnSync(s.shim, ['uninstall', '--only', 'codex', '--apply'], { env: s.env, encoding: 'utf8' });
     assert.equal(viaShim.status, 0, viaShim.stderr);
     assert.equal(fs.existsSync(path.join(s.home, '.codex', 'AGENTS.md')), false);

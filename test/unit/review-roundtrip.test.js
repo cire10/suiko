@@ -149,7 +149,7 @@ test('review round trip: open -> review -> wait -> apply/edit -> revise -> round
   ]);
   assert.deepEqual(r1.guards.errors, []);
   assert.deepEqual(r1.guards.intactLocks, ['L1']);
-  assert.match(ops.formatReviseReport(r1), /^specreview: recorded v2 for kitchen-sink \(\+4 -2 lines, 3 hunks\) · responds to rv1\n/);
+  assert.match(ops.formatReviseReport(r1), /^suiko: recorded v2 for kitchen-sink \(\+4 -2 lines, 3 hunks\) · responds to rv1\n/);
   assert.match(ops.formatReviseReport(r1), /t4 needs_input \(reply only\)/);
 
   const states = await anchorsOf(ctx);
@@ -229,7 +229,7 @@ test('review round trip: open -> review -> wait -> apply/edit -> revise -> round
     w3.text,
     'SPECREVIEW FEEDBACK · kitchen-sink · review rv3 on v3 · APPROVED · FINAL = v3\n' +
       '0 threads need action · 4 resolved · 0 open\n\n' +
-      'NEXT: specreview final kitchen-sink --decisions   (then stop waiting)\n',
+      'NEXT: suiko final kitchen-sink --decisions   (then stop waiting)\n',
   );
 
   // ---- final

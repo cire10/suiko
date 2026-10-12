@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview threads <doc> [--status open|addressed|answered|declined|needs_input|resolved|outdated|actionable|
+// `suiko threads <doc> [--status open|addressed|answered|declined|needs_input|resolved|outdated|actionable|
 //  unresolved|all] [--json]` (design 9.2). One line per thread (default: every unresolved thread).
 // Uses the engine's threads(ctx, doc, { status }) + formatThreads when available; otherwise reads the store's
 // thread files and prints:

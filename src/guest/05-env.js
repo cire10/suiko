@@ -1,4 +1,4 @@
-// SpecReview guest, part 05: environment, small utilities and the early handshake listener.
+// Suiko guest, part 05: environment, small utilities and the early handshake listener.
 //
 // This part runs synchronously while the <script> tag is being executed (the daemon inserts the tag right after
 // <head>), i.e. before any of the document's own scripts. It:
@@ -35,7 +35,7 @@ const ENV = Object.freeze({
   framed: window.parent !== window,
 });
 
-/** Internal errors of the guest itself (never thrown into the page; inspectable via window.__specreviewGuest). */
+/** Internal errors of the guest itself (never thrown into the page; inspectable via window.__suikoGuest). */
 const guestErrors = [];
 
 /**

@@ -1,6 +1,6 @@
 // @ts-check
-// `specreview last [--session <id>] [--transcript <path>] [--title T] [--browser pane|system|none] [--workspace <dir>]
-// [--json]` (Claude Code's /specreview-last): opens the agent's last message for review.
+// `suiko last [--session <id>] [--transcript <path>] [--title T] [--browser pane|system|none] [--workspace <dir>]
+// [--json]` (Claude Code's /suiko-last): opens the agent's last message for review.
 //
 // Finds the session's transcript (cli/transcript.js: --transcript, else the session id from --session or
 // $CLAUDE_CODE_SESSION_ID, else the newest transcript of the cwd's project directory), extracts the last assistant
@@ -8,7 +8,7 @@
 // it again for the same message reopens the same doc without recording anything: the agent's revisions stay; the
 // text is stored with a final newline, as `show` prints it), makes sure the daemon runs, opens the review UI and returns
 // at once with the review URL and the exact background `wait` command. The agent then revises its answer and records
-// it with `specreview revise <doc> --source <file> --replies -`.
+// it with `suiko revise <doc> --source <file> --replies -`.
 // Only Claude Code transcripts are read (the Codex rollout format is not documented well enough to parse safely).
 
 import { UsageError } from '../../core/store/errors.js';
@@ -35,7 +35,7 @@ export const spec = {
     '  ${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/<id>.jsonl, else the newest transcript of the current directory.',
     'Running it again for the same message reopens the same doc (your revisions stay). Claude Code only: Codex',
     '  transcripts are not supported.',
-    'Then run the printed `specreview wait` in the background; revise with `specreview revise <doc> --source <file> --replies -`.',
+    'Then run the printed `suiko wait` in the background; revise with `suiko revise <doc> --source <file> --replies -`.',
     '--browser system (default) | pane | none, as for open; $SPECREVIEW_BROWSER changes the default.',
   ],
 };
@@ -65,7 +65,7 @@ export async function execute(rt, input) {
   /** @type {string[]} */
   const stderr = [];
   const found = findTranscript({ transcript: input.transcript, session: input.session, env: rt.env, cwd: rt.cwd });
-  if (found.note) stderr.push(`specreview: ${found.note}`);
+  if (found.note) stderr.push(`suiko: ${found.note}`);
   const msg = lastAssistantMessage(found.path);
   if (!msg) throw new UsageError(`no assistant message with text in ${found.path}`, { details: { transcript: found.path } });
   if (Buffer.byteLength(msg.text) > MAX_SNAPSHOT_BYTES) throw new UsageError(`the last message is larger than ${MAX_SNAPSHOT_BYTES} bytes`);
@@ -85,8 +85,8 @@ export async function execute(rt, input) {
     snapshotLine(t),
     `review UI: ${url}`,
     ...externalsLines(t.externalHosts),
-    `next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background (Bash run_in_background: true) and end your turn. ` +
-      `When the review arrives, write your complete revised answer to a file and record it with \`specreview revise ${t.ref} --source <file> --replies -\` (replies JSON on stdin), then wait again.`,
+    `next: ${shownPrefix(shown)}run \`suiko wait ${t.ref}\` in the background (Bash run_in_background: true) and end your turn. ` +
+      `When the review arrives, write your complete revised answer to a file and record it with \`suiko revise ${t.ref} --source <file> --replies -\` (replies JSON on stdin), then wait again.`,
     ...scratchNote(ws),
   ];
   return {

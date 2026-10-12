@@ -71,7 +71,7 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
 let staticSignatureMemo = null;
 
 /**
- * Fingerprint of what /__sr/ serves besides the guest bundle: SpecReview's package.json, the render static files, and
+ * Fingerprint of what /__sr/ serves besides the guest bundle: Suiko's package.json, the render static files, and
  * the versions of the vendored doc libraries. Computed once per daemon process.
  * @returns {string}
  */

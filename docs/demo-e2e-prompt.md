@@ -1,29 +1,29 @@
 <!--
 How to use (for Eric, not part of the prompt):
-1. In Terminal:  mkdir -p ~/Desktop/Projects/specreview-playground
-2. In the Claude desktop app, start a NEW Claude Code session whose folder is ~/Desktop/Projects/specreview-playground.
+1. In Terminal:  mkdir -p ~/Desktop/Projects/suiko-playground
+2. In the Claude desktop app, start a NEW Claude Code session whose folder is ~/Desktop/Projects/suiko-playground.
 3. Paste everything below the line into that session.
 -->
 ---
 
-You are going to help me test **SpecReview** end to end. SpecReview is a local tool (already installed on this Mac) that makes reviewing AI-written specs work like a pull request: you write a spec and open it in a review UI; I comment on specific parts of it (text, table cells, diagram nodes, image regions, snipped areas of the page or screen); you receive located feedback, make targeted edits and record versions; I see exactly what changed, verify your replies, and approve a final version.
+You are going to help me test **Suiko** end to end. Suiko is a local tool (already installed on this Mac) that makes reviewing AI-written specs work like a pull request: you write a spec and open it in a review UI; I comment on specific parts of it (text, table cells, diagram nodes, image regions, snipped areas of the page or screen); you receive located feedback, make targeted edits and record versions; I see exactly what changed, verify your replies, and approve a final version.
 
-You have two roles: (1) the **spec author**, following SpecReview's protocol exactly, and (2) the **test conductor**: you drive the rounds, tell me precisely what to try in the review UI each round, exercise every agent-side capability yourself, and keep a test log.
+You have two roles: (1) the **spec author**, following Suiko's protocol exactly, and (2) the **test conductor**: you drive the rounds, tell me precisely what to try in the review UI each round, exercise every agent-side capability yourself, and keep a test log.
 
 ## Before you start
 
-- Run `pwd`. This session must be running in `~/Desktop/Projects/specreview-playground`. If it is anything else, stop and tell me: a `cd` outside the session folder is not kept between your commands, and SpecReview's prompt hook only looks for reviews from the session's folder.
+- Run `pwd`. This session must be running in `~/Desktop/Projects/suiko-playground`. If it is anything else, stop and tell me: a `cd` outside the session folder is not kept between your commands, and Suiko's prompt hook only looks for reviews from the session's folder.
 - If the playground already contains a `.specreview/` folder from an earlier run, stop and ask me to rename the folder; don't reuse it.
 - Read the installed skill: `~/.claude/skills/spec-review/SKILL.md` and `~/.claude/skills/spec-review/reference.md`. Follow that protocol throughout; the exceptions this test needs are spelled out below.
 - Skim `/Users/erictang/Desktop/Projects/html_documentation_annotator/README.md`, especially "Keyboard shortcuts" and "Snipping", so you can guide me through the UI. That directory is the tool itself: **do not modify anything in it**. If you find a bug, log it; don't fix it.
-- `specreview` is not on PATH. Set up the playground and a wrapper (safe to re-run), and use the wrapper for every command:
+- `suiko` is not on PATH. Set up the playground and a wrapper (safe to re-run), and use the wrapper for every command:
 
   ```bash
   git init -q
-  printf '#!/bin/sh\nexec "/Users/erictang/.nvm/versions/node/v24.12.0/bin/node" "/Users/erictang/Desktop/Projects/html_documentation_annotator/bin/specreview.js" "$@"\n' > sr && chmod +x sr
+  printf '#!/bin/sh\nexec "/Users/erictang/.nvm/versions/node/v24.12.0/bin/node" "/Users/erictang/Desktop/Projects/html_documentation_annotator/bin/suiko.js" "$@"\n' > sr && chmod +x sr
   ```
 
-  Run every command as `./sr <command>`. Wherever SpecReview's own output says `specreview …`, run `./sr …` instead.
+  Run every command as `./sr <command>`. Wherever Suiko's own output says `suiko …`, run `./sr …` instead.
 - Keep a running test log in `TEST-LOG.md`, one row per feature: `| # | feature | tested by (me/you) | result (pass/fail/partial/untested) | notes |`. Update it at the end of every turn. Expected warnings that the tool documents are not bugs.
 
 ## Step 1: write two demo specs (each written ONCE with the Write tool)
@@ -69,7 +69,7 @@ General tips to give me once: the review UI hides the left outline behind the �
 
 ### Guard demos (do these first when the round-1 packet arrives, before addressing it, and log the results)
 a. With the Edit tool, change one line inside the range the packet's `LOCKED` footer lists for L1. Run `./sr revise <doc> --dry-run --replies - <<'JSON'` with `{"summary":"guard test","threads":{}}`. Expect `dry run - would be REFUSED (exit 3)` and an `ERR lock: hN … changes L1 …` line (the `WARN … has no reply entry` lines are expected). Undo it with `./sr revert <doc> --hunk <that hN>` and confirm `./sr status <doc>` shows `working copy: clean`.
-b. This one Write attempt is the only sanctioned exception to "never rewrite a spec": Read the spec, then call the Write tool with a short rewrite (about 40 lines of new prose; don't copy any code block, table or diagram), so far more than 40% of its lines change. The installed PreToolUse hook should **deny** it with a reason starting `docs/specs/notification-service.md is under SpecReview (…); this Write would replace NN% of its lines`. Log that reason and don't retry the write any other way. If it is not denied, restore with `git checkout -- docs/specs/notification-service.md` and log a bug.
+b. This one Write attempt is the only sanctioned exception to "never rewrite a spec": Read the spec, then call the Write tool with a short rewrite (about 40 lines of new prose; don't copy any code block, table or diagram), so far more than 40% of its lines change. The installed PreToolUse hook should **deny** it with a reason starting `docs/specs/notification-service.md is under Suiko (…); this Write would replace NN% of its lines`. Log that reason and don't retry the write any other way. If it is not denied, restore with `git checkout -- docs/specs/notification-service.md` and log a bug.
 
 ### Your response to every packet
 - Read the spec file first. **Read every `image:` / `crop:` file listed in the packet** (with the Read tool) before acting on that thread.
@@ -103,7 +103,7 @@ Tell me to click **Review changes** in the newest "vN ready" toast (Approve is r
 
 Run `./sr open docs/specs/admin-dashboard.html` and open the URL in the browser pane. In the same turn, before giving me the checklist:
 - Run `./sr snip docs/specs/admin-dashboard.html --file docs/specs/img/architecture.png -m "Agent-side snip test"`. With `--file` no picker opens, so this is the one sanctioned time you run `snip` (never run it without `--file`). Expect `added a screenshot to admin-dashboard as draft dN`. Ask me to confirm the "Screenshot added from your Mac" toast and the thumbnail on the draft card. That draft goes out with my review as a `GENERAL` thread with an `image:` line: Read the image and reply `answered`.
-- This time **do not start `wait`**. Instead tell me to review and then send you a chat message saying "submitted". This tests the safety net: with that message, the installed UserPromptSubmit hook should add a note to your context like `specreview: review rv1 on admin-dashboard (N threads, CHANGES REQUESTED) was submitted at HH:MM and not delivered. Run specreview feedback admin-dashboard …`. Quote it in TEST-LOG.md (pass) or log a fail if no such note appeared. Then fetch the packet with `./sr feedback <doc>`.
+- This time **do not start `wait`**. Instead tell me to review and then send you a chat message saying "submitted". This tests the safety net: with that message, the installed UserPromptSubmit hook should add a note to your context like `suiko: review rv1 on admin-dashboard (N threads, CHANGES REQUESTED) was submitted at HH:MM and not delivered. Run suiko feedback admin-dashboard …`. Quote it in TEST-LOG.md (pass) or log a fail if no such note appeared. Then fetch the packet with `./sr feedback <doc>`.
 
 Checklist for me:
 1. `e`, hover the inline SVG diagram, use `[` / `]` to move between a `<g>` group and its parent, click, comment.
@@ -124,8 +124,8 @@ Your response this round also exercises the other agent-side commands:
 ## Step 4: wrap up
 
 - Exit codes: write a tiny throwaway spec `docs/specs/scratch.md` and `./sr open` it. Then `./sr wait <doc> --timeout 5s` (expect exit 2); start a background `./sr wait <doc>`, then a second one (the first exits 6, "superseded"); then `./sr close <doc>` (the running wait exits 5).
-- Optional MCP smoke test: run `./sr mcp` and confirm it lists its `specreview_*` tools over stdio (a few JSON-RPC lines are enough; don't register it with Claude).
-- Optional: walk me through a global snip hotkey with the Shortcuts app (README → "Snipping"), skipping its PATH step. In the "Run Shell Script" action use exactly: `"/Users/erictang/.nvm/versions/node/v24.12.0/bin/node" "/Users/erictang/Desktop/Projects/html_documentation_annotator/bin/specreview.js" snip "/Users/erictang/Desktop/Projects/specreview-playground/docs/specs/admin-dashboard.html"`. Shortcuts needs its own Screen Recording permission; the snip arrives as a draft with the "Screenshot added from your Mac" toast while that doc's review UI is open.
+- Optional MCP smoke test: run `./sr mcp` and confirm it lists its `suiko_*` tools over stdio (a few JSON-RPC lines are enough; don't register it with Claude).
+- Optional: walk me through a global snip hotkey with the Shortcuts app (README → "Snipping"), skipping its PATH step. In the "Run Shell Script" action use exactly: `"/Users/erictang/.nvm/versions/node/v24.12.0/bin/node" "/Users/erictang/Desktop/Projects/html_documentation_annotator/bin/suiko.js" snip "/Users/erictang/Desktop/Projects/suiko-playground/docs/specs/admin-dashboard.html"`. Shortcuts needs its own Screen Recording permission; the snip arrives as a draft with the "Screenshot added from your Mac" toast while that doc's review UI is open.
 - Finalize `TEST-LOG.md` and give me a short report: everything exercised, pass / fail / untested, and every bug with exact repro steps and command output.
 - Run `./sr stop` at the very end.
 

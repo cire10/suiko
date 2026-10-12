@@ -6,7 +6,7 @@
 // createContext, format })). The text formatters come from packet.js when it exports them; any missing one falls
 // back to the CLI's own formatter in format.js (so a partial engine still prints something sensible).
 
-import { SpecReviewError } from '../core/store/errors.js';
+import { SuikoError } from '../core/store/errors.js';
 import { EXIT } from '../shared/protocol.js';
 import { FALLBACK_FORMATTERS } from './format.js';
 
@@ -41,7 +41,7 @@ export async function loadEngine(injected = {}) {
     createContext = mod.createContext;
   }
   if (typeof createContext !== 'function') {
-    throw new SpecReviewError('the review engine does not export createContext()', { exit: EXIT.ERROR });
+    throw new SuikoError('the review engine does not export createContext()', { exit: EXIT.ERROR });
   }
   let packet = injected.format ?? null;
   if (!packet && !injected.ops) packet = await importEngineModule('packet.js').catch(() => null);
@@ -98,7 +98,7 @@ async function importEngineModule(file) {
   } catch (err) {
     const e = /** @type {NodeJS.ErrnoException} */ (err);
     const missing = e.code === 'ERR_MODULE_NOT_FOUND' && String(e.message).includes(`review/${file}`);
-    throw new SpecReviewError(
+    throw new SuikoError(
       missing
         ? `the review engine is not installed (src/core/review/${file} is missing)`
         : `the review engine failed to load (src/core/review/${file}): ${e.message}`,

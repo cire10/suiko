@@ -13,7 +13,7 @@
 //   recordReviewerVersion      ops/revise.js   -> recordCodeRound(ctx, doc, { author: human, capturedBy: 'ui-record' })
 //   applySuggestionAsReviewer  ops/revise.js   -> applyCodeSuggestions(..., { actor: human }) + recordCodeRound('ui-apply')
 //   applySuggestions           ops/edits.js    -> code/apply.js applyCodeSuggestions(ctx, doc, tids, { dryRun, actor })
-//   taggedEdit(s), revert      ops/edits.js    -> refused (exit 3): edit the files, `specreview revise` records the round
+//   taggedEdit(s), revert      ops/edits.js    -> refused (exit 3): edit the files, `suiko revise` records the round
 //   addLock / relock           ops/locks.js    -> refused before any render: "code reviews have no locks"
 //   ask, reanchorThread        ops/threads.js  -> code/threads.js askCode, reanchorCode
 //   moveThread                 ops/threads.js  -> kindOf(doc).capture + forwarder (a capture is required)

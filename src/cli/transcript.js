@@ -1,5 +1,5 @@
 // @ts-check
-// Claude Code transcripts (`specreview last`): finding the session's JSONL file and extracting the last assistant
+// Claude Code transcripts (`suiko last`): finding the session's JSONL file and extracting the last assistant
 // message from it. The format is internal to Claude Code and changes between versions, so everything here is
 // defensive: unparseable lines (a half-written last line) and unknown shapes are skipped, never fatal.
 //
@@ -15,7 +15,7 @@
 // message.id (one API message spans several lines, one content block each), stopping at another message or a real
 // prompt. When the current turn has no text yet (the slash command running now is the first thing in it), the walk
 // simply continues into the earlier turns. When the newest assistant message is still waiting for one of its tool
-// calls (Claude itself is running `specreview last` now, maybe after a sentence like "I'll open my answer"), that
+// calls (Claude itself is running `suiko last` now, maybe after a sentence like "I'll open my answer"), that
 // whole turn is skipped: the message to review is the answer before it.
 
 import fs from 'node:fs';

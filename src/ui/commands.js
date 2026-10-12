@@ -540,7 +540,7 @@ export const COMMANDS = Object.freeze([
     id: 'close-session',
     title: 'Close the review session…',
     category: 'Review',
-    description: 'End the review; a waiting agent stops waiting (like specreview close)',
+    description: 'End the review; a waiting agent stops waiting (like suiko close)',
     keywords: ['end', 'stop', 'finish', 'close'],
     when: (s) => (s.ds?.doc?.state === 'closed' ? 'the session is already closed' : true),
     placeholder: 'Close the review session?',
@@ -836,7 +836,7 @@ export function unavailable(c, s) {
     const w = typeof c.when === 'function' ? c.when(s) : c.when;
     return w == null || w === true ? null : String(w);
   } catch (err) {
-    console.warn('specreview: command condition failed', c.id, err);
+    console.warn('suiko: command condition failed', c.id, err);
     return 'not available';
   }
 }
@@ -881,7 +881,7 @@ export function helpGroups(kind) {
   }).filter((g) => g.rows.length);
 }
 
-const RECENT_KEY = 'specreview.recentCommands';
+const RECENT_KEY = 'suiko.recentCommands';
 const RECENT_MAX = 5;
 
 /** Ids of the commands run last from the palette, newest first. @returns {string[]} */

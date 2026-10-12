@@ -1,5 +1,5 @@
 // @ts-check
-// The SpecReview daemon (design 10.1, 12; BUILD_AMENDMENTS 2.5, 6): one process per OS user serving
+// The Suiko daemon (design 10.1, 12; BUILD_AMENDMENTS 2.5, 6): one process per OS user serving
 //   - the UI origin      http://127.0.0.1:<uiPort>       SPA, /ui/*, /vendor/*, /ui-shared/protocol.js, /api/*, SSE
 //   - the content origin http://127.0.0.1:<contentPort>  rendered docs + assets under per-doc capability paths
 // Both servers bind 127.0.0.1 only.
@@ -398,7 +398,7 @@ async function assertNotRunning(prev) {
     const res = await fetch(`http://127.0.0.1:${prev.uiPort}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
     const body = /** @type {any} */ (await res.json());
     if (res.ok && body?.name === APP_NAME && body?.pid === prev.pid) {
-      const err = new Error(`a SpecReview daemon is already running (pid ${prev.pid}, http://127.0.0.1:${prev.uiPort})`);
+      const err = new Error(`a Suiko daemon is already running (pid ${prev.pid}, http://127.0.0.1:${prev.uiPort})`);
       /** @type {any} */ (err).code = 'DAEMON_RUNNING';
       throw err;
     }

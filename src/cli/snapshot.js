@@ -122,11 +122,11 @@ export function externalsLines(hosts) {
 export function snapshotLine(t) {
   const { doc, version } = t;
   const what = originInfo(String(doc.origin?.type ?? '')).label;
-  if (t.created) return `specreview: tracking ${what} as "${doc.id}" (${doc.format}, ${lineCount(version?.lines)}) · recorded v${version?.v ?? doc.head}`;
-  if (t.reopened) return `specreview: ${what} "${doc.id}" is already tracked (head v${doc.head}); reopened it`;
+  if (t.created) return `suiko: tracking ${what} as "${doc.id}" (${doc.format}, ${lineCount(version?.lines)}) · recorded v${version?.v ?? doc.head}`;
+  if (t.reopened) return `suiko: ${what} "${doc.id}" is already tracked (head v${doc.head}); reopened it`;
   const r = t.report;
-  if (r && r.version && !r.dryRun) return `specreview: recorded v${r.version} of "${doc.id}" (${what}; +${r.stats.added} -${r.stats.removed} lines)`;
-  return `specreview: "${doc.id}" (${what}) is unchanged (identical to v${doc.head})`;
+  if (r && r.version && !r.dryRun) return `suiko: recorded v${r.version} of "${doc.id}" (${what}; +${r.stats.added} -${r.stats.removed} lines)`;
+  return `suiko: "${doc.id}" (${what}) is unchanged (identical to v${doc.head})`;
 }
 
 /**
@@ -166,7 +166,7 @@ export async function showUrl(rt, url, browser, stderr) {
     await rt.openBrowser(url);
     return 'system';
   } catch (err) {
-    stderr.push(`specreview: could not open the system browser: ${/** @type {Error} */ (err).message}`);
+    stderr.push(`suiko: could not open the system browser: ${/** @type {Error} */ (err).message}`);
     return 'failed';
   }
 }

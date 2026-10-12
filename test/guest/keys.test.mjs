@@ -254,7 +254,7 @@ describe('app-level shortcuts (Mod+K, Mod+, Mod+/)', () => {
     try {
       const page = await context.newPage();
       await page.goto(harness.docUrl('prose'));
-      await page.waitForFunction(() => !!(/** @type {any} */ (window).__specreviewGuest));
+      await page.waitForFunction(() => !!(/** @type {any} */ (window).__suikoGuest));
       await watchKeys(page.mainFrame());
       await page.mouse.click(700, 690);
       await page.keyboard.press('Meta+k');

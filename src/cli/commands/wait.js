@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--json]` (design 3.4/3.6/9.2, amendments 2.4).
+// `suiko wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--json]` (design 3.4/3.6/9.2, amendments 2.4).
 //
 // Flow
 //   1. Resolve the doc (or every doc with --all; with no argument, the workspace's only doc).
@@ -33,7 +33,7 @@ export const spec = {
   details: [
     'Run it in the background (Claude Code: Bash with run_in_background) and end the turn; you are re-invoked when it exits.',
     '--timeout 0 (default) waits indefinitely; 30m, 90s, 2h... give up with exit 2.',
-    'Exits 3 at once when the working copy has unrecorded edits (run `specreview revise` first) unless --allow-dirty.',
+    'Exits 3 at once when the working copy has unrecorded edits (run `suiko revise` first) unless --allow-dirty.',
     'Exit codes: 0 delivered · 2 timeout · 3 dirty · 5 session closed · 6 superseded by a newer wait (ignore it).',
     '--json prints each delivered packet as one JSON line.',
   ],
@@ -104,7 +104,7 @@ export async function execute(rt, input) {
     if (announced || rt.mode !== 'cli' || controller.signal.aborted) return;
     announced = true;
     const what = input.all ? `any doc in ${ctx?.store?.root ?? ctx?.root ?? 'this workspace'}` : `${noun}${head ? ` v${head}` : ''}`;
-    rt.stderr.write(`specreview: waiting for a review of ${what} (as ${rt.agent}). Safe to interrupt; nothing is lost.\n`);
+    rt.stderr.write(`suiko: waiting for a review of ${what} (as ${rt.agent}). Safe to interrupt; nothing is lost.\n`);
   };
   // engines that never call onStart still get the note once the wait is clearly blocking
   const announceTimer = setTimeout(announce, 1500);
@@ -193,14 +193,14 @@ async function finish(rt, engine, s) {
     const by = Number(outcome?.by ?? outcome?.supersededBy) || null;
     return {
       exit: EXIT.SUPERSEDED,
-      stderr: [`specreview: superseded by pid ${by ?? '?'} (a newer wait is listening); ignore this.`],
+      stderr: [`suiko: superseded by pid ${by ?? '?'} (a newer wait is listening); ignore this.`],
       json: { status: 'superseded', by },
     };
   }
   if (s.abortedBy && s.abortedBy !== 'timeout' && status !== 'timeout' && status !== 'closed') {
     return {
       exit: SIGNAL_EXIT[s.abortedBy] ?? EXIT.ERROR,
-      stderr: [`specreview: wait interrupted (${s.abortedBy}); nothing was delivered. Run \`specreview wait ${label}\` again to keep waiting.`],
+      stderr: [`suiko: wait interrupted (${s.abortedBy}); nothing was delivered. Run \`suiko wait ${label}\` again to keep waiting.`],
       json: { status: 'interrupted', signal: s.abortedBy },
     };
   }
@@ -208,7 +208,7 @@ async function finish(rt, engine, s) {
     const after = s.timeoutMs ? ` after ${formatDuration(s.timeoutMs)}` : '';
     return {
       exit: EXIT.TIMEOUT,
-      text: `specreview: no review yet for ${s.noun}${after}. Run \`specreview wait ${label}\` again (or ask the reviewer to click Submit review).`,
+      text: `suiko: no review yet for ${s.noun}${after}. Run \`suiko wait ${label}\` again (or ask the reviewer to click Submit review).`,
       json: { status: 'timeout', doc: s.input.all ? null : s.noun },
     };
   }
@@ -216,7 +216,7 @@ async function finish(rt, engine, s) {
     const doc = outcome.docId ?? outcome.doc ?? (s.input.all ? label : s.noun);
     return {
       exit: EXIT.CLOSED,
-      text: `specreview: the review session for ${doc} was closed; stop waiting.`,
+      text: `suiko: the review session for ${doc} was closed; stop waiting.`,
       json: { status: 'closed', doc },
     };
   }
@@ -229,15 +229,15 @@ async function finish(rt, engine, s) {
       const files = code.files.length ? ` (${code.files[0]}${code.files.length > 1 ? `, +${code.files.length - 1} more` : ''})` : '';
       return {
         exit: EXIT.REFUSED,
-        stderr: [`specreview: ${doc}: files changed since v${code.head ?? head ?? '?'}${files}: run \`specreview revise ${ref}\` to record the round first, or pass --allow-dirty.`],
+        stderr: [`suiko: ${doc}: files changed since v${code.head ?? head ?? '?'}${files}: run \`suiko revise ${ref}\` to record the round first, or pass --allow-dirty.`],
         json: { status: 'dirty', doc, head: code.head ?? head ?? null, changedFiles: code.files },
       };
     }
     return {
       exit: EXIT.REFUSED,
       stderr: [
-        `specreview: ${doc} has unrecorded edits (working copy differs from v${head ?? '?'}). ` +
-          `Record them first: \`specreview revise ${ref} --replies -\` (or pass --allow-dirty).`,
+        `suiko: ${doc} has unrecorded edits (working copy differs from v${head ?? '?'}). ` +
+          `Record them first: \`suiko revise ${ref} --replies -\` (or pass --allow-dirty).`,
       ],
       json: { status: 'dirty', doc, head: head ?? null },
     };
@@ -283,7 +283,7 @@ async function resolveTarget(rt, input) {
   const { ctx, engine } = await openContext(rt);
   // plan snapshots are the plan gate's (store/snapshot.js isGated): neither --all nor the doc-less default takes them
   const docs = (ctx?.store?.listDocs ? await ctx.store.listDocs() : []).filter((/** @type {any} */ d) => !isGated(d));
-  if (!docs.length) throw new NotFoundError('no tracked docs in this workspace; run `specreview open <file>` first');
+  if (!docs.length) throw new NotFoundError('no tracked docs in this workspace; run `suiko open <file>` first');
   if (input.all) return { ctx, engine, docIds: '*', label: '--all', noun: 'any tracked doc', head: null };
   if (docs.length > 1) {
     throw new UsageError(`wait: several docs are tracked (${docs.map((/** @type {any} */ d) => d.id).join(', ')}); pass <doc> or --all`);

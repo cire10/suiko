@@ -338,7 +338,7 @@ describe('security', () => {
     const health = await ui('/api/health');
     assert.equal(health.status, 200);
     assert.deepEqual(Object.keys(health.json()).sort(), ['build', 'name', 'ok', 'pid', 'version']);
-    assert.equal(health.json().name, 'specreview');
+    assert.equal(health.json().name, 'specreview', 'the protocol name stays specreview after the rename to suiko, so CLIs and daemons of both names recognise each other');
     assert.match(health.json().build, /^[0-9a-f]{16}$/, 'the code identity is an opaque hash, never a path');
     assert.ok(!health.text.includes(token) && !health.text.includes(d.secret));
 

@@ -153,7 +153,7 @@ function seedRound2(doc) {
   });
   doc.assetBlobs.set(`sha256:${sha(ARCH_V2_PNG)}`, ARCH_V2_PNG);
 
-  // An agent question (specreview ask) on the open-questions paragraph.
+  // An agent question (suiko ask) on the open-questions paragraph.
   const q = doc.resolveCapture(2, textCapture(doc, 2, 'Should the grace window be'));
   const tid = doc.nextId('thread');
   doc.threads.push({

@@ -125,7 +125,7 @@ export class GuestBridge {
     try {
       this.onMessage(d.type, d);
     } catch (err) {
-      console.error('specreview: guest message handler failed', d.type, err);
+      console.error('suiko: guest message handler failed', d.type, err);
     }
   }
 
@@ -140,7 +140,7 @@ export class GuestBridge {
       this.port.postMessage({ ...payload, sr: 1, type });
       return true;
     } catch (err) {
-      console.error('specreview: cannot post to the guest', type, err);
+      console.error('suiko: cannot post to the guest', type, err);
       return false;
     }
   }

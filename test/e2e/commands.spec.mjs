@@ -321,7 +321,7 @@ test('palette-only commands: filters, submit as a verdict, mark all seen, record
   await expect(firstItem(page)).toHaveAttribute('data-command-id', 'copy-prompt');
   await page.keyboard.press('Enter');
   await expect(toastWith(page, 'Prompt copied')).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Run `specreview feedback kitchen-sink` and address it.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Run `suiko feedback kitchen-sink` and address it.');
   await openPalette(page, 'copy spec path');
   await page.keyboard.press('Enter');
   await expect(toastWith(page, 'kitchen-sink.md')).toBeVisible();
@@ -387,7 +387,7 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await expect(about.locator('[data-about="root"]')).toHaveText(FIXTURE_DIR);
   await expect(about.locator('[data-about="path"]')).toHaveText(`${FIXTURE_DIR}/kitchen-sink.md`);
   await expect(about.locator('[data-about="ports"]')).toHaveText(`UI ${new URL(mock.uiOrigin).port} · content ${new URL(mock.contentOrigin).port}`);
-  await expect(about).toContainText('specreview feedback kitchen-sink');
+  await expect(about).toContainText('suiko feedback kitchen-sink');
 
   // Theme: the same state as `t`.
   await settings.getByRole('radio', { name: 'Dark' }).check();

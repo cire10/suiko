@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview snapshot <url> [--title T] [--reader auto|direct|jina] [--as-html] [--allow-private]
+// `suiko snapshot <url> [--title T] [--reader auto|direct|jina] [--as-html] [--allow-private]
 //  [--allow-remote-assets] [--replies <file|->] [--browser pane|system|none] [--workspace <dir>] [--json]`
 // (design 6.2): review a web page. Running the command is the consent to use the network; it is refused (exit 3)
 // when SPECREVIEW_OFFLINE=1 or the user config ($SPECREVIEW_HOME/config.json) says network.allow: false.
@@ -126,13 +126,13 @@ export async function execute(rt, input) {
   /** @type {typeof fetchForSnapshot} */
   const fetchPage = /** @type {any} */ (rt.deps).fetchUrl ?? fetchForSnapshot;
   const page = await fetchPage(input.url, { reader, allowPrivate: Boolean(input.allowPrivate), notes, signal: rt.signal });
-  for (const n of notes) stderr.push(`specreview: ${n}`);
+  for (const n of notes) stderr.push(`suiko: ${n}`);
 
   const converted = convert(page, Boolean(input.asHtml));
-  if (input.asHtml && page.format === 'markdown') stderr.push('specreview: --as-html applies to HTML pages; this page is Markdown and stays Markdown');
+  if (input.asHtml && page.format === 'markdown') stderr.push('suiko: --as-html applies to HTML pages; this page is Markdown and stays Markdown');
   const scripted = converted.hadScripts && converted.textChars < LIMITS.urlLowTextChars && page.reader !== 'jina';
   const jsHint = page.private
-    ? 'it is probably rendered by JavaScript, which SpecReview never runs'
+    ? 'it is probably rendered by JavaScript, which Suiko never runs'
     : 'it is probably rendered by JavaScript: try --reader jina (sends the URL to r.jina.ai)';
   if (!converted.textChars) {
     throw new UsageError(`snapshot: ${page.finalUrl} has no text to review${converted.hadScripts ? ` (${jsHint})` : ''}`, { details: { url: page.finalUrl } });
@@ -173,7 +173,7 @@ export async function execute(rt, input) {
     }
     throw err;
   }
-  if (t.created && replies && Object.keys(replies.threads).length) stderr.push('specreview: --replies was ignored: the doc is new, so it has no threads yet');
+  if (t.created && replies && Object.keys(replies.threads).length) stderr.push('suiko: --replies was ignored: the doc is new, so it has no threads yet');
 
   /** @type {import('../../shared/types.js').DaemonInfo | null} */
   let info = null;
@@ -204,11 +204,11 @@ export async function execute(rt, input) {
   const again = resnapshotCommand(t.doc, ws.root);
   lines.push(
     page.private
-      ? `next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background. When the review arrives, change the sources that produce the page, then record what it serves with \`${again} --replies -\` (replies JSON on stdin) and wait again.`
-      : `next: ${shownPrefix(shown)}run \`specreview wait ${t.ref}\` in the background`,
+      ? `next: ${shownPrefix(shown)}run \`suiko wait ${t.ref}\` in the background. When the review arrives, change the sources that produce the page, then record what it serves with \`${again} --replies -\` (replies JSON on stdin) and wait again.`
+      : `next: ${shownPrefix(shown)}run \`suiko wait ${t.ref}\` in the background`,
   );
   lines.push(...scratchNote(ws));
-  if (daemonError) stderr.push(`specreview: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the doc is tracked; run \`specreview doctor\`)`);
+  if (daemonError) stderr.push(`suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the doc is tracked; run \`suiko doctor\`)`);
   return {
     exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK,
     text: lines.join('\n'),

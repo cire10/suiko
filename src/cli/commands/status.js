@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview status [<doc>] [--json]` (design 9.6 / 9.8 "polling"): docs, head, thread counts, undelivered
+// `suiko status [<doc>] [--json]` (design 9.6 / 9.8 "polling"): docs, head, thread counts, undelivered
 // reviews, listening agents and the working-copy state. Without <doc>: every doc of the workspace found from the
 // cwd (or --workspace). The engine's status(ctx, docId | null) is used; when it does not accept null, the per-doc
 // results are collected. Outside any workspace it prints "no tracked docs" and exits 0.
@@ -72,5 +72,5 @@ function render(engine, s) {
 
 /** @returns {import('../io.js').CommandResult} */
 function noDocs() {
-  return { exit: EXIT.OK, text: 'no tracked docs here (run `specreview open <file>` to start a review)', json: { docs: [] } };
+  return { exit: EXIT.OK, text: 'no tracked docs here (run `suiko open <file>` to start a review)', json: { docs: [] } };
 }

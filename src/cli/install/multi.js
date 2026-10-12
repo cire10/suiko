@@ -1,8 +1,8 @@
 // @ts-check
-// The multi-agent installer behind `specreview install` (no target) and `specreview uninstall`:
+// The multi-agent installer behind `suiko install` (no target) and `suiko uninstall`:
 //   1. detect every agent of AGENTS (config dirs, binaries on PATH);
 //   2. select: --only <list> (configured even when not detected), else the detected agents (uninstall: every agent,
-//      since removal only touches what SpecReview wrote); --skip <list> removes agents;
+//      since removal only touches what Suiko wrote); --skip <list> removes agents;
 //   3. plan each selected agent (Planner), deduplicate files written for several agents (the shared skill in
 //      ~/.agents/skills, a project AGENTS.md), and on uninstall keep a shared file while an agent left out of the
 //      uninstall still uses it (stillUsesShared);
@@ -77,7 +77,7 @@ export function buildContext(rt, o) {
     root: projectRoot(rt.cwd),
     execPath,
     binPath,
-    cliOnPath: isOnPath('specreview', pathEnv),
+    cliOnPath: isOnPath('suiko', pathEnv),
     invocation: cliInvocation({ execPath, binPath }),
     pathEnv,
     manifest: loadManifest(manifestPath(env)),
@@ -91,7 +91,7 @@ export function buildContext(rt, o) {
  * first `node` on PATH, when it resolves to the node running now; else `execPath`. process.execPath has its symlinks
  * resolved, so on Homebrew it is /opt/homebrew/Cellar/node/<version>/bin/node, which `brew upgrade` deletes; the PATH
  * entry /opt/homebrew/bin/node keeps working. Version-pinned installs (nvm, asdf, Volta) still change path when you
- * switch versions: re-run `specreview install --apply` then.
+ * switch versions: re-run `suiko install --apply` then.
  * @param {Record<string, string | undefined>} env
  * @param {string} execPath
  * @returns {string}
@@ -246,14 +246,14 @@ export function runInstaller(ctx, o) {
     if (local.length) {
       notes.push(
         `These project files hold paths that exist only on this machine (${ctx.execPath}, ${ctx.binPath}): ${local.join(', ')}. ` +
-          'Keep them out of version control (e.g. in .gitignore); each teammate runs `specreview install --project` on their own machine.',
+          'Keep them out of version control (e.g. in .gitignore); each teammate runs `suiko install --project` on their own machine.',
       );
     }
   }
 
   if (o.mode === 'install' && !ctx.cliOnPath && agents.some((r) => r.selected && r.files.length)) {
     notes.push(
-      `\`specreview\` is not on PATH, so the installed instructions tell agents to run ${ctx.invocation} instead. ` +
+      `\`suiko\` is not on PATH, so the installed instructions tell agents to run ${ctx.invocation} instead. ` +
         `Run \`npm link\` in ${PACKAGE_ROOT} (then re-run this install) to use the short command.`,
     );
   }
@@ -299,7 +299,7 @@ export function describeReport(report) {
   const install = report.mode === 'install';
   const out = [];
   out.push(
-    `SpecReview ${report.mode}: ${report.applied ? 'applied' : 'dry run'} (${report.scope} scope${report.scope === 'project' ? `, ${ctx.root}` : ''})` +
+    `Suiko ${report.mode}: ${report.applied ? 'applied' : 'dry run'} (${report.scope} scope${report.scope === 'project' ? `, ${ctx.root}` : ''})` +
       (report.applied ? '' : '. Nothing is written without --apply.'),
   );
   /** @type {Map<string, string>} path -> name of the agent it was listed under */
@@ -363,7 +363,7 @@ export function describeReport(report) {
   } else if (pending) {
     out.push(install ? 'Run with --apply to write these changes.' : 'Run with --apply to remove these.');
   } else if (report.agents.some((r) => r.selected)) {
-    out.push(install ? 'Everything is already installed; nothing to write.' : 'Nothing to remove: SpecReview is not configured for the selected agents.');
+    out.push(install ? 'Everything is already installed; nothing to write.' : 'Nothing to remove: Suiko is not configured for the selected agents.');
   } else if (!install) {
     out.push('Nothing to remove.');
   }
@@ -456,7 +456,7 @@ export function parseAgentList(values, flag, resolve) {
 }
 
 /**
- * Does an agent left out of an uninstall still use SpecReview's shared files? Yes while its own (unshared) SpecReview
+ * Does an agent left out of an uninstall still use Suiko's shared files? Yes while its own (unshared) Suiko
  * config is still there, or a file of it cannot be read; and, for an agent detected here whose whole configuration is
  * shared files (Factory Droid reads only ~/.agents/skills), as long as it is detected.
  * @param {Ctx} ctx
@@ -475,7 +475,7 @@ function stillUsesShared(ctx, d, detected) {
 }
 
 /**
- * Per agent: is SpecReview configured (user scope), and is it up to date? Used by `specreview doctor`.
+ * Per agent: is Suiko configured (user scope), and is it up to date? Used by `suiko doctor`.
  * Agents that are neither detected nor configured are left out. An agent counts as configured by its own files; the
  * shared ones (~/.agents/skills) count only for a detected agent whose whole configuration is shared (Droid).
  * @param {Ctx} ctx
@@ -496,7 +496,7 @@ export function integrationStatus(ctx) {
     const plugin = pluginInfo?.id;
     if (!det.detected && !configured && !plugin) continue;
     const twice = pluginInfo ? claudeDoubleInstall(ctx, pluginInfo) : null;
-    const problem = twice ? `SpecReview plugin installed (${pluginInfo?.id}), and ${twice}` : [...inst.refusals, ...un.refusals][0]?.message;
+    const problem = twice ? `Suiko plugin installed (${pluginInfo?.id}), and ${twice}` : [...inst.refusals, ...un.refusals][0]?.message;
     out.push({
       id: def.id,
       name: def.name,

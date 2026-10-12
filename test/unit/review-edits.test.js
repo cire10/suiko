@@ -193,8 +193,8 @@ describe('revise without changes, reply, ask, reanchor', () => {
     assert.equal((await ctx.store.getThread(DOC, 't2'))?.status, 'declined');
     assert.equal(
       ops.formatReviseReport(r),
-      'specreview: working copy matches v1; posted 2 replies (no new version)\n  t1 needs_input\n  t2 declined\n' +
-        'next: specreview wait kitchen-sink (background)\n',
+      'suiko: working copy matches v1; posted 2 replies (no new version)\n  t1 needs_input\n  t2 declined\n' +
+        'next: suiko wait kitchen-sink (background)\n',
     );
     const events = (await ctx.store.readEvents(DOC, 0)).filter((e) => e.type === SSE.THREAD_UPDATED && e.replies);
     assert.equal(events.length, 1);

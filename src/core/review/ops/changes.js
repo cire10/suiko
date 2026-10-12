@@ -1,5 +1,5 @@
 // @ts-check
-// What changed, for the reviewer UI and `specreview diff` (design 8.5-8.8; BUILD_AMENDMENTS 3.4, 4.5):
+// What changed, for the reviewer UI and `suiko diff` (design 8.5-8.8; BUILD_AMENDMENTS 3.4, 4.5):
 //   changes(ctx, doc, { from, to })        -> Changes + { from, to, threadLinks, assets, guards }; to may be 'live'
 //   sourceDiffOp(ctx, doc, { from, to })   -> { from, to, hunks } (sourceDiff rows + thread ids per display hunk)
 //   unifiedDiff(ctx, doc, { from, to })    -> { from, to, patch }

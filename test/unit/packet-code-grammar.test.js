@@ -71,7 +71,7 @@ function packet(over = {}) {
       fileFromCwd: 'src/auth/refresh.js',
       src: '  const ttlSec = 30 * 24 * 3600;',
       suggestion: { mode: 'lines', file: 'src/auth/refresh.js', version: 1, old: 'const ttlSec = 30 * 24 * 3600;', new: 'const ttlSec = config.refreshTtlSec;', status: 'pending', appliedIn: null },
-      apply: `specreview apply ${DOC} t2`,
+      apply: `suiko apply ${DOC} t2`,
       comments: [eric('Read it from config.')],
     }),
     item({
@@ -131,7 +131,7 @@ function packet(over = {}) {
     firstPacket: true,
     replyOnly: false,
     agent: 'claude',
-    next: `edit the files -> specreview revise ${DOC} --replies - (records round v2 from your working tree) -> specreview wait ${DOC} (background)`,
+    next: `edit the files -> suiko revise ${DOC} --replies - (records round v2 from your working tree) -> suiko wait ${DOC} (background)`,
     ...over,
   });
 }
@@ -151,7 +151,7 @@ describe('code packet grammar', () => {
           item({ id: 't7', file: 'src/big.json', fileState: 'too-large', target: 'doc', comments: [eric('Generated?')] }),
           item({ id: 't8', lines: [42, 42], file: 'src/dup.js', src: 'return x;', srcUnique: false, comments: [eric('Return early.')] }),
           item({ id: 't9', file: null, side: null, fileState: null, target: 'doc', comments: [eric('Overall: split this PR.')] }),
-          item({ id: 't10', file: 'src/moved.js', anchorState: 'orphaned', note: `(orphaned: reanchor with specreview reanchor ${DOC} t10 --file src/moved.js --lines A-B)`, comments: [eric('Here.')] }),
+          item({ id: 't10', file: 'src/moved.js', anchorState: 'orphaned', note: `(orphaned: reanchor with suiko reanchor ${DOC} t10 --file src/moved.js --lines A-B)`, comments: [eric('Here.')] }),
           item({ id: 't11', lines: [7, 9], file: 'src/x.js', anchorState: 'changed', note: '(outdated: text changed)', src: 'a\nb\nc', comments: [eric('Edited since.')] }),
         ],
       }),
@@ -161,7 +161,7 @@ describe('code packet grammar', () => {
     assert.match(text, /^\[t7\] comment · src\/big\.json \(whole file\)\n {2}\(file too large to quote: Read it\)$/m);
     assert.match(text, /^ {2}src> return x;\n {2}\(not unique in the file: Read around L42 before editing\)$/m);
     assert.match(text, /^\[t9\] comment · GENERAL\n {2}Eric: Overall: split this PR\.$/m);
-    assert.match(text, /^\[t10\] comment · src\/moved\.js \(orphaned: reanchor with specreview reanchor cr-feat-token-refresh t10 --file src\/moved\.js --lines A-B\)$/m);
+    assert.match(text, /^\[t10\] comment · src\/moved\.js \(orphaned: reanchor with suiko reanchor cr-feat-token-refresh t10 --file src\/moved\.js --lines A-B\)$/m);
     assert.match(text, /^\[t11\] comment · src\/x\.js:L7-9 \(outdated: text changed\)$/m);
     assert.doesNotMatch(text, /LOCKED/, 'code reviews have no locks');
     assert.doesNotMatch(text, /§/, 'no sections in code items');

@@ -8,7 +8,7 @@
 //     waits, then a composer with the screenshot (a general comment, or on the selection); cancelled / busy /
 //     unsupported (the button disappears);
 //   - stored screenshots show as thumbnails on drafts / threads (DocState.attachmentBase) and open full size;
-//   - `specreview snip` from a terminal: the draft appears with a toast whose [Edit] opens it;
+//   - `suiko snip` from a terminal: the draft appears with a toast whose [Edit] opens it;
 //   - the help overlay groups the keys and lists them.
 // Most tests run against the mock daemon (its fake picker is set with mock.setScreenSnip). The UI side of a doc snip
 // is also driven directly through the guest bridge, so it is covered independently of the guest's drawing code; the
@@ -330,7 +330,7 @@ test('the help overlay groups the keys and lists b, Shift+B and Send now; button
   await expect(page.getByTestId(TESTID.composerSendNow)).toHaveAttribute('title', /Send just this comment/);
 });
 
-test('`specreview snip` from a terminal: the draft appears with a toast, [Edit] opens it; with --send it goes straight out', async ({ page, ui, mock }) => {
+test('`suiko snip` from a terminal: the draft appears with a toast, [Edit] opens it; with --send it goes straight out', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   const d = mock.doc('kitchen-sink');
   const shot = `data:image/png;base64,${makePng(64, 40, (x, y) => [x * 4, y * 6, 120, 255]).toString('base64')}`;

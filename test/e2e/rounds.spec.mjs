@@ -268,7 +268,7 @@ test('Approve: final and resolve-addressed options, a warning for open blocking 
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('No agent is listening');
   await expect(dialog.getByRole('button', { name: 'Copy prompt' })).toBeVisible();
-  await expect(dialog.locator('code.prompt')).toHaveText('Run `specreview feedback kitchen-sink` and address it.');
+  await expect(dialog.locator('code.prompt')).toHaveText('Run `suiko feedback kitchen-sink` and address it.');
   await dialog.locator('input[value="approved"]').check();
   await expect(dialog.getByLabel('Mark v2 final')).toBeChecked();
   await expect(dialog.getByLabel('Resolve 2 addressed threads')).toBeChecked();

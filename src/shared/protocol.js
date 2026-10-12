@@ -1,5 +1,5 @@
 // @ts-check
-// Shared constants for every SpecReview component (core, CLI, MCP, daemon, guest, UI).
+// Shared constants for every Suiko component (core, CLI, MCP, daemon, guest, UI).
 // This file must stay dependency-free and valid in both Node and the browser (the UI imports it
 // through /ui-shared/protocol.js; the guest bundle inlines a copy of the constants it needs).
 
@@ -14,7 +14,7 @@ export const EXIT = Object.freeze({
   TIMEOUT: 2,     // wait timed out
   REFUSED: 3,     // guard refusal, dirty working copy, CAS conflict, old_string not unique
   NOT_FOUND: 4,   // doc / thread / version not found
-  CLOSED: 5,      // review session closed by reviewer or `specreview close`
+  CLOSED: 5,      // review session closed by reviewer or `suiko close`
   SUPERSEDED: 6,  // another `wait` for the same doc+agent replaced this one
 });
 
@@ -169,7 +169,7 @@ export const LIMITS = Object.freeze({
   codeFileMaxBytesHard: 20 * 1024 * 1024,
   untrackedExcludeMax: 1000,              // untracked files listed before the rest are summarised as excluded
   codePollMs: 5000,                       // daemon poll of a code doc's working tree (no chokidar on a repo)
-  // `specreview snapshot <url>` (design 6.2): body cap (after decompression), total time, redirect hops, and the
+  // `suiko snapshot <url>` (design 6.2): body cap (after decompression), total time, redirect hops, and the
   // text length under which a page that had scripts gets the "rendered by JavaScript" note
   urlMaxBytes: 10 * 1024 * 1024,
   urlTimeoutMs: 30000,
@@ -179,7 +179,7 @@ export const LIMITS = Object.freeze({
 
 /**
  * Doc kinds this version understands (doc.json `kind`; absent means 'file'). 'snapshot' and 'code' are virtual: no
- * working file of their own. A doc of any other kind was made by a newer SpecReview: it is left out of listings and
+ * working file of their own. A doc of any other kind was made by a newer Suiko: it is left out of listings and
  * refused by id, never treated as a file doc (core/store/store.js, cli/hooks.js). A new kind must be added here.
  */
 export const DOC_KINDS = Object.freeze(['file', 'snapshot', 'code']);
@@ -218,7 +218,7 @@ export const CODE_TESTID = Object.freeze({
  *   text: string,             // visible text inside the box, whitespace-collapsed, max SNIP.maxText chars
  *   label: string }           // short human label, e.g. 'area over "2. Request flow" (figure + 2 paragraphs)'
  *
- * Screen snips (hotkey `B`, the UI's snip-screen button, or `specreview snip` from a terminal / macOS Shortcut) use the
+ * Screen snips (hotkey `B`, the UI's snip-screen button, or `suiko snip` from a terminal / macOS Shortcut) use the
  * macOS `screencapture -i` region picker on the reviewer's machine; the PNG becomes a composer/draft attachment on a
  * general (kind 'doc') comment, or on the current selection when there is one.
  */

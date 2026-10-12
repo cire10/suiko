@@ -187,17 +187,17 @@ describe('packet size cap', () => {
       reviews: [{ id: 'rv1', version: 1, verdict: 'changes_requested', body: '', by: 'Eric', at: '' }], verdict: 'changes_requested',
       final: null, threads, locks: [], decisions: [], drafts: null, resolvedThisRound: [],
       counts: { actionable: 40, new: 40, reopened: 0, reply: 0, answer: 0, open: 0, awaitingReviewer: 0, resolved: 0, resolvedThisRound: 0, outdated: 0, unresolved: 40, drafts: 0, undelivered: 1 },
-      next: 'edits -> specreview revise d --replies - -> specreview wait d (background)',
+      next: 'edits -> suiko revise d --replies - -> suiko wait d (background)',
     });
     const text = formatPacket(packet);
     const capped = text.match(/^\((\d+) more threads - packet size cap; run the commands to see them\)$/m);
     assert.ok(capped, text.slice(0, 300));
     const more = Number(capped[1]);
     assert.ok(more > 0 && more < 40);
-    assert.match(text, /^\[t40\] comment · L40 · §S · specreview show d t40$/m);
+    assert.match(text, /^\[t40\] comment · L40 · §S · suiko show d t40$/m);
     const beforeOverflow = text.slice(0, text.indexOf('(' + more + ' more threads'));
     assert.ok(beforeOverflow.length <= 10000, `${beforeOverflow.length} chars before the overflow list`);
-    assert.match(text, /\nNEXT: edits -> specreview revise d --replies - -> specreview wait d \(background\)\n$/);
+    assert.match(text, /\nNEXT: edits -> suiko revise d --replies - -> suiko wait d \(background\)\n$/);
   });
 });
 

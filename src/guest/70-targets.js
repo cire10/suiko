@@ -1,4 +1,4 @@
-// SpecReview guest, part 70: DomTargets -> DOM (resolution, painting, positions, focus and reveal).
+// Suiko guest, part 70: DomTargets -> DOM (resolution, painting, positions, focus and reveal).
 //
 // Resolution (amendments 3.4), per target:
 //   - kind 'doc': nothing to paint; position {top: 0, height: 0, state: 'ok'}.

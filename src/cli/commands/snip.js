@@ -1,5 +1,5 @@
 // @ts-check
-// `specreview snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` (reviewer tool, README
+// `suiko snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` (reviewer tool, README
 // "Snipping"): a screen snip from any terminal or a macOS Shortcuts global hotkey, without the review UI.
 //
 // 1. The doc: <doc> (id or path) when given; else the only doc of the cwd's workspace (or --workspace); else the
@@ -12,7 +12,7 @@
 //    (capture {kind:'doc'}), type comment (--question: question), severity normal, body -m (may be empty),
 //    attachments [path]. Its drafts.changed event carries {source:'snip', draft} so an open review UI toasts
 //    "Screenshot added from your Mac" with [Edit].
-// 4. --send submits just that draft as a one-item review (verdict comment), so a background `specreview wait`
+// 4. --send submits just that draft as a one-item review (verdict comment), so a background `suiko wait`
 //    wakes with a packet whose item prints the image's absolute path.
 // Works without the daemon (the engine writes the store; a running daemon picks the events up).
 // Exit 0 (also when the picker was cancelled: "cancelled", nothing added); 1 when screen snips are unsupported here
@@ -20,7 +20,7 @@
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { NotFoundError, SpecReviewError, UsageError } from '../../core/store/errors.js';
+import { NotFoundError, SuikoError, UsageError } from '../../core/store/errors.js';
 import { captureScreenRegion, imageMime, imageSize } from '../../core/util/screen-capture.js';
 import { EXIT, LIMITS } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
@@ -76,7 +76,7 @@ export async function execute(rt, input) {
   const shot = input.file ? await readImageFile(input.file) : await pickRegion(rt);
   const base = { doc: docId, ws: ctx.wsId ?? ctx.store?.wsId ?? null, root: ctx.root ?? ctx.store?.root ?? null, chosen: target.how };
   if (!shot) {
-    return { exit: EXIT.OK, text: 'specreview: snip cancelled; nothing was added', json: { ...base, cancelled: true }, stderr };
+    return { exit: EXIT.OK, text: 'suiko: snip cancelled; nothing was added', json: { ...base, cancelled: true }, stderr };
   }
   const mime = /** @type {string} */ (imageMime(shot.png));
   const att = await callOp(engine, 'saveAttachment', ctx, docId, { dataUrl: `data:${mime};base64,${shot.png.toString('base64')}` });
@@ -103,7 +103,7 @@ export async function execute(rt, input) {
   if (!input.send) {
     return {
       exit: EXIT.OK,
-      text: `specreview: added a screenshot to ${docId} as draft ${draft.id} - open the review UI to comment and submit`,
+      text: `suiko: added a screenshot to ${docId} as draft ${draft.id} - open the review UI to comment and submit`,
       json,
       stderr,
     };
@@ -115,8 +115,8 @@ export async function execute(rt, input) {
   json.review = review.id;
   json.listening = listening;
   const to = listening.length ? listening.join(', ') : 'the agent';
-  const later = listening.length ? '' : ' (nobody is waiting right now; it is delivered by the next `specreview wait`)';
-  return { exit: EXIT.OK, text: `specreview: sent a screenshot to ${to} as review ${review.id} on ${docId}${later}`, json, stderr };
+  const later = listening.length ? '' : ' (nobody is waiting right now; it is delivered by the next `suiko wait`)';
+  return { exit: EXIT.OK, text: `suiko: sent a screenshot to ${to} as review ${review.id} on ${docId}${later}`, json, stderr };
 }
 
 // ------------------------------------------------------------------------------------------------- the doc
@@ -163,15 +163,15 @@ async function chooseDoc(rt, docArg) {
   if (!pick) {
     throw new NotFoundError(
       rt.workspace
-        ? `no tracked docs in ${rt.workspace} (run \`specreview open <file>\` first, or pass the doc)`
-        : 'no tracked docs (run `specreview open <file>` first, or pass the doc: specreview snip <doc>)',
+        ? `no tracked docs in ${rt.workspace} (run \`suiko open <file>\` first, or pass the doc)`
+        : 'no tracked docs (run `suiko open <file>` first, or pass the doc: suiko snip <doc>)',
     );
   }
   const ctx = await engine.createContext({ cwd: rt.cwd, agent: rt.agent, root: pick.root });
   const doc = await resolveDoc(engine, ctx, pick.id);
   const where = realpathOr(rt.cwd) === pick.root ? '' : ` in ${pick.root}`;
   const others = ranked.length - 1;
-  const note = `specreview: no doc given; snipping to ${doc.id}${where}, the most recently active of ${others + 1} tracked doc${others ? 's' : ''} (pass the doc to choose)`;
+  const note = `suiko: no doc given; snipping to ${doc.id}${where}, the most recently active of ${others + 1} tracked doc${others ? 's' : ''} (pass the doc to choose)`;
   return { ctx, engine, doc, docId: doc.id, how: 'recent', note };
 }
 
@@ -203,7 +203,7 @@ async function pickRegion(rt) {
   } catch (err) {
     const e = /** @type {any} */ (err);
     if (e?.code === 'unsupported') {
-      throw new SpecReviewError(`${e.message}. Attach an existing image with --file <png>, or snip inside the doc with b in the review UI`, {
+      throw new SuikoError(`${e.message}. Attach an existing image with --file <png>, or snip inside the doc with b in the review UI`, {
         code: 'unsupported',
         exit: EXIT.ERROR,
         cause: err,
