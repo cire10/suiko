@@ -17,6 +17,7 @@
 import { LIMITS } from '../../shared/protocol.js';
 import { NotFoundError, UsageError } from '../store/errors.js';
 import { isEmptyTree } from './util.js';
+import { OID_RE, REPO_RE } from './pr.js';
 
 /**
  * @typedef {import('../../shared/types.js').CodeSpec} CodeSpec
@@ -128,6 +129,17 @@ export async function resolveSpec(repo, input, config) {
       const c = await repo.verifyCommit(String(input.commit ?? ''));
       if (!c) throw new NotFoundError(`commit not found: "${input.commit}" does not name a commit in this repository`, { details: { commit: input.commit } });
       return { ...spec, mode: 'commit', commit: c };
+    }
+    case 'pr': {
+      // resolved and fetched by `review --pr` in the CLI (pr.js); checked again here, field by field
+      const pr = /** @type {any} */ (input).pr;
+      const str = (/** @type {unknown} */ v) => typeof v === 'string' && v.length > 0 && v.length <= 255 && !/[\0-\x1f\x7f]/.test(v);
+      if (!pr || !REPO_RE.test(String(pr.repo)) || !Number.isSafeInteger(pr.number) || pr.number < 1
+        || !OID_RE.test(String(pr.headOid)) || !OID_RE.test(String(pr.mergeBase)) || !str(pr.headRefName) || !str(pr.baseRefName)) {
+        throw new UsageError('review: a PR review needs a resolved PR (`specreview review --pr <n>`)');
+      }
+      const { repo: slug, number, url, title, baseRefName, headRefName, headOid, mergeBase } = pr;
+      return { ...spec, mode: 'pr', pr: { repo: slug, number, url: String(url ?? ''), title: String(title ?? ''), baseRefName, headRefName, headOid, mergeBase } };
     }
     default:
       throw new UsageError(`review: unsupported mode ${JSON.stringify(mode)}`);

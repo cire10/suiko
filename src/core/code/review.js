@@ -41,7 +41,7 @@ export async function openCodeReview(ctx, { input, title }) {
   const key = specKey(spec);
 
   const existing = await ctx.store.findDocByOrigin(key);
-  if (existing) return rerun(ctx, existing, maxFiles);
+  if (existing) return rerun(ctx, existing, maxFiles, spec);
 
   // round 1 is taken before the doc exists (dry: the blobs are stored once the doc is there), so "nothing to
   // review" leaves nothing behind
@@ -60,9 +60,9 @@ export async function openCodeReview(ctx, { input, title }) {
     createdBy: agentActor(ctx),
     code: spec,
   });
-  if (!created) return rerun(ctx, doc, maxFiles);
+  if (!created) return rerun(ctx, doc, maxFiles, spec);
   return withDoc(ctx, doc.id, async (d) => {
-    if (d.head !== 0) return rerun(ctx, d, maxFiles);
+    if (d.head !== 0) return rerun(ctx, d, maxFiles, spec);
     const used = new Set(snap.code.files.flatMap((f) => [f.old, f.new]).filter(Boolean));
     for (const [ref, buf] of snap.bufs) if (used.has(ref)) await ctx.store.putDocBlob(d.id, buf);
     const st = codeStats(snap.code.files);
@@ -88,13 +88,14 @@ export async function openCodeReview(ctx, { input, title }) {
 }
 
 /**
- * A `review` re-run of an existing doc: reopened when closed, --max-files kept, a new round when the snapshot
- * changed.
+ * A `review` re-run of an existing doc: reopened when closed, --max-files kept, a PR's head and merge-base refreshed
+ * (`review --pr` resolved them again), a new round when the snapshot changed.
  * @param {Ctx} ctx
  * @param {Doc} existing
  * @param {number | null} maxFiles
+ * @param {CodeSpec} spec the spec resolved now
  */
-async function rerun(ctx, existing, maxFiles) {
+async function rerun(ctx, existing, maxFiles, spec) {
   return withDoc(ctx, existing.id, async (d) => {
     let dirtyDoc = false;
     if (d.state === 'closed') {
@@ -104,6 +105,10 @@ async function rerun(ctx, existing, maxFiles) {
     }
     if (maxFiles && /** @type {any} */ (d.code)?.maxFiles !== maxFiles) {
       d.code = /** @type {any} */ ({ ...d.code, maxFiles });
+      dirtyDoc = true;
+    }
+    if (spec.mode === 'pr' && spec.pr && JSON.stringify(/** @type {any} */ (d.code)?.pr) !== JSON.stringify(spec.pr)) {
+      d.code = /** @type {any} */ ({ ...d.code, pr: spec.pr });
       dirtyDoc = true;
     }
     if (dirtyDoc) await ctx.store.saveDoc(d);
@@ -138,6 +143,8 @@ async function defaultTitle(repo, spec, branch) {
       const subject = await repo.maybe(['log', '-1', '--format=%s', '--end-of-options', String(spec.commit)]);
       return `Commit ${short(spec.commit)}${subject ? `: ${subject.trim().slice(0, 80)}` : ''}${paths}`;
     }
+    case 'pr':
+      return `PR #${spec.pr?.number}${spec.pr?.title ? `: ${spec.pr.title.slice(0, 80)}` : ''}${paths}`;
     default:
       return `Code review${paths}`;
   }

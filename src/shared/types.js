@@ -142,7 +142,9 @@ export {};
  * @property {string} [to] range end (ref or sha, as given)
  * @property {boolean} [threeDot]
  * @property {string} [commit]
- * @property {{ repo: string, number: number, url: string, headRefName: string }} [pr]
+ * @property {{ repo: string, number: number, url: string, title: string, baseRefName: string, headRefName: string,
+ *   headOid: string, mergeBase: string }} [pr] PR mode (core/code/pr.js): headOid and mergeBase as of the last
+ *   `review --pr`, which refreshes them
  * @property {string[]} [paths] pathspecs
  * @property {number} context unified-diff context lines
  */

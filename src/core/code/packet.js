@@ -255,7 +255,10 @@ export function codeLineBasis(snap, threads) {
   const root = sc?.root ?? snap.code?.manifest?.root ?? '';
   const out = [`Repo root: ${root} (paths below are relative to it)`];
   const files = [...new Set(threads.filter((t) => t.file && t.lines && t.anchorState !== 'orphaned').map((t) => /** @type {string} */ (t.file)))];
-  if (sc?.notCheckedOut) {
+  const pr = /** @type {any} */ (snap.doc.code ?? {}).mode === 'pr' ? /** @type {any} */ (snap.doc.code).pr : null;
+  if (sc?.notCheckedOut && pr) {
+    out.push(`PR #${pr.number} is not checked out here: run \`gh pr checkout ${pr.number}\` before editing; line numbers are the PR head ${short(sc.manifest.newSha)}.`);
+  } else if (sc?.notCheckedOut) {
     out.push(`Line numbers = files of v${v} (commit ${short(sc.manifest.newSha)}), which is not checked out: check it out before editing.`);
   } else if (files.length) {
     const k = files.filter((p) => sc?.changed.has(p)).length;

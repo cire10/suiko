@@ -23,6 +23,7 @@ import { renderSource } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { autoCommit } from '../git.js';
 import { docKind, docOriginType, docRefFor, isCode, isSnapshot, originType, planFileOf } from '../../store/snapshot.js';
+import { deletePrRef } from '../../code/pr.js';
 import { kindOf } from '../kinds.js';
 import { pathFromCwd } from '../packet-data.js';
 import { anchorAt, isActionable, isOutdated } from '../threadstate.js';
@@ -403,7 +404,8 @@ export async function sourceLines(ctx, ref, { version, from, to } = {}) {
 }
 
 /**
- * Ends the review session: doc state 'closed' and a session.closed event (waiters exit 5).
+ * Ends the review session: doc state 'closed' and a session.closed event (waiters exit 5). A PR review also loses
+ * its local ref (refs/specreview/pr/<n>); `review --pr` fetches it again.
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  */
@@ -413,6 +415,8 @@ export async function closeSession(ctx, ref) {
       doc.state = 'closed';
       await ctx.store.saveDoc(doc);
     }
+    const spec = /** @type {any} */ (doc).code;
+    if (isCode(doc) && spec?.mode === 'pr') await deletePrRef(ctx.root, Number(spec.pr?.number));
     await emit(ctx, doc.id, SSE.SESSION_CLOSED, {});
     return { ok: true, doc: doc.id, state: doc.state };
   });

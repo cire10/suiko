@@ -1,8 +1,8 @@
 // @ts-check
-// `specreview review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha>]
+// `specreview review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha> | --pr <n|url>]
 //  [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane|system|none] [--workspace <dir>]
-//  [--json]` (design 4.2): opens a code review of the agent's changes (doc kind 'code') and returns at once with the
-// review URL and the background `wait` command.
+//  [--json]` (design 4.2, 4.18): opens a code review of the agent's changes (doc kind 'code') and returns at once with
+// the review URL and the background `wait` command.
 //
 // Workspace: --workspace, else the repository top level of the cwd (`git rev-parse --show-toplevel`); `.specreview/`
 // is created there when missing (review is an explicit verb, as `open` is). The engine (src/core/code/review.js
@@ -17,13 +17,21 @@
 //   review --base main [--committed]    merge-base(main, HEAD) .. working tree (--committed: .. HEAD, mode branch)
 //   review A..B | A...B                 range (three-dot: merge-base(A, B) .. B)
 //   review --commit <sha>               <sha>^ .. <sha>
-// Exit: 0 open; 1 not a git repository, git too old, git failure; 3 refused (too many files, unmerged index entries
-// with --staged, too many large untracked files); 4 base / range end / commit not found, or nothing to review.
+//   review --pr <n|url>                 a GitHub PR through `gh` (core/code/pr.js): its merge-base .. the working tree
+//                                       when the PR is checked out, else .. its head, fetched once into
+//                                       refs/specreview/pr/<n>. The only review that uses the network; re-run it to
+//                                       pick up new PR commits (rounds and the daemon never fetch).
+// Exit: 0 open; 1 not a git repository, git too old, git failure, gh missing or not signed in; 3 refused (too many
+// files, unmerged index entries with --staged, too many large untracked files, offline, no remote for the PR's
+// repository); 4 base / range end / commit / PR not found, or nothing to review.
 
+import fs from 'node:fs';
 import path from 'node:path';
-import { UsageError, exitCodeOf } from '../../core/store/errors.js';
+import { RefusedError, UsageError, exitCodeOf } from '../../core/store/errors.js';
 import { findWorkspace, initStoreDir } from '../../core/store/workspace.js';
 import { openRepo } from '../../core/code/git.js';
+import { fetchPr, ghRunner, resolvePr } from '../../core/code/pr.js';
+import { maxFilesOf } from '../../core/code/util.js';
 import { specLabel } from '../../core/code/spec.js';
 import { codeStats, skippedText } from '../../core/code/diff-text.js';
 import { EXIT } from '../../shared/protocol.js';
@@ -32,6 +40,7 @@ import { shellArg } from '../format.js';
 import { callOp, openContext, realpathOr, wsIdOfContext } from '../runtime.js';
 import { showUrl, shownPrefix } from '../snapshot.js';
 import { resolveBrowser } from './open.js';
+import { networkRefusal } from '../fetch-url.js';
 
 /** The modes a review can name (protocol.js CODE_MODES without 'pr', which is WP3b's `--pr`). */
 const MODES = ['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit'];
@@ -39,14 +48,15 @@ const MODES = ['since-base', 'uncommitted', 'staged', 'branch', 'range', 'commit
 export const spec = {
   name: 'review',
   usage:
-    'review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha>] [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane|system|none] [--workspace <dir>] [--json]',
-  summary: 'Open a code review of your changes (since-base, uncommitted, staged, range, commit), print the review URL and the wait command, and return.',
+    'review [<range>] [--uncommitted | --staged | --base <ref> [--committed] | --commit <sha> | --pr <n|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane|system|none] [--workspace <dir>] [--json]',
+  summary: 'Open a code review of your changes (since-base, uncommitted, staged, range, commit) or of a GitHub PR, print the review URL and the wait command, and return.',
   options: {
     uncommitted: { type: 'boolean' },
     staged: { type: 'boolean' },
     base: { type: 'string' },
     committed: { type: 'boolean' },
     commit: { type: 'string' },
+    pr: { type: 'string' },
     path: { type: 'string', multiple: true },
     context: { type: 'string' },
     'max-files': { type: 'string' },
@@ -59,6 +69,9 @@ export const spec = {
     '<range>: A..B (A to B) or A...B (merge-base of A and B to B). --base <ref> --committed: up to HEAD, not the working tree.',
     '--path limits the review to pathspecs (repeatable). --context: lines around each change (default 3).',
     'Running it again with the same spec records a new round when the files changed, and reopens the tab.',
+    '--pr <n|url>: a GitHub PR, through gh (signed in). Checked out (gh pr checkout): its merge-base .. your working tree;',
+    '  otherwise its head, fetched once from the remote of its repository (line numbers are the PR head; check it out to',
+    '  edit). The only review that uses the network (refused when SPECREVIEW_OFFLINE=1); run it again for new PR commits.',
     'Then run the printed `specreview wait` in the background; after editing the files, `specreview revise <doc> --replies -`.',
     '--browser system (default) | pane | none, as for open; $SPECREVIEW_BROWSER changes the default.',
   ],
@@ -80,15 +93,16 @@ export const spec = {
 /**
  * @param {import('../args.js').ParsedArgs} parsed
  * @param {import('../runtime.js').Runtime} rt
- * @returns {Promise<{ input: ReviewInput, title?: string, browser: 'pane' | 'system' | 'none' }>}
+ * @returns {Promise<{ input: ReviewInput, pr?: string, title?: string, browser: 'pane' | 'system' | 'none' }>}
  */
 export async function parse({ values, positionals }, rt) {
   expectPositionals('review', positionals, 0, 1, spec.usage);
   const [range] = positionals;
-  const picked = [range !== undefined && '<range>', values.uncommitted && '--uncommitted', values.staged && '--staged', values.base !== undefined && '--base', values.commit !== undefined && '--commit'].filter(Boolean);
-  if (picked.length > 1) throw new UsageError(`review: pick one of <range>, --uncommitted, --staged, --base, --commit (got ${picked.join(' and ')})`);
+  const picked = [range !== undefined && '<range>', values.uncommitted && '--uncommitted', values.staged && '--staged', values.base !== undefined && '--base', values.commit !== undefined && '--commit', values.pr !== undefined && '--pr'].filter(Boolean);
+  if (picked.length > 1) throw new UsageError(`review: pick one of <range>, --uncommitted, --staged, --base, --commit, --pr (got ${picked.join(' and ')})`);
   if (values.committed && values.base === undefined) throw new UsageError('review: --committed goes with --base <ref>');
   return {
+    ...(values.pr !== undefined ? { pr: /** @type {string} */ (values.pr) } : {}),
     input: reviewInput({
       range,
       uncommitted: Boolean(values.uncommitted),
@@ -160,18 +174,30 @@ function intArg(v, flag, min) {
 
 /**
  * @param {import('../runtime.js').Runtime} rt
- * @param {{ input: ReviewInput, title?: string, browser?: 'pane' | 'system' | 'none' }} input
+ * @param {{ input: ReviewInput, pr?: string, title?: string, browser?: 'pane' | 'system' | 'none' }} input
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 export async function execute(rt, input) {
   const browser = input.browser ?? resolveBrowser(undefined, rt.env);
   // the workspace of a code review is the repository top level (repo-relative paths are workspace paths)
   const root = rt.workspace ?? (await openRepo(rt.cwd, { allowSubdir: true })).root;
+  /** @type {any} */
+  let engineInput = input.input ?? {};
+  /** @type {{ checkedOut: boolean, fetched: boolean, remote: string | null } | null} */
+  let prState = null;
+  if (input.pr !== undefined) {
+    // gh and the one fetch run here, before the store exists: a refused or failed PR leaves nothing behind
+    const why = networkRefusal(rt.env);
+    if (why) throw new RefusedError(`review --pr uses the network (gh, git fetch), and ${why}`, { details: { offline: true } });
+    const pr = await resolvePr(ghRunner(rt.deps, rt.env), input.pr, { maxFiles: maxFilesOf(engineInput.maxFiles ?? null, workspaceConfig(root)) });
+    prState = await fetchPr(await openRepo(root), pr);
+    engineInput = { ...engineInput, mode: 'pr', pr };
+  }
   const ws = await findWorkspace(root, { create: false, explicitRoot: root });
   const storeCreated = !ws.exists;
   if (storeCreated) await initStoreDir(ws.root);
   const { ctx, engine } = await openContext(rt, { create: true, root: ws.root });
-  const res = await callOp(engine, 'openCodeReview', ctx, { input: input.input ?? {}, title: input.title });
+  const res = await callOp(engine, 'openCodeReview', ctx, { input: engineInput, title: input.title });
   const doc = res.doc;
   const code = res.code;
   const wsId = wsIdOfContext(ctx) || ws.wsId;
@@ -198,6 +224,11 @@ export async function execute(rt, input) {
   const lines = [`specreview: code review ${doc.id} ${what} · ${label}`];
   const skipped = code.skipped.length ? ` · skipped: ${skippedText(code.skipped)}` : '';
   lines.push(`  ${st.files} file${st.files === 1 ? '' : 's'} · +${st.added} -${st.removed}${skipped}`);
+  const pr = engineInput.pr;
+  if (pr) {
+    lines.push(`  ${pr.url}`);
+    if (code.newSide !== 'worktree') lines.push(`  PR #${pr.number} is not checked out here: line numbers are its head ${String(code.newSha ?? '').slice(0, 7)}; run \`gh pr checkout ${pr.number}\` before editing`);
+  }
   lines.push(url ? `  review UI: ${url}` : `  review UI: unavailable (${/** @type {Error} */ (daemonError)?.message ?? 'server not running'})`);
   lines.push(`next: ${shownPrefix(shown)}run \`specreview wait ${ref}\` in the background`);
   if (storeCreated) lines.push(`created ${path.join(ws.root, '.specreview')}/ (the SpecReview store; reviews never include it)`);
@@ -224,9 +255,23 @@ export async function execute(rt, input) {
     url,
     wsId,
     ref,
+    ...(pr ? { pr: { repo: pr.repo, number: pr.number, url: pr.url, checkedOut: code.newSide === 'worktree', fetched: Boolean(prState?.fetched) } } : {}),
     ...(daemonError ? { error: { message: /** @type {Error} */ (daemonError).message } } : {}),
   };
   return { exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK, text: lines.join('\n'), stderr, json };
+}
+
+/**
+ * The workspace's config.json (for code.maxFiles), read without creating the store; null when there is none.
+ * @param {string} root
+ * @returns {any}
+ */
+function workspaceConfig(root) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, '.specreview', 'config.json'), 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 /**

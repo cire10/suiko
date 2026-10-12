@@ -21,6 +21,7 @@ import { sha256 } from '../util/hash.js';
 import { countLines, decodeText } from '../util/stable-read.js';
 import { STORE_EXCLUDE, displayName, literal, looksSecret, openRepo, supportedName } from './git.js';
 import { isFixedEndpoint, isShaLike } from './spec.js';
+import { OID_RE, prCheckedOut, prRef } from './pr.js';
 import { canonicalText } from './diff-text.js';
 import { fileMaxBytes, mapLimit, maxFilesOf } from './util.js';
 
@@ -115,8 +116,24 @@ export async function resolveSides(repo, spec, prev) {
       newSide = 'commit';
       break;
     }
-    case 'pr':
-      throw new UsageError('PR reviews (review --pr) are not available in this build');
+    case 'pr': {
+      // local refs only: `review --pr` fetched what was needed (pr.js); rounds never fetch
+      const pr = spec.pr;
+      const n = pr?.number;
+      if (!pr || !OID_RE.test(String(pr.mergeBase)) || !OID_RE.test(String(pr.headOid))) {
+        throw new UsageError(`this PR review has no resolved merge-base: run \`specreview review --pr ${n ?? '<n>'}\` again`);
+      }
+      const mb = await repo.verifyCommit(pr.mergeBase);
+      if (!mb) throw new NotFoundError(`the merge-base ${pr.mergeBase.slice(0, 7)} of PR #${n} is not in this repository: run \`specreview review --pr ${n}\` to fetch it`);
+      baseSha = mb;
+      if (!(await prCheckedOut(repo, pr))) {
+        const c = await repo.verifyCommit(prRef(Number(n)));
+        if (!c) throw new NotFoundError(`PR #${n} is neither checked out nor fetched here: run \`specreview review --pr ${n}\``);
+        newSha = c;
+        newSide = 'commit';
+      }
+      break;
+    }
     default:
       throw new UsageError(`unsupported code review mode: ${JSON.stringify(spec.mode)}`);
   }

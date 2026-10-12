@@ -3,7 +3,8 @@
 //   - execFile('git', [...PREFIX, ...args]): argv only, never a shell;
 //   - PREFIX: no pager, no colours, no external diff or textconv, no fsmonitor, hooks pointed at an empty path
 //     (core.hooksPath=/dev/null; a fresh empty dir on Windows), no network (protocol.allow=never, no lazy fetch of
-//     missing objects in a partial clone), no auto gc;
+//     missing objects in a partial clone), no auto gc. The one exception is Repo#fetch (`review --pr` in the CLI
+//     only): https, ssh, git and local paths are allowed for that call, never plain http or ext;
 //   - the environment loses every variable that would redirect git to another repository, index or object store, or
 //     change config, pathspec or diff behaviour (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_CONFIG_PARAMETERS,
 //     GIT_LITERAL_PATHSPECS...), and gains GIT_TERMINAL_PROMPT=0, GIT_OPTIONAL_LOCKS=0, LC_ALL=C and, when given,
@@ -50,8 +51,11 @@ function hooksPath() {
   return windowsHooksDir;
 }
 
-/** @returns {string[]} */
-function prefix() {
+/**
+ * @param {boolean} [network] allow https, ssh, git and file transports (Repo#fetch); every other call has none
+ * @returns {string[]}
+ */
+function prefix(network = false) {
   return [
     '--no-pager',
     '-c', 'color.ui=never',
@@ -63,6 +67,9 @@ function prefix() {
     '-c', `core.hooksPath=${hooksPath()}`,
     '-c', 'core.safecrlf=false',
     '-c', 'protocol.allow=never',
+    ...(network
+      ? ['-c', 'protocol.https.allow=always', '-c', 'protocol.ssh.allow=always', '-c', 'protocol.git.allow=always', '-c', 'protocol.file.allow=always']
+      : []),
     '-c', 'gc.auto=0',
     '-c', 'maintenance.auto=false',
     '-c', 'advice.addEmbeddedRepo=false',
@@ -93,7 +100,7 @@ export function gitEnv(indexFile) {
 
 /**
  * @typedef {{ cwd: string, input?: string | Buffer, indexFile?: string, maxBuffer?: number, timeoutMs?: number,
- *   okCodes?: number[] }} GitOpts
+ *   okCodes?: number[], network?: boolean }} GitOpts
  * @typedef {{ code: number, stdout: Buffer, stderr: string }} GitResult
  */
 
@@ -104,14 +111,14 @@ export function gitEnv(indexFile) {
  * @param {GitOpts} opts
  * @returns {Promise<GitResult>}
  */
-export function gitx(args, { cwd, input, indexFile, maxBuffer = 64 << 20, timeoutMs = 30000, okCodes = [0] }) {
+export function gitx(args, { cwd, input, indexFile, maxBuffer = 64 << 20, timeoutMs = 30000, okCodes = [0], network = false }) {
   return new Promise((resolve, reject) => {
     /** @type {import('node:child_process').ChildProcess} */
     let child;
     try {
       child = execFile(
         'git',
-        [...prefix(), ...args],
+        [...prefix(network), ...args],
         { cwd, env: gitEnv(indexFile), encoding: 'buffer', maxBuffer, timeout: timeoutMs, windowsHide: true },
         (err, stdout, stderr) => {
           const errText = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : String(stderr ?? '');
@@ -355,6 +362,50 @@ export class Repo {
   async refExists(ref) {
     const r = await this.run(['show-ref', '--verify', '--quiet', '--end-of-options', ref], { okCodes: [0, 1, 128] });
     return r.code === 0;
+  }
+
+  /**
+   * Whether commit `a` is `b` or an ancestor of it; false when either is not in the repository.
+   * @param {string} a
+   * @param {string} b
+   * @returns {Promise<boolean>}
+   */
+  async isAncestor(a, b) {
+    const r = await this.run(['merge-base', '--is-ancestor', '--end-of-options', a, b], { okCodes: [0, 1, 128] });
+    return r.code === 0;
+  }
+
+  /**
+   * The configured remotes and their URLs.
+   * @returns {Promise<Array<{ name: string, url: string }>>}
+   */
+  async remotes() {
+    const out = await this.maybe(['config', '--get-regexp', '^remote\\..*\\.url$'], { failCodes: [1] });
+    /** @type {Array<{ name: string, url: string }>} */
+    const list = [];
+    for (const line of (out ?? '').split('\n')) {
+      const m = /^remote\.(.+)\.url (.*)$/.exec(line);
+      if (m) list.push({ name: m[1], url: m[2] });
+    }
+    return list;
+  }
+
+  /**
+   * Fetches refspecs from a configured remote, without tags. The only git call that may use the network (https,
+   * ssh, git or a local path; design 4.18): made by `review --pr` in the CLI, never by a round or the daemon.
+   * @param {string} remote
+   * @param {string[]} refspecs
+   */
+  async fetch(remote, refspecs) {
+    await this.run(['fetch', '--no-tags', '--quiet', '--end-of-options', remote, ...refspecs], { network: true, timeoutMs: 300000 });
+  }
+
+  /**
+   * Deletes a ref; nothing happens when it does not exist.
+   * @param {string} ref full ref name
+   */
+  async deleteRef(ref) {
+    await this.run(['update-ref', '-d', '--end-of-options', ref], { okCodes: [0, 1] });
   }
 
   /** The absolute path of the real index file. */
