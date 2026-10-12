@@ -2,7 +2,7 @@
 
 **Review AI-written specs the way you review pull requests.** Comment on any part of an HTML or Markdown spec in a local web UI, send precise, located feedback to your coding agent, get targeted edits instead of a regenerated document, and see exactly what changed, round after round, until you approve a final version.
 
-The name is *suikō* (推敲), Japanese for polishing a text by weighing every word: what you and your agent do here. Suiko used to be called SpecReview. The `specreview` command still works, and its files keep the `.specreview` name.
+The name is *suikō* (推敲), Japanese for polishing a text by weighing every word: what you and your agent do here.
 
 Suiko runs entirely on your machine, keeps every version and thread as plain files you can commit to git, and works with Claude Code (plugin, skill, slash command and hooks), any MCP client, and any CLI agent.
 

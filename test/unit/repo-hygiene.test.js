@@ -17,3 +17,9 @@ test('node_modules is neither tracked nor trackable, as a folder or as a symlink
   assert.equal(git('ls-files', '--', 'node_modules').trim(), '', 'nothing under node_modules is tracked');
   assert.equal(git('check-ignore', '--no-index', 'node_modules').trim(), 'node_modules', 'a file or symlink named node_modules is ignored');
 });
+
+test('the package installs one command, suiko (an unrelated npm package is called specreview: a second name could clash)', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.deepEqual(pkg.bin, { suiko: 'bin/suiko.js' });
+  assert.ok(fs.existsSync(path.join(ROOT, 'bin', 'suiko.js')));
+});
