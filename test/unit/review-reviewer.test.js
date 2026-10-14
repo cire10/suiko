@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import { SSE } from '../../src/shared/protocol.js';
 import { ConflictError, NotFoundError, UsageError } from '../../src/core/store/errors.js';
 import * as ops from '../../src/core/review/index.js';
+import { elementText } from '../../src/core/render/index.js';
 import { TINY_PNG, editFile, elementCapture, engineCtx, findSrid, makeWorkspace, textCapture } from '../helpers/engine.js';
 
 const DOC = 'kitchen-sink';
@@ -101,6 +102,43 @@ describe('locks and threads', () => {
     assert.equal(t1?.status, 'open');
   });
 
+  test('Accept all resolves several threads at once (every id checked first), and its Undo reopens them', async () => {
+    const { ctx, v1 } = await opened();
+    for (const [text, body] of [['Prototype the issuer.', 'a'], ['Ship rotation behind a flag.', 'b'], ['Load test the issuer', 'c']]) {
+      await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, text), body });
+    }
+    await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
+    await ops.reply(ctx, DOC, 't1', { body: 'Done.', status: 'addressed' });
+    await ops.reply(ctx, DOC, 't2', { body: 'Because of X.', status: 'answered' });
+    const status = async () => Object.fromEntries((await ctx.store.listThreads(DOC)).map((t) => [t.id, t.status]));
+
+    await assert.rejects(ops.resolveThreads(ctx, DOC, []), UsageError);
+    await assert.rejects(ops.resolveThreads(ctx, DOC, ['t1', 't9']), NotFoundError);
+    assert.deepEqual(await status(), { t1: 'addressed', t2: 'answered', t3: 'open' }, 'an unknown id resolves nothing');
+
+    const seq = (await ctx.store.readEvents(DOC, 0)).length;
+    const r = await ops.resolveThreads(ctx, DOC, ['t1', 't2', 't1']);
+    assert.deepEqual(r, { resolved: ['t1', 't2'], unchanged: [] });
+    assert.deepEqual(await status(), { t1: 'resolved', t2: 'resolved', t3: 'open' });
+    const t1 = await ctx.store.getThread(DOC, 't1');
+    assert.equal(/** @type {any} */ (t1)?.resolvedBy, 'Eric');
+    assert.equal(t1?.resolvedIn, 1);
+    assert.equal(t1?.decision ?? null, null, 'no decision is recorded');
+    const events = (await ctx.store.readEvents(DOC, 0)).slice(seq).filter((e) => e.type === SSE.THREAD_UPDATED);
+    assert.deepEqual(events.map((e) => [e.thread, e.status]), [['t1', 'resolved'], ['t2', 'resolved']]);
+    // already resolved: left as it is
+    assert.deepEqual(await ops.resolveThreads(ctx, DOC, ['t1', 't3']), { resolved: ['t3'], unchanged: ['t1'] });
+
+    // Undo: back to the agent's last status (or open), only for what is resolved
+    assert.deepEqual(await ops.unresolveThreads(ctx, DOC, ['t1', 't2', 't3']), { reopened: ['t1', 't2', 't3'], unchanged: [] });
+    assert.deepEqual(await status(), { t1: 'addressed', t2: 'answered', t3: 'open' });
+    assert.deepEqual(await ops.unresolveThreads(ctx, DOC, ['t1']), { reopened: [], unchanged: ['t1'] });
+    await assert.rejects(ops.unresolveThreads(ctx, DOC, ['t9']), NotFoundError);
+    // the resolve bookkeeping is gone
+    const back = /** @type {any} */ (await ctx.store.getThread(DOC, 't1'));
+    assert.deepEqual([back.resolvedIn, back.resolvedAt, back.resolvedBy], [null, undefined, undefined]);
+  });
+
   test('DOM targets for a version and for the live working copy', async () => {
     const { ctx, v1 } = await opened();
     await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Prototype the issuer.'), body: 'x' });
@@ -145,6 +183,30 @@ describe('locks and threads', () => {
   });
 });
 
+describe('changes for a side-by-side view', () => {
+  test('every hunk is also placed in the older version (oldSide), over any span of versions', async () => {
+    const { ctx, v1 } = await opened();
+    editFile(ws.file(FILE), 'rotated on every use', 'rotated on first use');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'wording' });
+    editFile(ws.file(FILE), '- [ ] Load test the issuer\n', '');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'drop an item' });
+    // without oldSide (agents: suiko diff, MCP) nothing extra is computed
+    assert.ok((await ops.changes(ctx, DOC, { from: 1, to: 3 })).hunks.every((h) => !('oldSide' in h)));
+    const ch = await ops.changes(ctx, DOC, { from: 1, to: 3, oldSide: true });
+    const para = findSrid(v1, (n, srid) => n.t === 'p' && /^Refresh tokens are rotated/.test(elementText(v1, srid)));
+    const item = findSrid(v1, (n, srid) => n.t === 'li' && /Load test the issuer/.test(elementText(v1, srid)));
+    const byOp = Object.fromEntries(ch.hunks.map((h) => [h.op, /** @type {any} */ (h).oldSide]));
+    assert.deepEqual(byOp.mod.words.map((/** @type {any} */ w) => [w.srid, w.quote]), [[para, 'every']]);
+    assert.ok(byOp.del.srids.includes(item), JSON.stringify(byOp.del));
+    assert.deepEqual(byOp.del.words.map((/** @type {any} */ w) => w.quote), ['Load test the issuer']);
+    // the working copy too
+    editFile(ws.file(FILE), 'Ship rotation behind a flag.', 'Ship rotation behind a feature flag.');
+    const live = await ops.changes(ctx, DOC, { from: 3, to: 'live', oldSide: true });
+    assert.deepEqual(live.hunks.map((h) => /** @type {any} */ (h).oldSide.words.map((/** @type {any} */ w) => w.quote)), [[]]);
+    assert.equal(/** @type {any} */ (live.hunks[0]).oldSide.srids.length, 1, 'the item that gains a word');
+  });
+});
+
 describe('changed images', () => {
   test('a replaced image is a change: changes.assets, thread link and an image mini-diff', async () => {
     const { ctx, v1 } = await opened();
@@ -165,6 +227,9 @@ describe('changed images', () => {
     const ch = await ops.changes(ctx, DOC, { from: 1, to: 2 });
     assert.equal(ch.assets.length, 1);
     assert.equal(ch.assets[0].srids.length, 1);
+    assert.equal('oldSrids' in ch.assets[0], false);
+    // side by side: where the older version shows the image
+    assert.deepEqual(/** @type {any} */ (await ops.changes(ctx, DOC, { from: 1, to: 2, oldSide: true })).assets[0].oldSrids, [img]);
     assert.deepEqual(ch.threadLinks, { t1: ['asset:docs/img/arch.png'] });
     const mini = await ops.threadMiniDiff(ctx, DOC, 't1');
     assert.deepEqual(mini, { kind: 'image', version: 2, from: 1, path: 'docs/img/arch.png', beforeUrl: 'v1/docs/img/arch.png', afterUrl: 'v2/docs/img/arch.png' });

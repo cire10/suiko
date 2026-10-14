@@ -5,6 +5,7 @@
 //     elements inside it, and read the guest's debug state.
 
 import { test as base, expect } from '@playwright/test';
+import { TESTID } from '../../src/shared/protocol.js';
 import { startMockServer } from './mock-server.mjs';
 
 /** @typedef {Awaited<ReturnType<typeof startMockServer>>} Mock */
@@ -31,14 +32,25 @@ export class Ui {
   }
 
   async ready() {
-    await expect(this.page.locator('.frame-wrap[data-guest="ready"]')).toBeAttached({ timeout: 15000 });
+    // the doc frame of the version shown (Changes side by side adds the older version's, .compare-base)
+    await expect(this.page.locator('.frame-wrap:not(.compare-base)[data-guest="ready"]')).toBeAttached({ timeout: 15000 });
   }
 
-  /** The doc iframe's Frame. */
+  /** The doc iframe's Frame (the version shown; not the older version of Changes side by side). */
   async frame() {
     await this.ready();
-    const f = this.page.frames().find((fr) => fr.url().startsWith(this.mock.contentOrigin));
-    if (!f) throw new Error('doc frame not found');
+    const handle = await this.page.getByTestId(TESTID.docFrame).elementHandle();
+    const f = await handle?.contentFrame();
+    if (!f || !f.url().startsWith(this.mock.contentOrigin)) throw new Error('doc frame not found');
+    return f;
+  }
+
+  /** The older version's iframe of Changes side by side, once its guest is connected. */
+  async baseFrame() {
+    await expect(this.page.locator('.frame-wrap.compare-base[data-guest="ready"]')).toBeAttached({ timeout: 15000 });
+    const handle = await this.page.getByTestId(TESTID.compareBaseFrame).elementHandle();
+    const f = await handle?.contentFrame();
+    if (!f) throw new Error('base frame not found');
     return f;
   }
 

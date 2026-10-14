@@ -15,9 +15,13 @@
 //                             'mod': { text: removed words joined by ' … ', html: null, lines } or null; 'add': null
 //             insertBefore,   'del': { srid } of the first block starting at/after the deletion point, else null
 //             insertAfter,    'del' with no following block: { srid } of the last block before it (addition)
-//             section }] }    heading chain at the hunk's new start (pure deletions: just before the deletion point)
-// It is synchronous (the Markdown fragment renderer is synchronous); awaiting it is harmless. `fromRender` is
-// accepted for interface compatibility and currently unused.
+//             section,        heading chain at the hunk's new start (pure deletions: just before the deletion point)
+//             oldSide }] }    only with `fromRender`: the same hunk in the OLD version's render, for a side-by-side
+//                             view: { srids, words, insertBefore, insertAfter }, the mirror image of the fields
+//                             above (srids: blocks holding removed / replaced text, or the insertion point of words
+//                             added inside a line; words: the removed / replaced text as rendered text; insertBefore /
+//                             insertAfter: where an 'add' hunk's new lines would go in the old version)
+// It is synchronous (the Markdown fragment renderer is synchronous); awaiting it is harmless.
 
 import { CONTEXT_CHARS } from '../../shared/protocol.js';
 import { renderFragmentSync } from '../render/fragment.js';
@@ -32,9 +36,11 @@ import { hunkWordOps } from './words.js';
  * @typedef {import('./hunks.js').Hunk} Hunk
  * @typedef {import('../render/srcmap.js').SrcNode} SrcNode
  * @typedef {{ srid: number, quote: string, prefix: string, suffix: string }} WordTarget
+ * @typedef {{ srids: number[], words: WordTarget[], insertBefore: { srid: number } | null, insertAfter: { srid: number } | null }} OldSide
  * @typedef {{ id: string, op: 'add'|'del'|'mod', old: { start: number, lines: number }, new: { start: number, lines: number },
  *             srids: number[], words: WordTarget[], deleted: { text: string, html: string|null, lines: number } | null,
- *             insertBefore: { srid: number } | null, insertAfter: { srid: number } | null, section: string[] }} ChangeHunk
+ *             insertBefore: { srid: number } | null, insertAfter: { srid: number } | null, section: string[],
+ *             oldSide?: OldSide }} ChangeHunk
  * @typedef {{ stats: { added: number, removed: number, hunks: number, blocksChanged: number }, hunks: ChangeHunk[] }} Changes
  */
 
@@ -42,12 +48,15 @@ import { hunkWordOps } from './words.js';
  * @param {{ fromSource: string, toSource: string, toRender: any, format?: string, hunks?: Hunk[], fromRender?: any }} p
  * @returns {Changes}
  */
-export function changeSet({ fromSource, toSource, toRender, format, hunks }) {
+export function changeSet({ fromSource, toSource, toRender, format, hunks, fromRender }) {
   const a = fromSource ?? '';
   const b = toSource ?? '';
   const fmt = format === 'html' || (!format && toRender?.format === 'html') ? 'html' : 'markdown';
   const hs = hunks ?? lineHunks(a, b);
   const order = new Map((toRender?.srcmap?.order ?? []).map((srid, i) => [srid, i]));
+  const oldOrder = new Map((fromRender?.srcmap?.order ?? []).map((/** @type {number} */ srid, /** @type {number} */ i) => [srid, i]));
+  /** @type {Map<number, import('../text/plain.js').PlainText>} the same cache for the old render */
+  const oldPlainCache = new Map();
   /** @type {ChangeHunk[]} */
   const out = [];
   /** @type {Set<number>} */
@@ -106,7 +115,8 @@ export function changeSet({ fromSource, toSource, toRender, format, hunks }) {
       if (!insertBefore) insertAfter = lastBlockBefore(toRender, h.newStartOff);
     }
 
-    out.push({
+    /** @type {ChangeHunk} */
+    const hunk = {
       id: h.id,
       op,
       old: { start: h.oldStart, lines: h.oldLines },
@@ -118,10 +128,57 @@ export function changeSet({ fromSource, toSource, toRender, format, hunks }) {
       insertAfter,
       // a pure deletion belongs to the section that held the removed lines: the one ending at the deletion point
       section: toRender?.outline ? sectionAt(toRender, op === 'del' ? Math.max(0, h.newStartOff - 1) : h.newStartOff) : [],
-    });
+    };
+    if (fromRender?.srcmap) hunk.oldSide = oldSideOf(fromRender, a, fmt, h, op, ops, oldOrder, oldPlainCache);
+    out.push(hunk);
   }
 
   return { stats: { added, removed, hunks: hs.length, blocksChanged: allBlocks.size }, hunks: out };
+}
+
+/**
+ * A hunk in the OLD version's render (side-by-side view): the mirror image of the new-side fields. Removed and
+ * replaced words become word targets in the old render (where the old version shows them), blocks with text added
+ * inside them are marked at the insertion point, and an 'add' hunk gets the old block its new lines would go before
+ * (or after, at the end of the document).
+ * @param {any} fromRender @param {string} a old source @param {'markdown'|'html'} fmt
+ * @param {Hunk} h @param {'add'|'del'|'mod'} op @param {import('./words.js').WordOp[]} ops
+ * @param {Map<number, number>} order old render's document order by srid
+ * @param {Map<number, import('../text/plain.js').PlainText>} cache
+ * @returns {OldSide}
+ */
+function oldSideOf(fromRender, a, fmt, h, op, ops, order, cache) {
+  /** @type {Set<number>} */
+  const srids = new Set();
+  /** @type {WordTarget[]} */
+  const words = [];
+  for (const o of ops) {
+    if (o.op === 'del') {
+      const [s, e] = trimRange(a, h.oldStartOff + o.aStart, h.oldStartOff + o.aEnd);
+      if (e <= s) continue;
+      for (const srid of elementsIntersecting(fromRender, s, e, { leafBlocks: true })) {
+        srids.add(srid);
+        const w = wordTarget(fromRender, a, fmt, srid, s, e, cache);
+        if (w) words.push(w);
+      }
+    } else if (o.op === 'ins' && op === 'mod' && o.text.trim()) {
+      const p = h.oldStartOff + o.aStart;
+      const srid = deepestBlockAt(fromRender, p > h.oldStartOff ? p - 1 : p, p);
+      if (srid != null) srids.add(srid);
+    }
+  }
+  let insertBefore = null;
+  let insertAfter = null;
+  if (op === 'add') {
+    insertBefore = firstBlockFrom(fromRender, h.oldStartOff);
+    if (!insertBefore) insertAfter = lastBlockBefore(fromRender, h.oldStartOff);
+  }
+  return {
+    srids: [...srids].sort((x, y) => (order.get(x) ?? 0) - (order.get(y) ?? 0)),
+    words,
+    insertBefore,
+    insertAfter,
+  };
 }
 
 /**

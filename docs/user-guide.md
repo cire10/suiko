@@ -39,7 +39,7 @@ Your agent runs `suiko open <file>`, which opens the review UI in your default b
 
 Wide layout (900 px and up):
 
-- **Top bar:** doc name, version picker, mode tabs (**Review**, **Changes**, **Source**, **History**), the comparison base (in Changes and Source modes), the tool buttons (pick, the scissors for an area snip, and screen snip), the presence chip (for example "claude is listening"), the draft count and **Submit review**.
+- **Top bar:** doc name, version picker, mode tabs (**Read**, **Review**, **Changes**, **Source**, **History**), the tool buttons (pick, the scissors for an area snip, and screen snip), the presence chip (for example "claude is listening"), the draft count and **Submit review**. In Changes and Source modes the version picker becomes a range, `[v1 · last review] → [v3 (latest)]`, and Changes adds **Inline** / **Side by side**.
 - **Left rail:** the outline (headings) with badges: open-thread count, `~` changed, `+` added, `[L]` locked. The **⋯** button next to a heading offers **Comment on section**, **Mark agreed** and **Unlock** (shown as "Unlock (L1)" with the lock id). Below it, a compact version history.
 - **Centre:** the document, live and interactive, with highlights, pins and change marks drawn over it.
 - **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card.
@@ -51,8 +51,9 @@ Narrow layout (below 900 px, typical for the pane next to a chat): the outline a
 
 | Mode | Shows | Use it to |
 |---|---|---|
+| **Read** (`0`) | The latest version as its readers will see it: no highlights, pins, change marks or thread panel | Read the doc clean. You can still select text and comment; the composer opens beside the doc |
 | **Review** (`1`) | The selected version (head by default) with your threads highlighted | Read and comment |
-| **Changes** (`2`) | The new version, live, with what changed since the base drawn on top | See what the agent did |
+| **Changes** (`2`) | What changed between two versions: drawn over the newer one (Inline), or the older one beside it (Side by side) | See what the agent did |
 | **Source** (`3`) | Numbered source, or a source diff against the base (unified or split) | Check exact text; comment on raw lines (head metadata, attributes, script config) |
 | **History** (`4`) | A timeline of versions and reviews | Go back in time; compare any two versions |
 
@@ -241,7 +242,14 @@ The UI never switches versions or reloads while you are writing a comment; it sh
 
 When the agent records a version, a toast appears, for example "v3 ready - answers rv2 (3 addressed, 1 needs you) [Review changes] [Verify]", and the tab title gets a `(v3)` prefix.
 
-**Review changes** opens Changes mode with the base set to the version you last reviewed ("since my last review"). The base picker also offers "previous version" or any vN; press `d` to toggle between your last review and the previous version. In Changes mode:
+**Review changes** opens Changes mode comparing the version you last reviewed with the newest one. The top bar shows the comparison as a range, `[v1 · last review] → [v3 (latest)]`: pick any older version on the left and any version on the right to compare those two. Press `d` to toggle the older end between your last review and the previous version. **Compare versions…** in the command palette and **Compare with…** in History do the same.
+
+Two layouts, switched with **Inline** / **Side by side** next to **Threads** (remembered in this browser):
+
+- **Inline** draws the changes over the newer version, as described below.
+- **Side by side** shows the older version on the left and the newer one on the right, each under a label. On the left, removed and replaced text is struck through in red with a red bar beside its block, and a green "⊕ N lines added" tab marks where the newer version added lines. The right side is the inline view. The two scroll together: wherever you scroll one, the other shows the same place, even when a section changed length. `n` and `p` take both to the next change. The left side is read-only; comment on the right. Side by side needs a window at least 900 px wide.
+
+In the inline view:
 
 - a green bar marks added blocks and an amber bar marks modified ones;
 - inserted words are tinted;
@@ -260,11 +268,12 @@ The **Verify** filter (`v`) lists threads the agent marked addressed, answered o
 |---|---|
 | `j` / `k` | Next / previous thread |
 | `x` | **Accept**: resolve the thread. Optionally type a one-line **Record as decision** |
+| `X` (Shift+X) | **Accept all**: every addressed or answered thread in the queue (the **Accept all** button at the top of Verify, and in Changes' round results). Declined threads stay for you to accept or reopen one by one. The toast has **Undo** |
 | `o` | **Reopen**: opens a reply box; the reply goes into your next review |
 | `y` | Accept a decline |
 | `r` | Reply to the focused thread |
 
-Accepting takes effect immediately. Reopens, replies and new comments wait in your pending review until you submit. Only you can resolve a thread; the agent never closes its own work.
+Accepting takes effect immediately, Accept all included. Reopens, replies and new comments wait in your pending review until you submit. Only you can resolve a thread; the agent never closes its own work.
 
 ## Thread cards
 
@@ -323,12 +332,13 @@ Press `Cmd+/` (or `?`) in the UI for this list. Buttons show their key when you 
 | **Review** | `f` or `Cmd+Shift+Enter` | Submit review dialog (outside the composer) |
 | | `v` | Verify queue |
 | | `x` | Resolve / accept |
+| | `X` (Shift+X) | Accept all addressed or answered threads in Verify |
 | | `o` | Reopen |
 | | `y` | Accept a decline |
 | | `r` | Reply to the focused thread |
 | **Navigate** | `j` / `k` | Next / previous thread |
 | | `n` / `p` | Next / previous change |
-| | `1` / `2` / `3` / `4` | Review / Changes / Source / History |
+| | `0` / `1` / `2` / `3` / `4` | Read / Review / Changes / Source / History |
 | | `[` / `]` (outside pick mode) | Previous / next version |
 | | `d` | Toggle base: your last review vs the previous version |
 | **View** | `h` | Hide all annotations (clean read) |
@@ -351,6 +361,8 @@ The palette lists every action that has a key, plus these, which have none:
 |---|---|
 | **Go to thread / section / version** | Jump to a thread by id or text, a heading in the outline, or any recorded version (or the live working copy) |
 | **Compare versions** | Changes mode for any two versions: pick the older one, then the newer one |
+| **Compare side by side / Compare inline** | Changes with the older version beside the newer one, or the changes drawn over the newer one |
+| **Accept all addressed threads** | Resolve every addressed or answered thread in Verify (`Shift+X`); declined ones stay |
 | **Filters** | Show **Open**, **Needs me**, **Verify**, **Drafts**, **Resolved**, **Outdated** or **All** threads |
 | **Submit review as Comment / Request changes / Approve** | Open **Submit review** with that verdict already chosen; nothing is sent until you submit there |
 | **General comment** | A comment about the whole document |
@@ -384,7 +396,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 ## Theme, accessibility and clean reading
 
 - `t` cycles light, dark and system themes (or pick one in [Settings](#settings)). Markdown documents follow the theme (including mermaid diagrams); raw HTML documents keep their own styling.
-- `h` hides every highlight, pin and change mark for a clean read; press it again to bring them back.
+- **Read** mode (`0`) shows the latest version with nothing drawn over it and no thread panel. `h` hides every highlight, pin and change mark in the other modes; press it again to bring them back.
 - All controls are labelled buttons with visible focus rings. The thread and change lists are the keyboard-accessible counterparts of the highlights. States are shown with icons and text, not colour alone. Reduced-motion settings are respected.
 - If one-key shortcuts get in your way (speech input, or a document with its own keyboard controls), turn off **Single-letter shortcuts** in [Settings](#settings); every action stays available from the buttons and the [command palette](#command-palette).
 
@@ -393,7 +405,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 | Symptom | What it means | What to do |
 |---|---|---|
 | "Annotations are blocked by this document's Content-Security-Policy" | The document's own CSP meta tag blocks the review overlay | Review in **Source** mode, or ask the agent to remove the restrictive CSP meta |
-| "2 external resources failed (offline?)" | The document loads files from the internet and they did not load | Expected offline. Ask the agent to make the document self-contained |
+| "2 external resources failed (offline?)" | The document loads files from the internet (scripts, fonts, images) and some did not load | Check your connection, then reload the document (command palette: **Reload the document**). Everything else in the review keeps working |
 | Page errors count in the status bar | The document's own scripts threw errors | Check whether they affect what you are reviewing; mention them in a comment if so |
 | A thread is **Outdated** | Its text was edited without being linked to it | Read "was / now" on the card; reply, resolve, or **Move here** |
 | A thread is **Orphaned** | Its text is gone | Use the orphan tray: **Move here**, **Keep as general** or **Resolve** |

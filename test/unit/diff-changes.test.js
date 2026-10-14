@@ -164,3 +164,77 @@ test('changeSet without a render still reports hunks, deletions and stats', () =
   assert.deepEqual(c.hunks[0].deleted, { text: 'b', html: null, lines: 1 });
   assert.deepEqual(c.stats, { added: 1, removed: 1, hunks: 1, blocksChanged: 0 });
 });
+
+/** The change set with the old version's render too (Changes side by side: hunks[].oldSide). */
+async function bothSides(from, to, format = 'markdown') {
+  const docPath = format === 'html' ? 'docs/a.html' : 'docs/k.md';
+  const toRender = await renderSource({ format, source: to, docPath });
+  const fromRender = await renderSource({ format, source: from, docPath });
+  return { toRender, fromRender, c: changeSet({ fromSource: from, toSource: to, toRender, fromRender, format, hunks: lineHunks(from, to) }) };
+}
+
+test('without fromRender the hunks have no oldSide (the frozen shape is unchanged)', async () => {
+  const to = kitchen.replace('rotated on every use', 'rotated on first use');
+  const { c } = await changes(kitchen, to);
+  assert.equal('oldSide' in c.hunks[0], false);
+});
+
+test('oldSide: replaced words are word targets in the old render, at the old paragraph', async () => {
+  const to = kitchen.replace('rotated on every use', 'rotated on first use');
+  const { fromRender, c } = await bothSides(kitchen, to);
+  const h = c.hunks[0];
+  const oldPara = sridOf(fromRender, kitchen, 'p', 'Refresh tokens are rotated');
+  assert.deepEqual(h.oldSide.srids, [oldPara]);
+  assert.deepEqual(h.oldSide.words.map((w) => [w.srid, w.quote]), [[oldPara, 'every']]);
+  assert.ok(h.oldSide.words[0].prefix.endsWith('rotated on '), h.oldSide.words[0].prefix);
+  assert.ok(h.oldSide.words[0].suffix.startsWith(' use, and the previous'), h.oldSide.words[0].suffix);
+  assert.equal(h.oldSide.insertBefore, null);
+  assert.equal(h.oldSide.insertAfter, null);
+});
+
+test('oldSide: a removed line is marked where the old version shows it; words added inside a line mark its block', async () => {
+  const removed = kitchen.replace(/^- \[ \] Load test the issuer\n/m, '');
+  assert.notEqual(removed, kitchen);
+  let { fromRender, c } = await bothSides(kitchen, removed);
+  let h = c.hunks[0];
+  assert.equal(h.op, 'del');
+  const li = sridOf(fromRender, kitchen, 'li', '- [ ] Load test the issuer');
+  assert.ok(h.oldSide.srids.includes(li), `the removed item ${li} in ${JSON.stringify(h.oldSide.srids)}`);
+  assert.deepEqual(h.oldSide.words.map((w) => w.quote), ['Load test the issuer']);
+
+  // an insertion inside a line: nothing to strike through, but the old block that gains text is marked
+  const extended = kitchen.replace('rotated on every use', 'rotated on every use with a 30 s grace window');
+  ({ fromRender, c } = await bothSides(kitchen, extended));
+  h = c.hunks[0];
+  assert.equal(h.op, 'mod');
+  assert.deepEqual(h.oldSide.words, []);
+  assert.deepEqual(h.oldSide.srids, [sridOf(fromRender, kitchen, 'p', 'Refresh tokens are rotated')]);
+});
+
+test('oldSide: an added block says where it goes in the old version (before the next block, or after the last one)', async () => {
+  const before = kitchen.replace('## 4 Rollout checklist', 'A new paragraph about rollout risk.\n\n## 4 Rollout checklist');
+  assert.notEqual(before, kitchen);
+  let { fromRender, c } = await bothSides(kitchen, before);
+  let h = c.hunks[0];
+  assert.equal(h.op, 'add');
+  assert.deepEqual(h.oldSide.srids, []);
+  assert.deepEqual(h.oldSide.insertBefore, { srid: sridOf(fromRender, kitchen, 'h2', '## 4 Rollout checklist') });
+  assert.equal(h.oldSide.insertAfter, null);
+
+  // at the end of the document: after the old last block
+  const end = `${kitchen.replace(/\n*$/, '')}\n\nA closing note.\n`;
+  ({ fromRender, c } = await bothSides(kitchen, end));
+  h = c.hunks[c.hunks.length - 1];
+  assert.equal(h.op, 'add');
+  assert.equal(h.oldSide.insertBefore, null);
+  assert.ok(h.oldSide.insertAfter && fromRender.srcmap.nodes[h.oldSide.insertAfter.srid], 'a block of the old render');
+});
+
+test('oldSide works for HTML docs too', async () => {
+  const to = appSpec.replace('<h1 id="title">Checkout Service</h1>', '<h1 id="title">Payment Service</h1>');
+  assert.notEqual(to, appSpec);
+  const { fromRender, c } = await bothSides(appSpec, to, 'html');
+  const h = c.hunks[0];
+  assert.deepEqual(h.oldSide.words.map((w) => w.quote), ['Checkout']);
+  assert.deepEqual(h.oldSide.srids, [sridOf(fromRender, appSpec, 'h1', '<h1 id="title">')]);
+});

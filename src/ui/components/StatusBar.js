@@ -4,7 +4,7 @@
 
 import { html } from 'preact-htm';
 import { showThreads } from '../actions.js';
-import { isOutdated, kindCaps } from '../model.js';
+import { isOutdated, kindCaps, showsDoc } from '../model.js';
 import { useStore } from '../state.js';
 
 export function StatusBar() {
@@ -29,7 +29,7 @@ export function StatusBar() {
     <span class=${ds.working?.dirty ? 'warn-text' : ''}>${caps.liveBanners
       ? `working copy ${ds.working?.missing ? 'missing' : ds.working?.dirty ? 'has unrecorded changes' : 'clean'}`
       : `working tree ${ds.working?.dirty ? 'changed since this round' : 'matches this round'}`}</span>
-    ${caps.pageErrors && (s.mode === 'review' || s.mode === 'changes')
+    ${caps.pageErrors && showsDoc(s.mode)
       ? html`<span class=${errs ? 'danger-text' : ''} title=${s.pageErrors?.last || ''}>page errors ${errs}</span>`
       : null}
     ${caps.pageErrors ? html`<span class=${ext || failedLocal ? 'warn-text' : ''} title=${[...(s.externals || []), ...(s.pageErrors?.resourcesFailed || [])].join('\n')}>

@@ -12,6 +12,8 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 
 ![Changes mode after a revision: change bars, inserted words, a removed-line tab, thread badges, the change list and a redrawn image](docs/img/changes-mode.png)
 
+![Changes side by side: the older version on the left with removed text struck through, the newer one on the right, scrolled together](docs/img/side-by-side.png)
+
 ![The Verify queue: a blocking thread "Addressed in v2", with the mini-diff of the change that addressed it](docs/img/verify.png)
 
 - [Why](#why)
@@ -45,7 +47,8 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 | "The agent regenerates the entire spec" | Every comment reaches the agent with the exact source lines to edit. Suggestions are applied verbatim. A Write hook and a rewrite guard block whole-file rewrites |
 | "Things we agreed on get lost" | Mark text **agreed** and Suiko refuses any revision that changes it. Unexplained deletions are refused too. Every version is immutable |
 | "It's not iterative" | Review rounds with verdicts, threaded replies, questions back to you, reopen and accept |
-| "I want to see what changed" | Changes drawn over the live document since your last review, per-thread mini-diffs, a source diff, and any-to-any version comparison |
+| "I want to see what changed" | Changes drawn over the live document since your last review, or the older version side by side with removed text struck through; per-thread mini-diffs, a source diff, and any-to-any version comparison (`[v1] → [v3]`) |
+| "I just want to read the latest version" | **Read** mode: the latest version as its readers will see it, with no highlights, change marks or thread panel |
 | "Which version is final?" | Approve marks a final version and exports a decision log |
 | "My HTML spec has scripts, SVG and charts" | The document renders as authored, scripts included, on an isolated origin |
 
@@ -243,12 +246,13 @@ Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ct
 | **Review** | `f` or `Cmd+Shift+Enter` | Submit the whole review (outside the comment box) |
 | | `v` | Verify queue: the threads the agent addressed, answered or declined |
 | | `x` / `o` | Accept / reopen the focused thread |
+| | `X` (Shift+X) | **Accept all**: every addressed or answered thread in Verify (declined ones stay; Undo in the toast) |
 | | `y` | Accept a decline |
 | | `r` | Reply to the focused thread |
 | **Navigate** | `j` / `k` | Next / previous thread |
 | | `n` / `p` | Next / previous change |
 | | `[` / `]` | Previous / next version (in pick mode: parent / child element) |
-| | `1` `2` `3` `4` | Review / Changes / Source / History mode |
+| | `0` `1` `2` `3` `4` | Read / Review / Changes / Source / History mode |
 | | `d` | Compare with your last review, or with the previous version |
 | **View** | `h` | Hide all highlights for a clean read |
 | | `\` | Show or hide the thread panel |
@@ -256,7 +260,7 @@ Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ct
 
 Most keys work while focus is in the document too. Keys that change a thread's state (`x`, `o`, `y`) act only when focus is in the Suiko UI, so scripts in a reviewed document cannot trigger them. `Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere, even while you type a comment (the draft is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` work too, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
 
-**Command palette** (`Cmd+K`): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions; filter the thread list; submit with a verdict; copy the review link or the agent prompt; open another doc; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
+**Command palette** (`Cmd+K`): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions, inline or side by side; filter the thread list; submit with a verdict; copy the review link or the agent prompt; open another doc; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
 
 **Settings** (`Cmd+,`): theme, the outline rail, whether the thread panel starts open, single-letter shortcuts (turn them off if the doc has its own keyboard controls or you press keys by accident), what happens when the agent records a new version, a confirmation before **Send now**, and the default verdict. See [Settings](docs/user-guide.md#settings).
 
@@ -368,7 +372,7 @@ guards: ok · lock L1 untouched · no unexplained deletions · rewrite 4%
 
 If the edit touched agreed text, deleted content no thread asked about, or rewrote most of the document, `revise` refuses (exit 3), records nothing, and prints the fix.
 
-**5. You verify.** The UI shows "v2 ready". **Review changes** draws everything that changed since your last review over the live document; **Verify** walks through each addressed thread with the agent's reply and a mini-diff. Press `x` to accept (optionally recording a decision) or `o` to reopen. Submit again.
+**5. You verify.** The UI shows "v2 ready". **Review changes** draws everything that changed since your last review over the live document, or, with **Side by side**, shows the older version beside it with the removed text struck through in red; the `[v1 · last review] → [v2]` pickers compare any two versions. **Verify** walks through each addressed thread with the agent's reply and a mini-diff. Press `x` to accept (optionally recording a decision) or `o` to reopen, or **Accept all** (`Shift+X`) to accept every addressed and answered thread at once. Press `0` for **Read** mode to read the new version clean. Submit again.
 
 **6. Approve.** Approving with "Mark v3 final" makes v3 the final version. The agent runs `suiko final token-service --decisions`, which checks the file on disk matches v3 and writes `token-service.decisions.md`.
 
@@ -607,7 +611,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 | You submitted but the agent did nothing | Its background wait is not running (for example the session restarted). Tell it "done", or paste the **Copy prompt** text from the Submit dialog. In Claude Code the prompt hook also reminds it on your next message. |
 | A `wait` printed "superseded … ignore this" (exit 6) | A newer `wait` took over. Harmless. |
 | "Annotations are blocked by this document's Content-Security-Policy" | The document's own CSP meta tag blocks the overlay. Review in Source mode, or remove the tag. |
-| "2 external resources failed (offline?)" | The document depends on the internet (CDN scripts, fonts). Make it self-contained. |
+| "2 external resources failed (offline?)" | The document loads files from the internet (scripts, fonts, images) and some did not load. Check your connection, then reload the document from the command palette. |
 | Starting over | `suiko stop`, then delete `~/.specreview`. Your versions and threads in `.specreview/` are untouched. |
 
 ## FAQ
@@ -632,7 +636,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 
 **How do I get an old version back?** `suiko show <doc> --version N` prints any recorded version's source, and History mode renders it. Ask the agent to restore the part you want, or comment on the change.
 
-**What should a spec look like to review well?** Markdown by default, stable headings, diagrams as mermaid or inline SVG, local images, and for HTML the text in static markup with no CDN dependencies. See [writing specs that review well](integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
+**Does a spec have to be written a certain way for Suiko?** No. The agent should write the best document for its readers: Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included. Suiko renders it as written, and whatever you can see you can comment on, snip (`b`) or screenshot (`B`). See [writing the doc](integrations/claude-code/skills/spec-review/reference.md#writing-the-doc).
 
 ## Development
 

@@ -230,6 +230,15 @@ const ops = {
   async resolveThread() {
     throw new ConflictError('thread t1 changed concurrently');
   },
+  async resolveThreads(/** @type {any} */ _ctx, /** @type {string} */ docId, /** @type {string[]} */ ids, /** @type {any} */ opts) {
+    calls.push(['resolveThreads', { docId, ids, by: opts?.by }]);
+    if (ids.includes('t9')) throw new NotFoundError('thread t9 not found');
+    return { resolved: ids, unchanged: [] };
+  },
+  async unresolveThreads(/** @type {any} */ _ctx, /** @type {string} */ docId, /** @type {string[]} */ ids) {
+    calls.push(['unresolveThreads', { docId, ids }]);
+    return { reopened: ids, unchanged: [] };
+  },
   async applySuggestionAsReviewer() {
     throw new RefusedError('the working copy has unrecorded changes');
   },
@@ -834,6 +843,27 @@ describe('API', () => {
     assert.equal(calls.findLast((c) => c[0] === 'submitReview')?.[1].expectHead, 4);
   });
 
+  test('Accept all (threads/resolve) and its Undo (threads/unresolve): ids validated, deduplicated, as the reviewer', async () => {
+    const base = `/api/docs/${store1.wsId}/spec/threads`;
+    for (const bad of [undefined, [], 't1', [1], ['t1', 'Bad Id'], Array.from({ length: 1001 }, (_, i) => `t${i + 1}`)]) {
+      assert.equal((await api(`${base}/resolve`, { threads: bad })).status, 422, JSON.stringify(bad)?.slice(0, 40));
+    }
+    const r = await api(`${base}/resolve`, { threads: ['t1', 't3', 't1'] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json(), { resolved: ['t1', 't3'], unchanged: [] });
+    const call = calls.findLast((c) => c[0] === 'resolveThreads')?.[1];
+    assert.deepEqual([call.docId, call.ids], ['spec', ['t1', 't3']]);
+    assert.equal(typeof call.by, 'string');
+    assert.ok(call.by.length > 0, 'by is the reviewer name');
+    assert.equal((await api(`${base}/resolve`, { threads: ['t1', 't9'] })).status, 404);
+    const undo = await api(`${base}/unresolve`, { threads: ['t1'] });
+    assert.equal(undo.status, 200);
+    assert.deepEqual(undo.json(), { reopened: ['t1'], unchanged: [] });
+    assert.equal((await api(`${base}/unresolve`, {})).status, 422);
+    // the per-thread routes are unchanged
+    assert.equal((await api(`${base}/t1/resolve`, { decision: 'x' })).status, 409);
+  });
+
   test('engine errors map to HTTP statuses', async () => {
     const base = `/api/docs/${store1.wsId}/spec`;
     const conflict = await api(`${base}/threads/t1/resolve`, { decision: 'x' });
@@ -852,12 +882,12 @@ describe('API', () => {
     assert.equal(wrongMethod.status, 405);
   });
 
-  test('diff defaults: to = head, from = previous version', async () => {
+  test('diff defaults: to = head, from = previous version; the UI also gets the changes placed in the older version', async () => {
     const r = await ui(`/api/docs/${store1.wsId}/spec/diff?to=live`, auth());
     assert.equal(r.status, 200);
-    assert.deepEqual(calls.findLast((c) => c[0] === 'changes')?.[1], { from: 1, to: 'live' });
+    assert.deepEqual(calls.findLast((c) => c[0] === 'changes')?.[1], { from: 1, to: 'live', oldSide: true });
     await ui(`/api/docs/${store1.wsId}/spec/diff?from=v1&to=1`, auth());
-    assert.deepEqual(calls.findLast((c) => c[0] === 'changes')?.[1], { from: 1, to: 1 });
+    assert.deepEqual(calls.findLast((c) => c[0] === 'changes')?.[1], { from: 1, to: 1, oldSide: true });
   });
 
   test('attachments accept only PNG/JPEG data URLs up to 5 MB', async () => {

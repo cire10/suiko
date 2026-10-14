@@ -113,12 +113,30 @@
   display: none;
 }
 
-.base-picker {
+/* Changes / Source: "[v1 · last review] → [v3 (latest)]", the older version's picker right before the version
+   picker, so the two ends of the comparison read as one range (and wrap as one). */
+.compare-range {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: var(--fs-sm);
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.compare-range .select {
+  min-width: 0;
+  max-width: 24ch;
+}
+
+.compare-arrow {
   color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Keeps the Inline / Side by side switch's place in the second row without adding a flex item when there is none. */
+.layout-slot {
+  display: contents;
 }
 
 .tools {
@@ -301,6 +319,55 @@
 
 .frame-wrap.is-hidden {
   display: none;
+}
+
+/* Changes side by side: the older version (left) and the newer one (right), each under a label. The older
+   version's elements follow the newer frame in the DOM; the grid places them, so the newer frame never moves. */
+.center.is-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.center.is-split > .frame-wrap {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.compare-split {
+  display: contents;
+}
+
+.compare-head {
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-head-old {
+  grid-column: 1;
+  border-right: 1px solid var(--border);
+  box-shadow: inset 0 2px 0 var(--danger);
+}
+
+.compare-head-new {
+  grid-column: 2;
+  box-shadow: inset 0 2px 0 var(--ok);
+}
+
+.frame-wrap.compare-base {
+  grid-column: 1;
+  grid-row: 2;
+  border-right: 1px solid var(--border);
 }
 
 .frame-wrap.is-picking {

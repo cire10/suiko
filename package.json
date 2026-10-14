@@ -1,6 +1,6 @@
 {
   "name": "@cire10/suiko",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown specs",
   "keywords": [
     "review",
@@ -20,8 +20,12 @@
     "url": "https://github.com/cire10/suiko/issues"
   },
   "type": "module",
-  "bin": { "suiko": "bin/suiko.js" },
-  "engines": { "node": ">=20.19" },
+  "bin": {
+    "suiko": "bin/suiko.js"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
   "files": [
     "bin",
     "src",
@@ -74,5 +78,7 @@
     "@playwright/test": "1.64.0"
   },
   "license": "MIT",
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }

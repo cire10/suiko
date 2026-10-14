@@ -21,10 +21,11 @@
 
 import { MSG, SSE } from 'protocol';
 import { api, docApi, onConnection, onReconnect, token } from './api.js';
-import { guest } from './frame.js';
+import { baseGuest, guest } from './frame.js';
 import {
-  agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, defaultBase, draftVersion, isComposerDirty,
-  hasMode, isReplyDirty, kindCaps, numericVersion, panelItems, replyDraftsFor, staleApproveText, suggestionMode, versionNumbers,
+  acceptableThreads, agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, declinedToVerify, defaultBase,
+  draftVersion, isComposerDirty, hasMode, isReplyDirty, kindCaps, numericVersion, panelItems, replyDraftsFor,
+  showsDoc, staleApproveText, suggestionMode, versionNumbers,
 } from './model.js';
 import { EventStream } from './sse.js';
 import { store, writePref } from './state.js';
@@ -565,6 +566,12 @@ export async function loadChanges() {
 function pushChanges() {
   const s = get();
   guest.send(MSG.SET_CHANGES, { changes: s.mode === 'changes' ? s.changes : null });
+  pushBaseChanges();
+}
+
+/** Nothing is drawn over the doc: the reviewer hid the annotations (h), or Read mode. @param {UiState} s */
+export function annotationsHidden(s) {
+  return s.hidden || s.mode === 'read';
 }
 
 /** @param {UiState} s */
@@ -584,8 +591,8 @@ function sendInit() {
     drafts: t?.drafts || [],
     changes: s.mode === 'changes' ? s.changes : null,
     activeId: s.focusedId,
-    hidden: s.hidden,
-    prefs: { singleKeys: s.prefs.singleKeys },
+    hidden: annotationsHidden(s),
+    prefs: { singleKeys: s.prefs.singleKeys, scrollSync: splitShown(s) },
   });
 }
 
@@ -605,6 +612,7 @@ export function contentOrigin(s) {
 /** Called by DocFrame right before it navigates the iframe. */
 export function frameNavigating() {
   pendingRestore = lastScroll;
+  lastMainScroll = null;
   frameVersion = get().version;
   set({ guest: guestInitial(), tool: 'select' });
 }
@@ -627,6 +635,165 @@ guest.setHandlers({
   // A hello is a page with its guest (also a late one after frameLost): the doc is back.
   onHello: (hello) => set((s) => ({ guest: { ...s.guest, connected: false, title: hello.title, lost: false } })),
   onMessage: onGuestMessage,
+});
+
+// ============================================================================================ side by side
+
+/**
+ * The outline of the older version's frame (from its guest's `ready`): headings to line the two versions up.
+ * @type {Array<{ srid: number, level: number, text: string }>}
+ */
+let baseOutline = [];
+/** The frame the reviewer is scrolling in Changes side by side: it leads, the other one follows. */
+/** @type {'main'|'base'} */
+let syncLeader = 'main';
+/** The newer version's last `scroll` report (where a freshly loaded older version starts). @type {any} */
+let lastMainScroll = null;
+
+/**
+ * Whether Changes shows the older version beside the newer one: the layout is 'split', the window is wide, there is
+ * an older version to show, and the doc kind has a rendered frame.
+ * @param {UiState} s
+ */
+export function splitShown(s) {
+  return s.mode === 'changes' && s.compareLayout === 'split' && !s.narrow && s.base != null && s.version != null
+    && !!s.ds && kindCaps(s.ds).frame;
+}
+
+/** URL of the older version's frame of Changes side by side, or null when it is not shown. @param {UiState} s */
+export function baseFrameUrl(s) {
+  if (!splitShown(s) || !s.ds?.contentBase) return null;
+  return docUrl(s.ds.contentBase, /** @type {number} */ (s.base), s.ds.doc.path);
+}
+
+/**
+ * Inline (the changes drawn over the newer version) or side by side (the older version beside it). Remembered per
+ * browser. Choosing side by side from elsewhere (the palette) switches to Changes.
+ * @param {'inline'|'split'} layout
+ */
+export function setCompareLayout(layout) {
+  const s = get();
+  if (s.compareLayout !== layout) {
+    set({ compareLayout: layout });
+    writePref('compareLayout', layout);
+  }
+  if (layout === 'split' && s.mode !== 'changes') setMode('changes');
+  guest.send(MSG.SET_PREFS, { scrollSync: splitShown(get()) });
+  if (layout === 'split' && get().narrow) toast('Side by side needs a wider window; the changes are shown inline.', { timeout: 3500 });
+}
+
+/** The reviewer is pointing at one of the two frames: that one leads the scrolling. @param {'main'|'base'} side */
+export function setSyncLeader(side) {
+  syncLeader = side;
+}
+
+/** Called by the older version's frame right before it navigates. */
+export function baseFrameNavigating() {
+  baseGuest.reset();
+  baseOutline = [];
+  set({ baseConnected: false });
+}
+
+/**
+ * The changes placed in the older version (Changes.hunks[].oldSide), for its frame; null while the changes loaded
+ * are not the ones from the version that frame shows (the base was just changed).
+ * @param {UiState} s
+ */
+function baseChanges(s) {
+  return splitShown(s) && s.changes && Number(s.changes.from) === s.base ? { ...s.changes, side: 'old' } : null;
+}
+
+function pushBaseChanges() {
+  baseGuest.send(MSG.SET_CHANGES, { changes: baseChanges(get()) });
+}
+
+function sendBaseInit() {
+  const s = get();
+  baseGuest.send(MSG.INIT, {
+    mode: 'readonly',
+    theme: s.theme,
+    targets: [],
+    locks: [],
+    drafts: [],
+    changes: baseChanges(s),
+    activeId: null,
+    hidden: annotationsHidden(s),
+    prefs: { singleKeys: s.prefs.singleKeys, scrollSync: true },
+  });
+}
+
+/** Where the reader is, below the top of a frame (the guest's reading line). */
+const READING_LINE = 8;
+
+/**
+ * The heading of another version's outline that matches one of this outline (same text, same occurrence), or null.
+ * @param {Array<{ srid: number, text: string }>} src @param {Array<{ srid: number, text: string }>} dst
+ * @param {number} srid
+ */
+function matchHeading(src, dst, srid) {
+  const i = src.findIndex((x) => x.srid === srid);
+  if (i < 0) return null;
+  const text = src[i].text;
+  const nth = src.slice(0, i).filter((x) => x.text === text).length;
+  const same = dst.filter((x) => x.text === text);
+  return same[nth] ?? (same.length === 1 ? same[0] : null);
+}
+
+/**
+ * Lines the other frame up with the one the reviewer scrolls: the reading line sits the same fraction of the way
+ * between the same two headings (or a document edge) in both versions, so they stay together inside a section even
+ * when it changed length. A heading the other version lacks: the matching one of the two is lined up instead.
+ * @param {'main'|'base'} from
+ * @param {any} d SCROLL {heading, next, docTop, docEnd}
+ */
+function syncScroll(from, d) {
+  const s = get();
+  if (from !== syncLeader || !splitShown(s) || !d) return;
+  const src = from === 'main' ? s.guest.outline : baseOutline;
+  const dst = from === 'main' ? baseOutline : s.guest.outline;
+  /** @param {any} h */
+  const valid = (h) => (h && Number.isFinite(Number(h.srid)) && Number.isFinite(Number(h.top)) ? h : null);
+  const a = valid(d.heading);
+  const b = valid(d.next);
+  const ma = a ? matchHeading(src, dst, Number(a.srid)) : null;
+  const mb = b ? matchHeading(src, dst, Number(b.srid)) : null;
+  const target = from === 'main' ? baseGuest : guest;
+  if ((a && !ma) || (b && !mb)) {
+    const one = ma ? { m: ma, top: Number(a.top) } : mb ? { m: mb, top: Number(b.top) } : null;
+    if (one) target.send(MSG.SCROLL_TO, { srid: one.m.srid, offset: one.top });
+    return;
+  }
+  const aTop = a ? Number(a.top) : Number(d.docTop);
+  const bTop = b ? Number(b.top) : Number(d.docEnd);
+  if (!Number.isFinite(aTop) || !Number.isFinite(bTop)) return;
+  const f = bTop > aTop ? (READING_LINE - aTop) / (bTop - aTop) : 0;
+  target.send(MSG.SCROLL_TO, { sync: { a: ma ? ma.srid : null, b: mb ? mb.srid : null, f } });
+}
+
+baseGuest.setHandlers({
+  onMessage: (type, d) => {
+    switch (type) {
+      case MSG.READY:
+        baseOutline = Array.isArray(d.outline) ? d.outline.filter((/** @type {any} */ h) => h && Number.isFinite(h.srid))
+          .map((/** @type {any} */ h) => ({ srid: h.srid, level: Number(h.level) || 1, text: String(h.text ?? '') })) : [];
+        set({ baseConnected: true });
+        sendBaseInit();
+        // start where the newer version is
+        if (lastMainScroll) {
+          syncLeader = 'main';
+          syncScroll('main', lastMainScroll);
+        }
+        return;
+      case MSG.SCROLL:
+        syncScroll('base', d);
+        return;
+      case MSG.KEY:
+        keyForwarder?.(d, true);
+        return;
+      default:
+      // read-only: no selection, captures or targets; page errors are the newer version's to report
+    }
+  },
 });
 
 /** @param {string} type @param {any} d */
@@ -673,6 +840,8 @@ function onGuestMessage(type, d) {
       let heading = null;
       for (const h of outline) if (h.srid <= srid) heading = h.text;
       lastScroll = { version: get().version, srid, offset: Number(d.offset) || 0, heading };
+      lastMainScroll = d;
+      syncScroll('main', d);
       return;
     }
     case MSG.PAGE_ERROR:
@@ -744,6 +913,8 @@ export function activate(id) {
  * @param {{ fromDoc?: boolean }} [opts]
  */
 export function focusItem(id, opts = {}) {
+  // Read mode shows no threads: focusing one is reviewing it
+  if (get().mode === 'read') setMode('review');
   const s = get();
   const visible = panelItems(s.ds, s.filter, s.version).some((x) => x.id === id);
   set({
@@ -838,7 +1009,13 @@ export function navChange(dir) {
 /** @param {string} id */
 export function goToHunk(id) {
   set({ activeHunk: id });
-  if (get().mode === 'changes') guest.send(MSG.SCROLL_TO, { hunk: id });
+  if (get().mode !== 'changes') return;
+  guest.send(MSG.SCROLL_TO, { hunk: id });
+  // side by side: the older version shows the same hunk (its removed text); each frame goes there itself
+  if (splitShown(get())) {
+    syncLeader = 'main';
+    baseGuest.send(MSG.SCROLL_TO, { hunk: id });
+  }
 }
 
 /** @param {number} srid */
@@ -855,15 +1032,27 @@ export function revealTarget(id) {
 
 // ============================================================================================ modes, versions, base
 
-/** @param {Mode} mode */
+/**
+ * Switches the mode. Read shows the latest version (the live working copy stays when that is what is shown), so
+ * entering it switches to the head first; it is refused, like any version switch, while a comment is open on an
+ * older version.
+ * @param {Mode} mode
+ */
 export function setMode(mode) {
+  if (!hasMode(get().ds, mode) || get().mode === mode) return;
+  if (mode === 'read') {
+    const cur = get();
+    const head = Number(cur.ds.doc.head);
+    if (cur.version !== 'live' && cur.version !== head && !switchVersion(head)) return;
+  }
   const s = get();
-  if (!hasMode(s.ds, mode)) return;
-  if (s.mode === mode) return;
   let base = s.base;
   if (base == null) base = defaultBase(s.ds, s.version, s.baseKind === 'custom' ? 'last' : s.baseKind);
   if (s.tool !== 'select') guest.send(MSG.SET_TOOL, { tool: 'select' });
-  set({ mode, base, tool: 'select', sidePane: mode === 'changes' ? 'changes' : s.sidePane, unseenVersion: mode === 'changes' ? null : s.unseenVersion });
+  set({
+    mode, base, tool: 'select', sidePane: mode === 'changes' ? 'changes' : s.sidePane,
+    unseenVersion: mode === 'changes' || mode === 'read' ? null : s.unseenVersion,
+  });
   updateTitle();
   sendInit();
   if (base !== s.base || (!s.changes && base != null)) loadChanges();
@@ -1266,6 +1455,10 @@ export async function submitComposer(opts = {}) {
         ds: { ...s.ds, drafts: { ...(s.ds.drafts || {}), items: upsert(s.ds.drafts?.items || [], draft) } },
         focusedId: draft.id,
       } : null));
+      // Read mode shows no drafts: say where it went
+      if (get().mode === 'read' && !comp.draftId) {
+        toast(`Added to your review (${draft.id}). It goes to the agent when you submit.`, { tone: 'ok', timeout: 4000 });
+      }
     }
     await refreshNow();
   } catch (err) {
@@ -1621,6 +1814,72 @@ export async function unresolveThread(id) {
   });
 }
 
+/**
+ * Accept all (the Verify queue's button, Shift+X, the palette): resolves every addressed or answered thread the agent
+ * is waiting on you to verify, in one request, then offers Undo. Declined threads are left for the reviewer to decide
+ * one by one. Returns false when there was nothing to accept.
+ */
+export async function acceptAll() {
+  const c = client;
+  const s = get();
+  if (!c || !s.ds) return false;
+  if (s.version === 'live') {
+    toast('The working copy is a read-only preview. Switch to a recorded version to accept threads.', { tone: 'warn' });
+    return false;
+  }
+  const ids = acceptableThreads(s.ds).map((/** @type {any} */ t) => String(t.id)).filter((id) => !s.busyThreads.includes(id));
+  if (!ids.length) {
+    toast(declinedToVerify(s.ds).length
+      ? 'Nothing to accept in one go: the threads left in Verify were declined. Accept or reopen each one.'
+      : 'Nothing to accept: no addressed or answered threads are waiting in Verify.', { timeout: 4000 });
+    return false;
+  }
+  set((st) => ({ busyThreads: [...st.busyThreads, ...ids] }));
+  /** @type {any} */
+  let r;
+  try {
+    r = await c.resolveMany(ids);
+  } catch (err) {
+    toast(`Could not accept the threads: ${errorText(err)}`, { tone: 'danger' });
+    return true;
+  } finally {
+    set((st) => ({ busyThreads: st.busyThreads.filter((x) => !ids.includes(x)) }));
+  }
+  if (client !== c) return true;
+  const done = Array.isArray(r?.resolved) ? r.resolved.map(String) : ids;
+  const declined = declinedToVerify(get().ds).length;
+  toast(`Accepted ${done.length} thread${done.length === 1 ? '' : 's'} (${listIds(done)}).${declined
+    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}`, {
+    tone: 'ok',
+    timeout: 12000,
+    actions: done.length ? [{ label: 'Undo', run: () => undoAcceptAll(c, done) }] : [],
+  });
+  await refreshNow();
+  return true;
+}
+
+/**
+ * The Undo of Accept all: those threads go back to the agent's last status (Addressed, Answered).
+ * @param {NonNullable<typeof client>} c the doc the threads were accepted on
+ * @param {string[]} ids
+ */
+async function undoAcceptAll(c, ids) {
+  if (client !== c) return;
+  try {
+    await c.unresolveMany(ids);
+  } catch (err) {
+    toast(`Could not undo: ${errorText(err)}`, { tone: 'danger' });
+    return;
+  }
+  toast(`${ids.length} thread${ids.length === 1 ? ' is' : 's are'} back in Verify.`, { timeout: 3000 });
+  await refreshNow();
+}
+
+/** "t1, t2, t5", or "t1, t2, t3 and 4 more" for a long list. @param {string[]} ids */
+function listIds(ids) {
+  return ids.length <= 5 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')} and ${ids.length - 3} more`;
+}
+
 /** Reviewer "Apply now" for a suggestion. @param {string} id */
 export async function applySuggestion(id) {
   const c = client;
@@ -1831,6 +2090,7 @@ export function applyTheme(theme) {
   set({ theme });
   writePref('theme', theme);
   guest.send(MSG.SET_THEME, { theme });
+  baseGuest.send(MSG.SET_THEME, { theme });
 }
 
 export function cycleTheme() {
@@ -1842,14 +2102,19 @@ export function cycleTheme() {
 
 export function toggleHidden() {
   if (!kindCaps(get().ds).hide) return;
+  if (get().mode === 'read') {
+    toast('Read mode shows no annotations. Switch to Review (1) to see them.', { timeout: 3000 });
+    return;
+  }
   const hidden = !get().hidden;
   set({ hidden });
   guest.send(MSG.SET_HIDDEN, { hidden });
+  baseGuest.send(MSG.SET_HIDDEN, { hidden });
 }
 
 /**
  * Select (text), pick (e: an element) or snip (b: a box over any area). Pick and snip need the rendered doc of a
- * recorded version (Review / Changes) and a connected guest.
+ * recorded version (Read / Review / Changes) and a connected guest.
  * @param {'select'|'pick'|'snip'} tool
  */
 export function setTool(tool) {
@@ -1859,7 +2124,7 @@ export function setTool(tool) {
     toast('Pick and snip work on rendered documents; click a line number to comment.', { timeout: 2500 });
     return;
   }
-  if (tool !== 'select' && (s.version === 'live' || !(s.mode === 'review' || s.mode === 'changes'))) {
+  if (tool !== 'select' && (s.version === 'live' || !showsDoc(s.mode))) {
     if (s.version === 'live') toast('The working copy preview is read-only.', { tone: 'warn' });
     return;
   }
@@ -1878,7 +2143,7 @@ export function togglePick() {
 /**
  * b / the scissors button: snip an area of the doc. The guest shows a crosshair; dragging a box opens the composer
  * with a crop of the box, Esc cancels, and the tool goes back to select after one snip. In Source / History mode it
- * switches to Review first. A `b` forwarded from the doc while already snipping is ignored (the guest handles its
+ * switches to Review first (Read keeps its clean view). A `b` forwarded from the doc while already snipping is ignored (the guest handles its
  * own keys while it snips); a `b` in the UI then cancels the snip.
  * @param {{ fromGuest?: boolean }} [opts]
  */
@@ -1888,7 +2153,7 @@ export function toggleSnip(opts = {}) {
     if (!opts.fromGuest) setTool('select');
     return;
   }
-  if (s.version !== 'live' && s.mode !== 'review' && s.mode !== 'changes') setMode('review');
+  if (s.version !== 'live' && !showsDoc(s.mode)) setMode('review');
   setTool('snip');
 }
 
@@ -1896,7 +2161,7 @@ export function toggleSnip(opts = {}) {
 function screenSnipCapture(s) {
   if (!kindCaps(s.ds).frame) return kindSelection?.() || { kind: 'doc' };
   if (s.mode === 'source' && s.sourceSel) return { kind: 'source', startLine: s.sourceSel.from, endLine: s.sourceSel.to };
-  if ((s.mode === 'review' || s.mode === 'changes') && s.guest.selection) return s.guest.selection;
+  if (showsDoc(s.mode) && s.guest.selection) return s.guest.selection;
   return { kind: 'doc' };
 }
 
@@ -1974,10 +2239,18 @@ export async function snipScreen() {
 
 /**
  * \ : the thread drawer (narrow) or the side panel (wide), for this page; whether it is open when a doc opens is a
- * setting (prefs.panelOpen).
+ * setting (prefs.panelOpen). In Read mode, which has no thread panel, it switches to Review with the panel open.
  */
 export function toggleSidebar() {
   const s = get();
+  if (s.mode === 'read') {
+    // Read mode has no thread panel: show the threads in Review
+    setMode('review');
+    if (get().mode !== 'review') return;
+    if (s.narrow) set({ drawer: true, nav: false });
+    else set({ sidebar: true });
+    return;
+  }
   if (s.narrow) set({ drawer: !s.drawer, nav: false });
   else set({ sidebar: !s.sidebar });
 }
@@ -2066,7 +2339,10 @@ export function setPref(name, value) {
   if (s.prefs[name] === value) return;
   set({ prefs: { ...s.prefs, [name]: value } });
   writePref(PREF_KEYS[name], typeof value === 'boolean' ? (value ? '1' : '0') : String(value));
-  if (name === 'singleKeys') guest.send(MSG.SET_PREFS, { singleKeys: !!value });
+  if (name === 'singleKeys') {
+    guest.send(MSG.SET_PREFS, { singleKeys: !!value });
+    baseGuest.send(MSG.SET_PREFS, { singleKeys: !!value });
+  }
   if (name === 'railMode') set({ railOpen: null });
   if (name === 'panelOpen' && !s.narrow) set({ sidebar: !!value });
 }

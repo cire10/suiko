@@ -1,11 +1,11 @@
 // @ts-check
 // Left rail: the outline (from the guest's `ready`, else from the targets endpoint) with badges for open threads,
-// changed (~) / added (+) sections and locks, plus a section menu (Comment on section, Mark agreed, Unlock), then a
-// compact version history.
+// changed (~) / added (+) sections and locks (none in Read mode), plus a section menu (Comment on section, Mark
+// agreed, Unlock), then a compact version history.
 
 import { html, useMemo, useState } from 'preact-htm';
 import { openComposer, scrollToSrid, setMode, switchVersion, unlock } from '../actions.js';
-import { actorLabel, anchorAt, headingBadges, normWs, relTime, sectionTail, versionNumbers } from '../model.js';
+import { actorLabel, anchorAt, headingBadges, normWs, relTime, sectionTail, showsDoc, versionNumbers } from '../model.js';
 import { useStore } from '../state.js';
 
 export function Outline() {
@@ -22,6 +22,8 @@ export function Outline() {
   const badges = useMemo(() => headingBadges(outline, s.ds, s.changes, s.version), [outline, s.ds, s.changes, s.version]);
   const minLevel = outline.reduce((m, h) => Math.min(m, Number(h.level) || 1), 6);
   const canComment = s.version !== 'live';
+  // Read mode: a plain table of contents, without thread, change or lock badges
+  const reading = s.mode === 'read';
 
   /** @param {any} h */
   const lockOf = (h) => (s.ds?.locks || []).find((/** @type {any} */ l) => l.active !== false
@@ -35,13 +37,14 @@ export function Outline() {
           const b = badges.get(h.srid);
           const lock = lockOf(h);
           return html`<li class="outline-item" style=${{ '--depth': Math.max(0, (Number(h.level) || 1) - minLevel) }} key=${h.srid}>
-            <button type="button" class="outline-link" onClick=${() => { if (s.mode !== 'review' && s.mode !== 'changes') setMode('review'); scrollToSrid(h.srid); }}
+            <button type="button" class="outline-link" onClick=${() => { if (!showsDoc(s.mode)) setMode('review'); scrollToSrid(h.srid); }}
               title=${h.text}>
               <span class="outline-text">${h.text}</span>
-              ${b?.added ? html`<span class="badge tone-ok" title="Added in this comparison">+</span>` : null}
-              ${b?.changed ? html`<span class="badge tone-warn" title="Changed in this comparison">~</span>` : null}
-              ${b?.open ? html`<span class="badge tone-accent" title=${`${b.open} open thread(s)`}>${b.open}</span>` : null}
-              ${b?.locked || lock ? html`<span class="badge tone-lock" title="Agreed (locked)">L</span>` : null}
+              ${reading ? null : html`
+                ${b?.added ? html`<span class="badge tone-ok" title="Added in this comparison">+</span>` : null}
+                ${b?.changed ? html`<span class="badge tone-warn" title="Changed in this comparison">~</span>` : null}
+                ${b?.open ? html`<span class="badge tone-accent" title=${`${b.open} open thread(s)`}>${b.open}</span>` : null}
+                ${b?.locked || lock ? html`<span class="badge tone-lock" title="Agreed (locked)">L</span>` : null}`}
             </button>
             ${canComment ? html`<button type="button" class="icon-btn icon-btn-xs outline-more" aria-haspopup="menu"
               aria-expanded=${menuFor === h.srid} aria-label=${`Actions for section ${h.text}`}

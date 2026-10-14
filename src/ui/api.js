@@ -281,6 +281,10 @@ export function docApi(ws, doc) {
     resolve: (tid, body) => request('POST', `${base}/threads/${enc(tid)}/resolve`, body),
     /** @param {string} tid */
     unresolve: (tid) => request('POST', `${base}/threads/${enc(tid)}/unresolve`, {}),
+    /** Accept all: resolves these threads at once. @param {string[]} threads -> {resolved, unchanged} */
+    resolveMany: (threads) => request('POST', `${base}/threads/resolve`, { threads }),
+    /** The Undo of Accept all. @param {string[]} threads -> {reopened, unchanged} */
+    unresolveMany: (threads) => request('POST', `${base}/threads/unresolve`, { threads }),
     /** @param {string} tid @param {{ version: number, capture: any }} body */
     move: (tid, body) => request('POST', `${base}/threads/${enc(tid)}/move`, body),
     /** @param {string} tid */

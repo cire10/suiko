@@ -318,7 +318,11 @@ test('every TESTID is rendered somewhere in the review flow', async ({ page, ui,
   await collect();
   await page.getByTestId(TESTID.docList).getByRole('link', { name: /Token Service Implementation Spec/ }).click();
   await ui.ready();
-  await collect(); // changes mode: change items, round results (verify accept / reopen)
+  await collect(); // changes mode: change items, round results (verify accept / reopen, accept all), compare range and layout
+  await page.getByTestId(TESTID.compareLayout).locator('[data-layout="split"]').click();
+  await ui.baseFrame();
+  await collect(); // the older version's frame
+  await page.getByTestId(TESTID.compareLayout).locator('[data-layout="inline"]').click();
   await modeTab(page, 'review').click();
   await page.locator('.filter[data-filter="verify"]').click();
   await ui.card('t1').getByTestId(TESTID.verifyReopen).click();

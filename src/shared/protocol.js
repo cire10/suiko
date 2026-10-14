@@ -97,23 +97,28 @@ export const MSG = Object.freeze({
   ACTIVATE: 'activate',       // {id}  (user clicked a highlight / pin / change bar)
   KEY: 'key',                 // {key, meta, ctrl, shift, alt}  (only non-editable focus, not defaultPrevented;
                               // Mod+K / Mod+, / Mod+/ are also forwarded from editable focus and default-prevented)
-  SCROLL: 'scroll',           // {topSrid}
+  SCROLL: 'scroll',           // {topSrid, offset, heading, next, docTop, docEnd}  heading / next: {srid, top}|null, the
+                              // headings around the reading line; with docTop / docEnd they line two versions up
   PAGE_ERROR: 'pageError',    // {count, last}
   TOOL_CHANGED: 'toolChanged',// {tool}  (guest changed tool itself: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip')
   // UI -> guest
   CONNECT: 'connect',         // carries the MessagePort (window message, not port)
   INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId, hidden, prefs?}
   SET_TARGETS: 'setTargets',  // {targets:DomTarget[]}
-  SET_CHANGES: 'setChanges',  // {changes:Changes|null}
+  SET_CHANGES: 'setChanges',  // {changes:Changes|null}  (changes.side 'old': the older version of a side-by-side
+                              // comparison, painted from hunks[].oldSide)
   FOCUS: 'focus',             // {id}   highlight as active + scroll into view + pulse
-  SCROLL_TO: 'scrollTo',      // {srid?|id?|hunk?}
+  SCROLL_TO: 'scrollTo',      // {srid?, offset?|id?|hunk?|sync?: {a, b, f}}  sync: the point a fraction f of the way
+                              // from heading a to heading b (null: the document's top / end) to the reading line
   SET_TOOL: 'setTool',        // {tool:'select'|'pick'|'snip'}  (snip: drag a box over ANY area of the doc, see SNIP below)
   SET_THEME: 'setTheme',      // {theme:'light'|'dark'|'system'}
   REVEAL: 'reveal',           // {id}   open <details>/tabs hiding the target
   CLEAR_SELECTION: 'clearSelection',
   SET_HIDDEN: 'setHidden',    // {hidden:boolean}  hide all annotations (clean read)
-  SET_PREFS: 'setPrefs',      // {singleKeys:boolean}  false: the guest neither acts on nor captures single-letter keys
-                              // (c s q a b ...); it forwards them like any other key. Also accepted inside INIT as prefs.
+  SET_PREFS: 'setPrefs',      // {singleKeys?:boolean, scrollSync?:boolean}  singleKeys false: the guest neither acts on
+                              // nor captures single-letter keys (c s q a b ...); it forwards them like any other key.
+                              // scrollSync: report `scroll` while scrolling, not only once it settles (side by side).
+                              // Also accepted inside INIT as prefs.
 });
 
 /** data-testid values the UI must render (used by e2e tests). */
@@ -135,6 +140,10 @@ export const TESTID = Object.freeze({
   presence: 'presence',
   verifyAccept: 'verify-accept',
   verifyReopen: 'verify-reopen',
+  verifyAcceptAll: 'verify-accept-all', // Accept all (the Verify queue's addressed / answered threads)
+  compareFrom: 'compare-from',         // Changes / Source: the older version of the comparison (#sr-base)
+  compareLayout: 'compare-layout',     // Changes: Inline / Side by side (buttons carry data-layout="inline|split")
+  compareBaseFrame: 'compare-base-frame', // Changes side by side: the older version's doc frame
   replyTextarea: 'reply-textarea',
   replyAdd: 'reply-add',
   toast: 'toast',

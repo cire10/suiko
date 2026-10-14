@@ -1,7 +1,7 @@
 // Suiko guest, part 30: text highlights.
 //
 // Uses the CSS Custom Highlight API: one Highlight per name (sr-open, sr-resolved, sr-active, sr-draft, sr-ins,
-// sr-lock, sr-outdated) registered in CSS.highlights, styled by ::highlight() rules in ONE constructed stylesheet
+// sr-del, sr-lock, sr-outdated) registered in CSS.highlights, styled by ::highlight() rules in ONE constructed stylesheet
 // appended to document.adoptedStyleSheets (re-checked on every update, in case page scripts replace the list).
 // No DOM node is added for highlights, and the rules only match the sr-* highlight names, so nothing leaks into the
 // page's own styling.
@@ -9,7 +9,9 @@
 
 const Highlights = (() => {
   /** Names in ascending paint priority. */
-  const NAMES = ['sr-outdated', 'sr-resolved', 'sr-lock', 'sr-open', 'sr-draft', 'sr-ins', 'sr-active'];
+  const NAMES = ['sr-outdated', 'sr-resolved', 'sr-lock', 'sr-open', 'sr-draft', 'sr-ins', 'sr-del', 'sr-active'];
+  /** The names painted by the Changes overlay (inserted text; removed text, shown in the older version); the rest are threads'. */
+  const CHANGE_NAMES = ['sr-ins', 'sr-del'];
 
   /** Background colours (also used by the fallback rect painter). */
   const COLORS = {
@@ -18,6 +20,7 @@ const Highlights = (() => {
     'sr-active': 'rgba(255, 140, 0, 0.50)',
     'sr-draft': 'rgba(56, 139, 253, 0.26)',
     'sr-ins': 'rgba(46, 160, 67, 0.30)',
+    'sr-del': 'rgba(207, 34, 46, 0.22)',
     'sr-lock': 'rgba(130, 80, 223, 0.15)',
     'sr-outdated': 'rgba(140, 140, 140, 0.24)',
   };
@@ -25,6 +28,7 @@ const Highlights = (() => {
   const DECORATION = {
     'sr-active': 'underline 2px rgba(214, 100, 0, 0.95)',
     'sr-ins': 'underline 1px rgba(26, 127, 55, 0.9)',
+    'sr-del': 'line-through 1.5px rgba(207, 34, 46, 0.95)',
     'sr-outdated': 'underline wavy 1px rgba(110, 110, 110, 0.85)',
   };
 
@@ -113,6 +117,7 @@ const Highlights = (() => {
   return {
     supported,
     NAMES,
+    CHANGE_NAMES,
     set,
     layoutFallback,
     /** @param {string[]} names */

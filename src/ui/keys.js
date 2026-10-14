@@ -11,7 +11,8 @@
 // hosts (Safari, the Claude desktop app) keep the Cmd combos for themselves. The browser's own action for these
 // combos is prevented. Dialogs are exclusive, and Esc closes the one that is open.
 // Forwarded keys may only trigger non-mutating actions (navigation, opening a composer, toggling panels). So x / o /
-// y (resolve, reopen, accept a decline), Cmd+Enter (add a draft) and Send now are honoured only from the UI itself.
+// y / X (resolve, reopen, accept a decline, accept all), Cmd+Enter (add a draft) and Send now are honoured only from
+// the UI itself.
 // b (snip an area of the doc) and Shift+B (snip the screen) work from both: they only start a capture the reviewer
 // completes (dragging a box, or picking an area in the macOS picker) and open a composer; nothing is sent.
 // Cmd/Ctrl+Shift+Enter is Send now (this comment alone, as a one-item review) while a new comment is open in the
@@ -25,7 +26,7 @@
 
 import {
   closeDialog, cancelComposer, cancelReply, clearFocus, cycleTheme, navChange, navThread, openDialog, openSubmit,
-  acceptDecline, acceptFocused, focusedThread, reopenFocused, selectionAction, setKeyForwarder, setMode, setTool,
+  acceptAll, acceptDecline, acceptFocused, focusedThread, reopenFocused, selectionAction, setKeyForwarder, setMode, setTool,
   showThreads, snipScreen, startReply, stepVersion, submitComposer, toggleBaseKind, toggleDialog, toggleHidden,
   togglePick, toggleSidebar, toggleSnip,
 } from './actions.js';
@@ -137,17 +138,24 @@ export function handleKey(k, fromGuest) {
       return !fromGuest && reopenFocused();
     case 'y':
       return !fromGuest && acceptDecline();
+    case 'X':
+      // Shift+X: accept all (from the UI only, like x); 'X' without Shift is Caps Lock: x
+      if (fromGuest) return false;
+      if (k.shift) acceptAll();
+      else acceptFocused();
+      return true;
     case 'v':
       showThreads('verify', { review: true });
       return true;
     case 'f':
       openSubmit();
       return true;
+    case '0':
     case '1':
     case '2':
     case '3':
     case '4': {
-      // the doc's own modes (model.js modesFor): a code review has no Source (3)
+      // the doc's own modes (model.js modesFor): a code review has no Read (0) and no Source (3)
       const m = modesFor(s.ds).find((x) => x.n === Number(key));
       if (m) setMode(m.key);
       return true;

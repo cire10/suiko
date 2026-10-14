@@ -160,7 +160,7 @@ const Targets = (() => {
   function paint() {
     /** @type {Map<string, Range[]>} */
     const by = new Map();
-    for (const n of Highlights.NAMES) if (n !== 'sr-ins') by.set(n, []);
+    for (const n of Highlights.NAMES) if (!Highlights.CHANGE_NAMES.includes(n)) by.set(n, []);
     if (!hidden) {
       for (const r of resolved.values()) {
         if (!r.range) continue;

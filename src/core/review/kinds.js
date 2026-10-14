@@ -44,7 +44,7 @@
 //     ui/model.js                    kindCaps: snapshot docs have no "Apply now" (ThreadCard)
 //     daemon/api.js                  a web-page snapshot's source URL in the doc summary
 //     daemon/content.js              the strict CSP of snapshot docs (code docs are never served there)
-//     ui/components/DocFrame.js      the strict sandbox of snapshot docs (code docs have their own view)
+//     ui/frame.js                    the strict sandbox of snapshot docs' frames (code docs have their own view)
 //   became isVirtual (no working file of their own):
 //     core/store/store.js (workingPath, readWorking, writeWorking, findDoc, findDocByOrigin, createDoc duplicates),
 //     core/review/ops/record.js (asset skips, autoCommit docPath), core/review/ops/common.js (changedWorkingAssets),
@@ -255,7 +255,7 @@ export const SNAPSHOT_SITES = Object.freeze({
   'cli/hooks.js': 1,
   'daemon/api.js': 1,
   'daemon/content.js': 1,
-  'ui/components/DocFrame.js': 1,
   'ui/components/Home.js': 1,
+  'ui/frame.js': 1,
   'ui/model.js': 1,
 });

@@ -7,7 +7,11 @@
 // setPrefs). setTool switches between the exclusive tools: 'select', 'pick' (60-picker.js) and 'snip' (65-snip.js).
 // setPrefs {singleKeys} (also init.prefs) switches the guest's own single-key shortcuts on or off (85-keys.js).
 // After every layout pass it posts `positions` when they changed (scroll-only changes are throttled to 100 ms), and
-// when scrolling settles it posts `scroll {topSrid, offset}`.
+// when scrolling settles it posts `scroll {topSrid, offset, heading, next, docTop, docEnd}`: heading / next are the
+// last stamped heading at or above the reading line (8 px below the top of the viewport) and the first one below it,
+// {srid, top} or null, and docTop / docEnd the document's own edges, so the UI can put another version at the same
+// point between the same two headings (`scrollTo {sync: {a, b, f}}`). With prefs.scrollSync (a side-by-side
+// comparison, where the UI scrolls the other version along) it also posts while scrolling, about every 50 ms.
 //
 // Modes: 'review' (default) and 'changes' allow captures; 'readonly' (working-copy preview) disables the selection
 // toolbar, selection captures, pick mode and snip mode. Annotation painting is identical in all modes.
@@ -16,7 +20,7 @@
 // modules. It never exposes the channel.
 
 const Main = (() => {
-  const state = { mode: 'review', theme: 'system', hidden: false, started: false };
+  const state = { mode: 'review', theme: 'system', hidden: false, started: false, scrollSync: false };
 
   function capturesAllowed() {
     return state.mode !== 'readonly';
@@ -167,8 +171,52 @@ const Main = (() => {
     posTimer = /** @type {any} */ (setTimeout(guard(sendPositions, 'positions'), wait));
   }
 
+  /** Where the reader is: this far below the top of the viewport. */
+  const READING_LINE = 8;
+
+  /**
+   * The stamped headings around the reading line, with their viewport tops: the last one at or above it and the
+   * first one below it (null past either end). They let the UI line another version up.
+   * @returns {{heading: {srid: number, top: number}|null, next: {srid: number, top: number}|null}}
+   */
+  function headingsAround() {
+    /** @type {{srid: number, top: number}|null} */
+    let heading = null;
+    for (const h of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+      const srid = sridOf(h);
+      if (srid == null || elementBySrid(srid) !== h || TextWalk.isExcluded(h)) continue;
+      const r = h.getBoundingClientRect();
+      if (isEmptyRect(r)) continue;
+      const at = { srid, top: Math.round(r.top) };
+      if (r.top > READING_LINE) return { heading, next: at };
+      heading = at;
+    }
+    return { heading, next: null };
+  }
+
+  /**
+   * SCROLL_TO {sync: {a, b, f}}: scrolls so that the point a fraction f of the way from heading a to heading b sits on
+   * the reading line (a null: the top of the document; b null: its end). The other version of a side-by-side
+   * comparison reported f between the same two headings.
+   * @param {any} s
+   */
+  function syncTo(s) {
+    const sy = window.scrollY;
+    /** @param {unknown} srid @param {number} fallback */
+    const topOf = (srid, fallback) => {
+      const el = srid == null ? null : elementBySrid(Number(srid));
+      const r = el ? el.getBoundingClientRect() : null;
+      return r && !isEmptyRect(r) ? r.top : fallback;
+    };
+    const a = topOf(s.a, -sy);
+    const b = topOf(s.b, document.documentElement.scrollHeight - sy);
+    const f = Math.max(0, Math.min(1, Number(s.f) || 0));
+    const y = a + f * Math.max(0, b - a);
+    window.scrollTo({ top: Math.max(0, sy + y - READING_LINE), behavior: /** @type {any} */ ('instant') });
+  }
+
   let lastTop = '';
-  const reportScroll = debounce(guard(() => {
+  function scrollReport() {
     if (!Channel.connected) return;
     const vw = document.documentElement.clientWidth || window.innerWidth;
     /** @type {Element|null} */
@@ -184,12 +232,33 @@ const Main = (() => {
       }
     }
     if (!found) return;
-    const payload = { topSrid: sridOf(found), offset: Math.round(found.getBoundingClientRect().top) };
+    const sy = window.scrollY;
+    const payload = {
+      topSrid: sridOf(found),
+      offset: Math.round(found.getBoundingClientRect().top),
+      ...headingsAround(),
+      docTop: Math.round(-sy) || 0, // no -0 at the top
+      docEnd: Math.round(document.documentElement.scrollHeight - sy),
+    };
     const key = JSON.stringify(payload);
     if (key === lastTop) return;
     lastTop = key;
     Channel.send(MSG.SCROLL, payload);
-  }, 'scroll-report'), 150);
+  }
+  const reportScroll = debounce(guard(scrollReport, 'scroll-report'), 150);
+  const reportScrollLive = debounce(guard(scrollReport, 'scroll-report'), 30, 50);
+
+  function onScroll() {
+    if (state.scrollSync) reportScrollLive();
+    else reportScroll();
+  }
+
+  /** prefs (INIT, SET_PREFS): scrollSync is the guest's own; the rest are the keyboard's. @param {any} prefs */
+  function setPrefs(prefs) {
+    if (!prefs || typeof prefs !== 'object') return;
+    if ('scrollSync' in prefs) state.scrollSync = !!prefs.scrollSync;
+    Keys.setPrefs(prefs);
+  }
 
   // ---- channel ------------------------------------------------------------------------------------------------
 
@@ -205,7 +274,7 @@ const Main = (() => {
     setMode(d.mode);
     applyTheme(d.theme);
     setHidden(!!d.hidden);
-    if (d.prefs) Keys.setPrefs(d.prefs); // absent: keep the current preferences
+    if (d.prefs) setPrefs(d.prefs); // absent: keep the current preferences
     Targets.set(targetsOf(d));
     Targets.setActive(d.activeId == null ? null : String(d.activeId));
     ChangesOverlay.set(d.changes || null);
@@ -220,6 +289,7 @@ const Main = (() => {
   });
   Channel.on(MSG.SCROLL_TO, (d) => {
     if (d.hunk != null) ChangesOverlay.scrollTo(String(d.hunk));
+    else if (d.sync && typeof d.sync === 'object') syncTo(d.sync);
     else if (d.id != null) Targets.scrollToId(String(d.id));
     else if (d.srid != null) Targets.scrollToSrid(Number(d.srid), typeof d.offset === 'number' ? d.offset : undefined);
     Scheduler.requestLayout();
@@ -231,7 +301,7 @@ const Main = (() => {
   });
   Channel.on(MSG.CLEAR_SELECTION, () => SelectionCapture.clear());
   Channel.on(MSG.SET_HIDDEN, (d) => setHidden(!!d.hidden));
-  Channel.on(MSG.SET_PREFS, (d) => Keys.setPrefs(d));
+  Channel.on(MSG.SET_PREFS, (d) => setPrefs(d));
 
   /** Closes the "removed content" popover on a click anywhere in the page. @param {PointerEvent} ev */
   function closePopoverOnOutside(ev) {
@@ -256,7 +326,7 @@ const Main = (() => {
     Scheduler.onDomChange(Targets.reresolve);
     Scheduler.onDomChange(ChangesOverlay.reresolve);
     Scheduler.onDomChange(Picker.refresh);
-    Scheduler.onScroll(reportScroll);
+    Scheduler.onScroll(onScroll);
     Scheduler.start();
     SelectionCapture.start();
     Keys.start();
