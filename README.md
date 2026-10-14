@@ -607,7 +607,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 | You submitted but the agent did nothing | Its background wait is not running (for example the session restarted). Tell it "done", or paste the **Copy prompt** text from the Submit dialog. In Claude Code the prompt hook also reminds it on your next message. |
 | A `wait` printed "superseded … ignore this" (exit 6) | A newer `wait` took over. Harmless. |
 | "Annotations are blocked by this document's Content-Security-Policy" | The document's own CSP meta tag blocks the overlay. Review in Source mode, or remove the tag. |
-| "2 external resources failed (offline?)" | The document depends on the internet (CDN scripts, fonts). Make it self-contained. |
+| "2 external resources failed (offline?)" | The document loads files from the internet (scripts, fonts, images) and some did not load. Check your connection, then reload the document from the command palette. |
 | Starting over | `suiko stop`, then delete `~/.specreview`. Your versions and threads in `.specreview/` are untouched. |
 
 ## FAQ
@@ -632,7 +632,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 
 **How do I get an old version back?** `suiko show <doc> --version N` prints any recorded version's source, and History mode renders it. Ask the agent to restore the part you want, or comment on the change.
 
-**What should a spec look like to review well?** Markdown by default, stable headings, diagrams as mermaid or inline SVG, local images, and for HTML the text in static markup with no CDN dependencies. See [writing specs that review well](integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
+**Does a spec have to be written a certain way for Suiko?** No. The agent should write the best document for its readers: Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included. Suiko renders it as written, and whatever you can see you can comment on, snip (`b`) or screenshot (`B`). See [writing the doc](integrations/claude-code/skills/spec-review/reference.md#writing-the-doc).
 
 ## Development
 

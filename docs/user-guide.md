@@ -393,7 +393,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 | Symptom | What it means | What to do |
 |---|---|---|
 | "Annotations are blocked by this document's Content-Security-Policy" | The document's own CSP meta tag blocks the review overlay | Review in **Source** mode, or ask the agent to remove the restrictive CSP meta |
-| "2 external resources failed (offline?)" | The document loads files from the internet and they did not load | Expected offline. Ask the agent to make the document self-contained |
+| "2 external resources failed (offline?)" | The document loads files from the internet (scripts, fonts, images) and some did not load | Check your connection, then reload the document (command palette: **Reload the document**). Everything else in the review keeps working |
 | Page errors count in the status bar | The document's own scripts threw errors | Check whether they affect what you are reviewing; mention them in a comment if so |
 | A thread is **Outdated** | Its text was edited without being linked to it | Read "was / now" on the card; reply, resolve, or **Move here** |
 | A thread is **Orphaned** | Its text is gone | Use the orphan tray: **Move here**, **Keep as general** or **Resolve** |

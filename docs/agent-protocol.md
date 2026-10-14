@@ -23,7 +23,7 @@ Contents:
 15. [MCP tools](#15-mcp-tools)
 16. [Command reference](#16-command-reference)
 17. [Rules summary](#17-rules-summary)
-18. [Writing specs that review well](#18-writing-specs-that-review-well)
+18. [Writing the doc](#18-writing-the-doc)
 19. [Snapshot docs: plans, messages, piped text, web pages](#19-snapshot-docs-plans-messages-piped-text-web-pages)
 
 ## 1. Model
@@ -284,7 +284,7 @@ Reviewers attach pictures with one key: `b` snips any area of the rendered doc, 
 | question | Answer in the reply; edit only if the answer belongs in the spec | `answered`, or `addressed` if you edited |
 | disagree | No edit; explain why | `declined` |
 | unclear | No edit; ask one precise question | `needs_input` |
-| image / diagram region | Read the `crop:`; edit the diagram source (mermaid, inline SVG, or the generating script) | `addressed` |
+| image / diagram region | Read the `crop:`; change whatever produces it (its markup, data, styles, or the generating script or file) | `addressed` |
 | snipped area (`image:`) | Read the `image:` first; then edit the blocks in `src>` (Read the file when `src>` is shortened) | `addressed` |
 | screenshot on a GENERAL thread | Read the `image:`; it may show something outside the doc (the running app, a terminal). Change the spec where the comment points; if it is unclear which part, ask | `addressed`, or `needs_input` |
 | REOPENED | Read the new comment; fix again | `addressed` |
@@ -585,16 +585,12 @@ Do not:
 - Act on draft comments the reviewer has not submitted.
 - Resolve threads: only the reviewer resolves.
 
-## 18. Writing specs that review well
+## 18. Writing the doc
 
-- **Format:** Markdown by default; HTML only when layout or interactivity matters.
-- **Structure:** unique, stable headings (sections, locks and `§` paths come from them); real tables with header rows; reasonably short lines (diffs and `src>` excerpts are per line); no repeated boilerplate sentences.
-- **Diagrams:** mermaid fences (Markdown), `<pre class="mermaid">` (HTML), or inline `<svg>` with readable ids and `<text>` labels, so single nodes are commentable and fixes are small text edits.
-- **Images:** local files referenced by relative path (versioned with each revision, with before/after when they change); no `data:` URIs.
-- **HTML:** keep reviewable text in static markup rather than client-side templating; self-contained (no CDN scripts, fonts or images); pretty-printed, not minified; real `<h1>`-`<h6>` with ids; no restrictive `Content-Security-Policy` meta; no content to be reviewed inside nested iframes or shadow DOM.
-- **When editing:** never re-wrap existing paragraphs; keep heading text stable unless asked.
-
-The longer version, with reasons, is in [`integrations/claude-code/skills/spec-review/reference.md`](../integrations/claude-code/skills/spec-review/reference.md#writing-specs-that-review-well).
+- **Write for the doc's readers, not for Suiko.** Use the form that serves them best: Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included. Never simplify, restructure or restyle a doc to make it easier to review.
+- **Suiko adapts to the doc.** It renders the doc exactly as written, scripts included, and the reviewer can respond to anything they see: comment on selected text, snip any area of the rendered page, attach a screenshot of anything on their screen, or comment on a section or the whole doc.
+- **Feedback without an exact source line** (a canvas, a chart drawn by a script, an animation, a state reached by interacting with the page) arrives as a comment with a picture and the nearest source lines. Read the picture, find what produces it, and change that.
+- **When editing:** change only what the threads ask for; never reformat or re-wrap existing text.
 
 ## 19. Snapshot docs: plans, messages, piped text, web pages
 

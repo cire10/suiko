@@ -11,8 +11,8 @@ The user reviews the spec in a local web UI and comments on exact parts of it. Y
 
 ## 1. Write the spec once
 
-- Default to Markdown in the repo, e.g. `docs/specs/<name>.md`. Use `.html` only when layout or interactivity matters.
-- Write it so it reviews well: stable headings, mermaid fences or inline SVG for diagrams, local images by relative path, no CDN dependencies, and (in HTML) the text in static markup rather than built by scripts. Details: [reference.md](reference.md#writing-specs-that-review-well).
+- Write the document its readers need, in the form that serves them best, in the repo (e.g. under `docs/specs/`): Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included.
+- Never simplify, restructure or restyle the doc for Suiko. Suiko renders it exactly as written, and the reviewer can respond to anything they see: comment on text, snip any area of the page, or attach a screenshot of anything on their screen. See [reference.md](reference.md#writing-the-doc).
 - This first Write is the only whole-file write. After `suiko open`, never use Write on the doc again.
 
 ## 2. Open it and hand over
@@ -61,7 +61,7 @@ It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. 
    - **question**: answer in the reply (`answered`). Also edit only if the answer belongs in the spec (`addressed`).
    - **disagree**: `declined` with the reason. **Unclear**: `needs_input` with one precise question.
    - **`image:` and `crop:` lines** are pictures the user attached: a snipped area of the doc, a screenshot of their screen, a pasted image, or a region crop. **Read every one with the Read tool before acting on that thread.** A snip's `src>` covers all blocks under the snipped area: edit only what the comment is about. A `GENERAL` screenshot may show something outside the doc (the running app, a terminal); if you cannot tell which part of the spec it concerns, use `needs_input`.
-   - **image or diagram**: edit the diagram's source (mermaid fence, inline SVG, or the script that generates the image).
+   - **a picture, diagram, chart or interactive part**: change whatever produces it (its markup, its data, its styles, or the script or file it comes from).
    - A `src>` shortened with `...(N more lines)`, or one with an elided `data:` URI, is not a usable `old_string`: Read those lines from the file.
 3. **Order:** do all Edit-tool edits first, then `suiko apply <doc> t3 t5` for the suggestions. `apply` rewrites the file, so re-Read it before any later Edit. If Edit says the file changed since it was read, re-Read and retry. If `apply` reports a conflict, treat that thread as a normal comment.
 4. **Never:**
