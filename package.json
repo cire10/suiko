@@ -1,6 +1,6 @@
 {
   "name": "@cire10/suiko",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown specs",
   "keywords": [
     "review",
