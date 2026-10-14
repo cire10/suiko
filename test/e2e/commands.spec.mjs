@@ -125,19 +125,19 @@ test('fuzzy search ranks and highlights; arrows and Enter run; an empty query li
 
   // ↓ / Ctrl+N move, Enter runs the active row.
   await paletteInput(page).fill('mode');
-  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-review');
+  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-read');
   await page.keyboard.press('ArrowDown');
-  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-changes');
+  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-review');
   await page.keyboard.press('Control+n');
-  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-source');
+  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-changes');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Control+p');
-  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-review');
+  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-read');
   await page.keyboard.press('ArrowUp'); // wraps around
   await expect(page.getByTestId(TESTID.commandItem).last()).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('ArrowDown');
-  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-review');
-  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+  await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-read');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown');
   await expect(activeItem(page)).toHaveAttribute('data-command-id', 'mode-history');
   await page.keyboard.press('Enter');
   await expect(palette(page)).toHaveCount(0);

@@ -54,18 +54,18 @@ const Overlay = (() => {
   -webkit-font-smoothing: antialiased;
   --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --border: rgba(31, 35, 40, 0.18);
   --hover: rgba(129, 139, 152, 0.16); --shadow: 0 6px 20px rgba(0, 0, 0, 0.18); --accent: #0969da;
-  --del-bg: #fff5f5; --del-border: #cf222e;
+  --del-bg: #fff5f5; --del-border: #cf222e; --add-bg: #f0fff4; --add-border: #1a7f37;
 }
 .frame[data-theme="dark"] {
   --bg: #1c2128; --fg: #e6edf3; --muted: #9198a1; --border: rgba(240, 246, 252, 0.16);
   --hover: rgba(177, 186, 196, 0.14); --shadow: 0 6px 20px rgba(0, 0, 0, 0.5); --accent: #4493f8;
-  --del-bg: #2d1517; --del-border: #f85149;
+  --del-bg: #2d1517; --del-border: #f85149; --add-bg: #12261e; --add-border: #3fb950;
 }
 @media (prefers-color-scheme: dark) {
   .frame:not([data-theme="light"]) {
     --bg: #1c2128; --fg: #e6edf3; --muted: #9198a1; --border: rgba(240, 246, 252, 0.16);
     --hover: rgba(177, 186, 196, 0.14); --shadow: 0 6px 20px rgba(0, 0, 0, 0.5); --accent: #4493f8;
-    --del-bg: #2d1517; --del-border: #f85149;
+    --del-bg: #2d1517; --del-border: #f85149; --add-bg: #12261e; --add-border: #3fb950;
   }
 }
 .layer { position: absolute; inset: 0; pointer-events: none; }
@@ -88,6 +88,7 @@ const Overlay = (() => {
 .bar { width: 3px; border-radius: 2px; }
 .bar.add { background: #2da44e; }
 .bar.mod { background: #d4a72c; }
+.bar.del { background: #cf222e; }
 .badge { position: absolute; box-sizing: border-box; height: 15px; padding: 0 5px; border-radius: 8px;
   font-size: 10px; line-height: 15px; font-weight: 600; color: #fff; background: #0969da; pointer-events: auto;
   cursor: pointer; white-space: nowrap; }
@@ -96,6 +97,7 @@ const Overlay = (() => {
   font-size: 11px; line-height: 18px; color: var(--del-border); background: var(--del-bg);
   border: 1px solid var(--del-border); pointer-events: auto; cursor: pointer; white-space: nowrap; }
 .tab.open { background: var(--del-border); color: #fff; }
+.tab.add { color: var(--add-border); background: var(--add-bg); border-color: var(--add-border); cursor: default; }
 .tab.compact, .badge.compact { height: 13px; padding: 0 4px; border-radius: 7px; line-height: 11px; }
 .tab.compact { font-size: 10px; }
 .badge.compact { font-size: 9px; line-height: 13px; }

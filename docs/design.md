@@ -1430,13 +1430,15 @@ These checks apply to every route:
 | `POST /api/docs/:ws/:doc/reviews` | `{verdict, body, markFinal?, resolveAddressed?, draftIds?, reviewedVersion?}` (draftIds omitted = all; "Send now" passes one; `reviewedVersion` = the version on screen: an `approved` verdict is refused with 409 when head differs) | `Review` |
 | `POST /api/docs/:ws/:doc/threads/:tid/resolve` | `{decision?: string}` | `Thread` |
 | `POST /api/docs/:ws/:doc/threads/:tid/unresolve` | | `Thread` |
+| `POST /api/docs/:ws/:doc/threads/resolve` | `{threads: string[]}` (1-1000 ids) | `{resolved, unchanged}` ("Accept all": every id checked first, already resolved ones unchanged) |
+| `POST /api/docs/:ws/:doc/threads/unresolve` | `{threads: string[]}` | `{reopened, unchanged}` (the Undo of "Accept all") |
 | `POST /api/docs/:ws/:doc/threads/:tid/move` | `{version, capture}` | `Thread` |
 | `POST /api/docs/:ws/:doc/threads/:tid/apply` | | `VersionManifest` (reviewer applies a suggestion; 409 if the working copy is dirty) |
 | `GET /api/docs/:ws/:doc/threads/:tid/minidiff` | | `{version, before, after, words}` |
 | `POST /api/docs/:ws/:doc/locks` | `{version, capture, note?}` | `Lock` |
 | `DELETE /api/docs/:ws/:doc/locks/:id` | | `{ok}` |
 | `POST /api/docs/:ws/:doc/locks/:id/relock` | | `Lock` |
-| `GET /api/docs/:ws/:doc/diff?from=1&to=2` | `to` may be `live` | `Changes` |
+| `GET /api/docs/:ws/:doc/diff?from=1&to=2` | `to` may be `live` | `Changes` (hunks carry `oldSide`, assets `oldSrids`: the same changes placed in the `from` version, for Changes side by side) |
 | `GET /api/docs/:ws/:doc/diff/source?from=&to=` | | `SourceDiff` |
 | `POST /api/docs/:ws/:doc/record` | `{summary}` | `VersionManifest` (reviewer-authored) |
 | `POST /api/docs/:ws/:doc/attachments` | `{dataUrl}` (PNG or JPEG, at most 5 MB) | `{path}` |

@@ -12,7 +12,7 @@
 
 import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
 
-/** @typedef {'review'|'changes'|'source'|'history'} Mode */
+/** @typedef {'read'|'review'|'changes'|'source'|'history'} Mode  read: the latest version, nothing drawn over it */
 /** @typedef {'open'|'needs'|'verify'|'drafts'|'resolved'|'outdated'|'all'} Filter */
 /** @typedef {'system'|'light'|'dark'} Theme */
 /** @typedef {'submit'|'help'|'image'|'palette'|'settings'} Dialog  one at a time: opening one closes the other */
@@ -110,6 +110,9 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  * @property {{ from: number, to: number }|null} sourceSel selected lines in Source mode
  * @property {'unified'|'split'} sourceLayout
  * @property {boolean} sourceDiff show the diff against the base in Source mode
+ * @property {'inline'|'split'} compareLayout Changes mode: the changes drawn over the newer version (inline), or the
+ *   older version beside it (split: side by side, scrolled together; wide layouts only). Remembered per browser
+ * @property {boolean} baseConnected side by side: the older version's frame has its guest
  * @property {'changes'|'threads'} sidePane which list the side panel shows in Changes mode
  * @property {number} frameNonce bump to reload the doc iframe
  * @property {boolean} recording the working-copy banner shows its "Record as my revision" form
@@ -186,6 +189,8 @@ export function initialState() {
     sourceSel: null,
     sourceLayout: readPref('sourceLayout', ['unified', 'split'], 'unified'),
     sourceDiff: true,
+    compareLayout: readPref('compareLayout', ['inline', 'split'], 'inline'),
+    baseConnected: false,
     sidePane: 'changes',
     frameNonce: 0,
     recording: false,

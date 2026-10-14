@@ -3,12 +3,12 @@
 // (Open, Needs me, Verify, Drafts, Resolved, Outdated, All), "General comment" (a code review takes it as a
 // whole-review thread), and the thread / draft cards in document order (List layout, amendments 1; a code review
 // orders them by file). Focusing a card scrolls the doc to its anchor; clicking a highlight in the doc focuses its
-// card.
+// card. The Verify filter starts with "Accept all" (AcceptAllBar): every addressed or answered thread at once.
 
 import { html, useMemo } from 'preact-htm';
 import { TESTID } from 'protocol';
-import { openComposer, setFilter } from '../actions.js';
-import { agentName, filterCounts, FILTERS, kindCaps, panelItems } from '../model.js';
+import { acceptAll, openComposer, setFilter } from '../actions.js';
+import { acceptableThreads, agentName, declinedToVerify, filterCounts, FILTERS, kindCaps, panelItems, showsDoc } from '../model.js';
 import { useStore } from '../state.js';
 import { DraftCard, ThreadCard } from './ThreadCard.js';
 
@@ -53,7 +53,7 @@ export function ThreadPanel() {
     // Only the non-'ok' target states matter here; positions themselves change on every scroll. They describe the
     // rendered doc, so they mean something only while it is displayed (Review / Changes): in Source and History the
     // iframe is hidden and every target would read as "hidden".
-    states: kindCaps(st.ds).frame && (st.mode === 'review' || st.mode === 'changes') ? targetStates(st.guest.positions) : '',
+    states: kindCaps(st.ds).frame && showsDoc(st.mode) ? targetStates(st.guest.positions) : '',
   }));
   const items = useMemo(() => panelItems(s.ds, s.filter, s.version), [s.ds, s.filter, s.version]);
   const counts = useMemo(() => filterCounts(s.ds, s.version), [s.ds, s.version]);
@@ -74,6 +74,7 @@ export function ThreadPanel() {
       ${canComment ? html`<button type="button" class="btn btn-sm" onClick=${() => openComposer({ capture: { kind: 'doc' } })}
         title=${framed ? 'A comment about the whole document' : 'A comment about the whole review'}>General comment</button>` : null}
     </div>
+    ${s.filter === 'verify' ? html`<${AcceptAllBar} ds=${s.ds} busy=${s.busyThreads} live=${!canComment} />` : null}
     <div class="cards" role="list">
       ${items.length === 0
         ? html`<div class="empty" role="listitem">${total === 0 || s.filter === 'open' || s.filter === 'all'
@@ -90,4 +91,24 @@ export function ThreadPanel() {
               shown=${!s.draftTargets || s.draftTargets.some((/** @type {any} */ x) => x.id === it.id)} />`))}
     </div>
   </section>`;
+}
+
+/**
+ * The Verify queue's "Accept all": every addressed or answered thread at once (Undo in the toast). Declined threads
+ * are not included; the bar says how many are left for the reviewer to decide.
+ * @param {{ ds: any, busy: string[], live: boolean }} props
+ */
+export function AcceptAllBar({ ds, busy, live }) {
+  const ok = acceptableThreads(ds);
+  const declined = declinedToVerify(ds).length;
+  if (!ok.length && !declined) return null;
+  const pending = ok.some((/** @type {any} */ t) => busy.includes(t.id));
+  return html`<div class="accept-all-bar" role="group" aria-label="Accept all">
+    ${ok.length ? html`<span class="small">${ok.length} addressed or answered</span>
+      <button type="button" class="btn btn-sm btn-ok" data-testid=${TESTID.verifyAcceptAll} disabled=${pending || live}
+        aria-keyshortcuts="Shift+X" title=${live ? 'The working copy preview is read-only'
+          : 'Accept and resolve every addressed or answered thread (⇧X). You can undo it.'}
+        onClick=${() => acceptAll()}>Accept all (${ok.length})</button>` : null}
+    ${declined ? html`<span class="small muted accept-all-note">${declined} declined: accept or reopen ${declined === 1 ? 'it' : 'each'} below.</span>` : null}
+  </div>`;
 }

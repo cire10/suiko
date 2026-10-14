@@ -565,7 +565,7 @@ export class MockDoc {
     const A = this.source(from);
     const B = this.source(to);
     const hunks = lineHunks(A, B);
-    const cs = changeSet({ fromSource: A, toSource: B, toRender: this.render(to), format: this.format, hunks });
+    const cs = changeSet({ fromSource: A, toSource: B, toRender: this.render(to), fromRender: this.render(from), format: this.format, hunks });
     const toN = to === 'live' ? null : Number(to);
     const manifest = toN && toN === from + 1 ? this.versions[toN - 1].manifest : null;
     /** @type {Record<string, string[]>} */
@@ -580,12 +580,15 @@ export class MockDoc {
     const fromAssets = this.assetHashes[from] || {};
     const toAssets = to === 'live' ? this.assetHashes[this.head] || {} : this.assetHashes[toN || this.head] || {};
     const render = this.render(to);
+    const fromRender = this.render(from);
+    /** srids of the elements of a render that show the asset @param {any} r @param {string} path */
+    const showing = (r, path) => Object.entries(r.srcmap.nodes)
+      .filter(([, n]) => /** @type {any} */ (n).a?.src && String(/** @type {any} */ (n).a.src).replace(/^\.\//, '') === path)
+      .map(([k]) => Number(k));
     const assets = [];
     for (const path of new Set([...Object.keys(fromAssets), ...Object.keys(toAssets)])) {
       if (fromAssets[path] === toAssets[path]) continue;
-      const srids = Object.entries(render.srcmap.nodes)
-        .filter(([, n]) => /** @type {any} */ (n).a?.src && String(/** @type {any} */ (n).a.src).replace(/^\.\//, '') === path)
-        .map(([k]) => Number(k));
+      const srids = showing(render, path);
       // Like the real engine: URLs relative to DocState.contentBase, plus the threads anchored on the image.
       const threads = this.threads.filter((t) => {
         const a = t.anchors[String(toN ?? this.head)] || Object.values(t.anchors).slice(-1)[0];
@@ -599,6 +602,7 @@ export class MockDoc {
         fromUrl: fromAssets[path] ? `v${from}/${path}` : null,
         toUrl: toAssets[path] ? `${to === 'live' ? 'live' : `v${to}`}/${path}` : null,
         srids,
+        oldSrids: showing(fromRender, path),
         threads,
       });
     }
@@ -778,14 +782,60 @@ export class MockDoc {
     return t;
   }
 
-  /** @param {string} tid */
+  /** Back to the agent's last reply status when that reply is the newest comment (like the engine), else open. @param {string} tid */
   unresolve(tid) {
     const t = this.thread(tid);
-    t.status = 'open';
+    const cs = t.comments || [];
+    let lastAgent = -1;
+    let lastHuman = -1;
+    cs.forEach((/** @type {any} */ c, /** @type {number} */ i) => {
+      if (c.by?.kind === 'agent') lastAgent = i;
+      else if (c.by?.kind === 'human') lastHuman = i;
+    });
+    const agentStatus = lastAgent >= 0 ? cs[lastAgent].status : null;
+    t.status = agentStatus && lastAgent > lastHuman ? agentStatus : 'open';
     t.resolvedIn = null;
     t.updatedAt = this.clock();
     this.emit('thread.updated', { thread: tid });
     return t;
+  }
+
+  /** Accept all: every id is checked first; already resolved threads are left alone. @param {unknown} ids */
+  resolveMany(ids) {
+    const list = this.bulkThreads(ids);
+    const resolved = [];
+    const unchanged = [];
+    for (const t of list) {
+      if (t.status === 'resolved') unchanged.push(t.id);
+      else {
+        this.resolve(t.id);
+        resolved.push(t.id);
+      }
+    }
+    return { resolved, unchanged };
+  }
+
+  /** The Undo of Accept all. @param {unknown} ids */
+  unresolveMany(ids) {
+    const list = this.bulkThreads(ids);
+    const reopened = [];
+    const unchanged = [];
+    for (const t of list) {
+      if (t.status !== 'resolved') unchanged.push(t.id);
+      else {
+        this.unresolve(t.id);
+        reopened.push(t.id);
+      }
+    }
+    return { reopened, unchanged };
+  }
+
+  /** @param {unknown} ids */
+  bulkThreads(ids) {
+    if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === 'string')) {
+      throw httpError(422, 'threads must be a non-empty list of thread ids');
+    }
+    return [...new Set(ids)].map((id) => this.thread(String(id)));
   }
 
   /** @param {string} tid @param {{ version: number, capture: any }} p */

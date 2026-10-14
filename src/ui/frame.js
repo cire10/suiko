@@ -23,6 +23,11 @@ export const FRAME_SANDBOX =
  */
 export const FRAME_SANDBOX_STRICT = 'allow-scripts allow-same-origin allow-modals allow-popups allow-popups-to-escape-sandbox';
 
+/** The sandbox flags of a doc's frames (the newer and, side by side, the older version). @param {any} ds DocState */
+export function frameSandbox(ds) {
+  return ds?.doc?.kind === 'snapshot' ? FRAME_SANDBOX_STRICT : FRAME_SANDBOX;
+}
+
 export class GuestBridge {
   constructor() {
     /** @type {HTMLIFrameElement|null} */
@@ -146,5 +151,8 @@ export class GuestBridge {
   }
 }
 
-/** The single bridge of the app (one doc iframe at a time). */
+/** The bridge of the doc iframe: the version shown. */
 export const guest = new GuestBridge();
+
+/** The bridge of the second doc iframe of Changes side by side: the older version (read-only). */
+export const baseGuest = new GuestBridge();

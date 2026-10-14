@@ -7,7 +7,7 @@
 
 import { html, useEffect, useRef, useState } from 'preact-htm';
 import { goToNewHead, recordWorkingCopy, reloadFrame, setMode, startRecording, stopRecording, switchVersion } from '../actions.js';
-import { agentName, kindCaps } from '../model.js';
+import { agentName, kindCaps, showsDoc } from '../model.js';
 import { useStore } from '../state.js';
 
 export function Banners() {
@@ -25,7 +25,7 @@ export function Banners() {
   const agent = agentName(ds);
   const live = kindCaps(ds).liveBanners;
   const out = [];
-  if (live && s.lost && (s.mode === 'review' || s.mode === 'changes')) {
+  if (live && s.lost && showsDoc(s.mode)) {
     const where = s.version === 'live' ? 'the working copy' : `v${s.version}`;
     out.push(html`<div class="banner banner-warn" role="alert" key="lost" data-frame-lost>
       <span><strong>The document navigated away</strong> from the reviewed page; comments and highlights are off until you go back.</span>

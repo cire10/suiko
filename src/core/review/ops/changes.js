@@ -1,6 +1,9 @@
 // @ts-check
 // What changed, for the reviewer UI and `suiko diff` (design 8.5-8.8; BUILD_AMENDMENTS 3.4, 4.5):
-//   changes(ctx, doc, { from, to })        -> Changes + { from, to, threadLinks, assets, guards }; to may be 'live'
+//   changes(ctx, doc, { from, to, oldSide })  -> Changes + { from, to, threadLinks, assets, guards }; to may be
+//                                            'live'. With oldSide (the review UI's Changes side by side), hunks also
+//                                            carry oldSide and assets oldSrids: the same changes placed in the `from`
+//                                            version's render (one more render; agents' diffs leave it out)
 //   sourceDiffOp(ctx, doc, { from, to })   -> { from, to, hunks } (sourceDiff rows + thread ids per display hunk)
 //   unifiedDiff(ctx, doc, { from, to })    -> { from, to, patch }
 //   threadMiniDiff(ctx, doc, tid)          -> { kind: 'text', version, from, before, after, words }
@@ -66,14 +69,16 @@ async function loadPair(ctx, doc, { from, to }) {
 /**
  * @param {Ctx} ctx
  * @param {string | Doc} ref
- * @param {{ from?: number | string, to?: number | string }} [range]
+ * @param {{ from?: number | string, to?: number | string, oldSide?: boolean }} [range] oldSide: also place the
+ *   changes in the `from` version (hunks[].oldSide, assets[].oldSrids) for a side-by-side view
  */
 export async function changes(ctx, ref, range = {}) {
   const doc = await resolveDoc(ctx, ref);
   if (isCode(doc)) return codeChanges(ctx, doc, range);
   const p = await loadPair(ctx, doc, range);
   const hunks = lineHunks(p.fromSource, p.source);
-  const cs = changeSet({ fromSource: p.fromSource, toSource: p.source, toRender: p.toRender, format: doc.format, hunks });
+  const fromRender = range.oldSide ? await ctx.render(doc, p.from).catch(() => null) : null;
+  const cs = changeSet({ fromSource: p.fromSource, toSource: p.source, toRender: p.toRender, fromRender, format: doc.format, hunks });
   const threads = await ctx.store.listThreads(doc.id);
 
   /** @type {Map<string, { threads: string[], linkedBy: string | null, other: string | null }>} */
@@ -118,6 +123,8 @@ export async function changes(ctx, ref, range = {}) {
     fromUrl: p.fromManifest.assets?.[path] ? `v${p.from}/${path}` : null,
     toUrl: p.assets[path] ? `${toLabel}/${path}` : null,
     srids: sridsReferencing(p.toRender, doc.path, path),
+    // where the old version shows it (Changes side by side)
+    ...(fromRender ? { oldSrids: sridsReferencing(fromRender, doc.path, path) } : {}),
     threads: Object.entries(assetThreads).filter(([, ps]) => ps.includes(path)).map(([t]) => t).sort(compareIds),
   }));
   for (const a of assets) for (const t of a.threads) (threadLinks[t] ??= []).push(`asset:${a.path}`);

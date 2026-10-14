@@ -1,6 +1,7 @@
 // @ts-check
 // Thread operations (design 3.7-3.10, 7.6, 8.8, 9.2, 9.6):
-//   reviewer: resolveThread (Accept, optional decision), unresolveThread, moveThread ("Move here")
+//   reviewer: resolveThread (Accept, optional decision), unresolveThread, resolveThreads / unresolveThreads (Accept
+//             all, and its Undo), moveThread ("Move here")
 //   agent:    reply (no version), ask (agent-question thread, status needs_input), reanchorThread (override;
 //             applied to head when the working copy is clean, else staged until the next revise)
 //   readers:  threads (one line per thread), show (a thread's timeline, or exact old source lines)
@@ -65,18 +66,110 @@ export async function unresolveThread(ctx, ref, tid, _opts = {}) {
   return withDoc(ctx, ref, async (doc) => {
     const t = await requireThread(ctx, doc.id, tid);
     if (t.status === 'resolved') {
-      const { lastAgent, lastHuman } = lastIndexes(t);
-      const agentStatus = lastAgent >= 0 ? t.comments[lastAgent].status : null;
-      t.status = agentStatus && lastAgent > lastHuman ? agentStatus : 'open';
-      t.resolvedIn = null;
-      delete (/** @type {any} */ (t).resolvedAt);
-      delete (/** @type {any} */ (t).resolvedBy);
-      t.updatedAt = ctx.now();
+      unresolveInPlace(t, ctx.now());
       await ctx.store.saveThread(doc.id, t);
       await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
     }
     return t;
   });
+}
+
+/**
+ * Accept all (the Verify queue): resolves several threads in one critical section. Every id is checked before
+ * anything changes (an unknown one is NotFound and resolves nothing); threads already resolved are left as they are.
+ * No decision is recorded.
+ * @param {Ctx} ctx
+ * @param {string | Doc} ref
+ * @param {string[]} tids
+ * @param {{ by?: string }} [opts]
+ * @returns {Promise<{ resolved: string[], unchanged: string[] }>}
+ */
+export async function resolveThreads(ctx, ref, tids, { by } = {}) {
+  const ids = threadIdList(tids);
+  return withDoc(ctx, ref, async (doc) => {
+    const list = [];
+    for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
+    const at = ctx.now();
+    const name = humanActor(ctx, by).name;
+    /** @type {string[]} */
+    const resolved = [];
+    /** @type {string[]} */
+    const unchanged = [];
+    for (const t of list) {
+      if (t.status === 'resolved') {
+        unchanged.push(t.id);
+        continue;
+      }
+      resolveInPlace(ctx, doc, t, { at, head: doc.head });
+      /** @type {any} */ (t).resolvedBy = name;
+      await ctx.store.saveThread(doc.id, t);
+      resolved.push(t.id);
+    }
+    for (const id of resolved) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: id, status: 'resolved' });
+    return { resolved, unchanged };
+  });
+}
+
+/**
+ * Undoes resolveThreads (the Undo of "Accept all"): each resolved thread returns to the agent's last reply status
+ * (or open), as unresolveThread does. Ids are checked first; threads that are not resolved are left as they are.
+ * @param {Ctx} ctx
+ * @param {string | Doc} ref
+ * @param {string[]} tids
+ * @param {{ by?: string }} [_opts]
+ * @returns {Promise<{ reopened: string[], unchanged: string[] }>}
+ */
+export async function unresolveThreads(ctx, ref, tids, _opts = {}) {
+  const ids = threadIdList(tids);
+  return withDoc(ctx, ref, async (doc) => {
+    const list = [];
+    for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
+    const at = ctx.now();
+    /** @type {string[]} */
+    const reopened = [];
+    /** @type {string[]} */
+    const unchanged = [];
+    for (const t of list) {
+      if (t.status !== 'resolved') {
+        unchanged.push(t.id);
+        continue;
+      }
+      unresolveInPlace(t, at);
+      await ctx.store.saveThread(doc.id, t);
+      reopened.push(t.id);
+    }
+    for (const t of list) {
+      if (reopened.includes(t.id)) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
+    }
+    return { reopened, unchanged };
+  });
+}
+
+/**
+ * A resolved thread back to the agent's last reply status (when that reply is the newest comment), else open.
+ * @param {Thread} t
+ * @param {string} at
+ */
+function unresolveInPlace(t, at) {
+  const { lastAgent, lastHuman } = lastIndexes(t);
+  const agentStatus = lastAgent >= 0 ? t.comments[lastAgent].status : null;
+  t.status = agentStatus && lastAgent > lastHuman ? agentStatus : 'open';
+  t.resolvedIn = null;
+  delete (/** @type {any} */ (t).resolvedAt);
+  delete (/** @type {any} */ (t).resolvedBy);
+  t.updatedAt = at;
+}
+
+/**
+ * The thread ids of a bulk operation, without duplicates (UsageError when it is not a non-empty list of ids).
+ * @param {unknown} tids
+ * @returns {string[]}
+ */
+function threadIdList(tids) {
+  if (!Array.isArray(tids) || !tids.length || !tids.every((t) => typeof t === 'string' && t.trim())) {
+    throw new UsageError('threads must be a non-empty list of thread ids');
+  }
+  return [...new Set(tids.map((t) => String(t).trim()))];
 }
 
 /**

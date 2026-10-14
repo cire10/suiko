@@ -1,7 +1,9 @@
 // @ts-check
-// Top bar (design 11.1): doc title, version picker, mode tabs (a dropdown below 900 px), Changes base picker, the
-// command palette button (⌘K), comment / pick / snip / screen-snip / hide / theme tools, Settings (gear) and the
-// keyboard shortcuts, presence chip, round status, the review progress chip, Drafts count and Submit review. The
+// Top bar (design 11.1): doc title, version picker (in Changes / Source preceded by the older version's picker, so
+// the comparison reads "[v1 · last review] → [v3 (latest)]"), mode tabs (a dropdown below 900 px), the command palette
+// button (⌘K), comment / pick / snip / screen-snip / hide / theme tools, Settings (gear) and the keyboard shortcuts;
+// then presence chip, round status, the review progress chip, Changes' Inline / Side by side switch (wide layouts),
+// Drafts count and Submit review. The
 // modes and tools follow the doc kind (model.js modesFor / kindCaps: a code review has no Source, pick, snip, hide). The
 // capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are discoverable; the screen-snip button
 // disappears once the daemon said it cannot capture the screen (not macOS). The menu button (outline drawer / rail)
@@ -13,12 +15,13 @@
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import {
-  cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase, setMode, snipScreen,
-  switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar, toggleSnip,
+  cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase, setCompareLayout, setMode,
+  snipScreen, switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar, toggleSnip,
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import {
-  agentName, draftCount, filterCounts, kindCaps, modesFor, presenceInfo, reviewProgress, roundSummary, versionNumbers,
+  agentName, draftCount, filterCounts, kindCaps, modesFor, presenceInfo, reviewProgress, roundSummary, showsDoc,
+  versionNumbers,
 } from '../model.js';
 import { useStore } from '../state.js';
 import { Chip, Icon } from './common.js';
@@ -43,6 +46,7 @@ export function TopBar() {
     selection: st.guest.selection,
     screenRunning: st.screenSnip.running,
     screenSupported: st.screenSnip.supported,
+    compareLayout: st.compareLayout,
   }));
   const ds = s.ds;
   if (!ds) return null;
@@ -57,10 +61,12 @@ export function TopBar() {
   const progress = reviewProgress(ds);
   const drafts = draftCount(ds);
   const open = filterCounts(ds, s.version).open;
-  const canPick = s.version !== 'live' && (s.mode === 'review' || s.mode === 'changes');
+  const canPick = s.version !== 'live' && showsDoc(s.mode);
   const showBase = s.mode === 'changes' || s.mode === 'source';
   const numericV = s.version === 'live' ? head + 1 : Number(s.version);
   const last = Number(ds.doc.lastReviewedVersion);
+  // the older end of a comparison: any version before the shown one (every recorded version for the working copy)
+  const olders = versions.filter((v) => v < numericV || (s.version === 'live' && v <= head)).reverse();
 
   /** @param {Event} e */
   const onVersion = (e) => {
@@ -68,6 +74,13 @@ export function TopBar() {
     const v = el.value === 'live' ? 'live' : Number(el.value);
     if (!switchVersion(v)) el.value = String(s.version);
   };
+  // the version shown; in Changes / Source the newer end of the comparison range
+  const versionSelect = html`<label class="sr-only" for="sr-version">${showBase ? 'Compare to' : 'Version'}</label>
+    <select id="sr-version" class="select" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}
+      title=${showBase ? 'The newer version: shown with what changed' : 'The version shown'}>
+      ${versions.slice().reverse().map((v) => html`<option value=${String(v)}>v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' FINAL' : ''}</option>`)}
+      ${caps.liveBanners && ((ds.working?.dirty && !ds.working?.missing) || s.version === 'live') ? html`<option value="live">Working copy (live)</option>` : null}
+    </select>`;
 
   return html`<header class="topbar">
     <div class="tb-row">
@@ -76,11 +89,18 @@ export function TopBar() {
       <a class="brand" href="/" title="All documents" onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); navigate('/'); }}>
         <${Icon} name="comment" size=${16} /><span class="brand-text">Suiko</span></a>
       <h1 class="doc-name" title=${ds.doc.path}>${ds.doc.title || ds.doc.id}</h1>
-      <label class="sr-only" for="sr-version">Version</label>
-      <select id="sr-version" class="select" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}>
-        ${versions.slice().reverse().map((v) => html`<option value=${String(v)}>v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' FINAL' : ''}</option>`)}
-        ${caps.liveBanners && ((ds.working?.dirty && !ds.working?.missing) || s.version === 'live') ? html`<option value="live">Working copy (live)</option>` : null}
-      </select>
+      ${showBase ? html`<span class="compare-range" role="group" aria-label="Compare versions">
+        <label class="sr-only" for="sr-base">Compare from</label>
+        <select id="sr-base" class="select" data-testid=${TESTID.compareFrom} value=${s.base == null ? '' : String(s.base)}
+          disabled=${!olders.length} title="The older version: what changed since it is shown (d: your last review / the previous version)"
+          onChange=${(/** @type {any} */ e) => setBase(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
+          ${s.base == null ? html`<option value="">${olders.length ? 'none' : 'no earlier version'}</option>` : null}
+          ${olders.map((v) => html`<option value=${String(v)}>
+            v${v}${v === last ? ' · last review' : v === numericV - 1 ? ' · previous' : ''}</option>`)}
+        </select>
+        <span class="compare-arrow" aria-hidden="true">→</span>
+        ${versionSelect}
+      </span>` : versionSelect}
       <nav class="mode-tabs" role="tablist" aria-label="Mode">
         ${MODES.map((m) => html`<button type="button" role="tab" data-testid=${TESTID.modeTab} data-mode=${m.key}
           aria-selected=${s.mode === m.key} class=${s.mode === m.key ? 'active' : ''} title=${`${m.label} (${m.n})`}
@@ -91,15 +111,6 @@ export function TopBar() {
         onChange=${(/** @type {any} */ e) => setMode(e.currentTarget.value)}>
         ${MODES.map((m) => html`<option value=${m.key}>${m.label}</option>`)}
       </select>
-      ${showBase ? html`<span class="base-picker">
-        <label for="sr-base">base</label>
-        <select id="sr-base" class="select" value=${s.base == null ? '' : String(s.base)} title="Compare against (d toggles)"
-          onChange=${(/** @type {any} */ e) => setBase(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
-          <option value="">none</option>
-          ${versions.filter((v) => v < numericV || (s.version === 'live' && v <= head)).reverse().map((v) => html`<option value=${String(v)}>
-            v${v}${v === last ? ' (your last review)' : v === numericV - 1 ? ' (previous)' : ''}</option>`)}
-        </select>
-      </span>` : null}
       <span class="spacer"></span>
       <${PaletteButton} />
       <span class="tools">
@@ -127,8 +138,9 @@ export function TopBar() {
           <${Icon} name="screen" /><kbd class="kbd-hint" aria-hidden="true">⇧B</kbd>
         </button>` : null}
         ${caps.hide ? html`<button type="button" class=${`icon-btn ${s.hidden ? 'active' : ''}`} aria-pressed=${s.hidden}
-          aria-label="Hide annotations" title="Hide annotations (h)" onClick=${toggleHidden}>
-          <${Icon} name=${s.hidden ? 'eyeOff' : 'eye'} />
+          disabled=${s.mode === 'read'} aria-label="Hide annotations"
+          title=${s.mode === 'read' ? 'Read mode shows no annotations' : 'Hide annotations (h)'} onClick=${toggleHidden}>
+          <${Icon} name=${s.hidden || s.mode === 'read' ? 'eyeOff' : 'eye'} />
         </button>` : null}
         <button type="button" class="icon-btn" data-theme-toggle aria-label=${`Theme: ${s.theme}. Change theme`}
           title=${`Theme: ${s.theme} (t)`} onClick=${cycleTheme}>
@@ -147,6 +159,7 @@ export function TopBar() {
       <span key="progress" class="progress-slot">${progress && progress.stage !== 'ready'
         ? html`<${Chip} tone=${progress.tone} class="review-progress">${progress.label}<//>` : null}</span>
       <span key="spacer" class="spacer"></span>
+      <span key="layout" class="layout-slot">${s.mode === 'changes' && caps.frame && !s.narrow ? html`<${CompareLayout} layout=${s.compareLayout} />` : null}</span>
       <button key="threads" type="button" class="btn btn-sm threads-toggle" aria-controls="sr-side"
         aria-expanded=${s.narrow ? s.drawer : s.sidebar} onClick=${toggleSidebar} title="Toggle the thread panel (\\)">
         <${Icon} name="threads" size=${14} /> Threads (${open})
@@ -155,6 +168,20 @@ export function TopBar() {
       <${SubmitButton} key="submit" />
     </div>
   </header>`;
+}
+
+/**
+ * Changes: Inline (what changed drawn over the newer version) or Side by side (the older version beside it).
+ * @param {{ layout: 'inline'|'split' }} props
+ */
+function CompareLayout({ layout }) {
+  return html`<span class="seg compare-layout" role="group" aria-label="Compare layout" data-testid=${TESTID.compareLayout}>
+    <button type="button" data-layout="inline" aria-pressed=${layout !== 'split'} class=${layout !== 'split' ? 'active' : ''}
+      title="What changed, drawn over the newer version" onClick=${() => setCompareLayout('inline')}>Inline</button>
+    <button type="button" data-layout="split" aria-pressed=${layout === 'split'} class=${layout === 'split' ? 'active' : ''}
+      title="The older version beside the newer one, scrolled together: removed text in red, added text in green"
+      onClick=${() => setCompareLayout('split')}>Side by side</button>
+  </span>`;
 }
 
 /** The command palette button: a search field look-alike with its key (⌘K / Ctrl K). Also on the doc list. */

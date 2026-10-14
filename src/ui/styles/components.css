@@ -390,6 +390,31 @@
   padding: 12px;
 }
 
+/* Verify's "Accept all": a slim bar above the cards (and in Changes' round results). */
+.accept-all-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.accept-all-bar .btn {
+  margin-left: auto;
+}
+
+.accept-all-note {
+  flex: 1 1 100%;
+}
+
+.round-results .accept-all-bar {
+  margin: 0 0 8px;
+}
+
 /* ---------------------------------------------------------------- cards */
 
 /* A thread is a GitHub review-comment box: white, hairline border, 6px radius. State is a small coloured mark

@@ -66,12 +66,13 @@ export function kindCaps(ds) {
 }
 
 /**
- * @typedef {{ key: 'review'|'changes'|'source'|'history', label: string, n: number, description: string }} ModeInfo
+ * @typedef {{ key: 'read'|'review'|'changes'|'source'|'history', label: string, n: number, description: string }} ModeInfo
  *   n: its number key (stable per mode key across kinds)
  */
 
 /** @type {readonly ModeInfo[]} */
 const FILE_MODES = Object.freeze([
+  { key: 'read', label: 'Read', n: 0, description: 'The latest version as its readers see it: no highlights, change marks or threads' },
   { key: 'review', label: 'Review', n: 1, description: 'Comment on the rendered document' },
   { key: 'changes', label: 'Changes', n: 2, description: 'What changed since your last review' },
   { key: 'source', label: 'Source', n: 3, description: 'The source with line numbers and its diff' },
@@ -98,6 +99,15 @@ export function modesFor(ds) {
 /** Whether the doc offers a mode. @param {DocState} ds @param {string} mode */
 export function hasMode(ds, mode) {
   return modesFor(ds).some((m) => m.key === mode);
+}
+
+/**
+ * Whether a mode shows the rendered doc (Read, Review, Changes), where text can be selected, picked or snipped;
+ * Source and History hide it.
+ * @param {string} mode
+ */
+export function showsDoc(mode) {
+  return mode === 'read' || mode === 'review' || mode === 'changes';
 }
 
 /** @param {string|null|undefined} iso */
@@ -495,6 +505,22 @@ export function agentPrompt(ds) {
   return `Run \`suiko feedback ${ds?.doc?.id ?? ''}\` and address it.`;
 }
 
+/**
+ * What "Accept all" accepts: the Verify queue's addressed and answered threads (the agent changed the doc, or answered
+ * a question). Declined threads stay in the queue: each needs the reviewer's own decision.
+ * @param {DocState} ds
+ * @returns {any[]}
+ */
+export function acceptableThreads(ds) {
+  return (ds?.threads || []).filter((/** @type {any} */ t) => (t.status === 'addressed' || t.status === 'answered')
+    && isVerifiable(t, ds.drafts));
+}
+
+/** The Verify queue's declined threads (left out of "Accept all"). @param {DocState} ds @returns {any[]} */
+export function declinedToVerify(ds) {
+  return (ds?.threads || []).filter((/** @type {any} */ t) => t.status === 'declined' && isVerifiable(t, ds.drafts));
+}
+
 /** Threads an Approve with "resolve addressed" would resolve. @param {DocState} ds */
 export function addressedThreads(ds) {
   return (ds?.threads || []).filter((/** @type {any} */ t) => ['addressed', 'answered'].includes(t.status));
@@ -570,7 +596,8 @@ export function reviewProgress(ds) {
 }
 
 /**
- * "v3 ready - 3 addressed, 1 needs you" when the head version answers a review.
+ * "v3 ready - 3 to verify, 1 needs you" when the head version answers a review. `addressed` counts the Verify queue
+ * (addressed, answered and declined threads waiting for the reviewer).
  * @param {DocState} ds
  */
 export function roundSummary(ds) {
@@ -581,7 +608,7 @@ export function roundSummary(ds) {
   const addressed = threads.filter((/** @type {any} */ t) => isVerifiable(t, ds.drafts)).length;
   const needs = threads.filter((/** @type {any} */ t) => t.status === 'needs_input').length;
   const parts = [];
-  if (addressed) parts.push(`${addressed} addressed`);
+  if (addressed) parts.push(`${addressed} to verify`);
   if (needs) parts.push(`${needs} needs you`);
   return { text: parts.length ? `v${head} ready - ${parts.join(', ')}` : `v${head} ready`, addressed, needs, version: head };
 }

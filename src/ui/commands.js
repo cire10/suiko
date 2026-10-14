@@ -17,16 +17,16 @@
 // The palette's "Recent" group (the last commands run) is kept in localStorage.
 
 import {
-  acceptDecline, acceptFocused, applyTheme, closeSession, compareVersions, copyAgentPrompt, copyReviewLink,
+  acceptAll, acceptDecline, acceptFocused, applyTheme, closeSession, compareVersions, copyAgentPrompt, copyReviewLink,
   copySpecPath, cycleTheme, docPath, focusItem, focusedThread, markAllChangesSeen, navChange, navigate, navThread,
   openComposer, openDialog, openSubmit, readSeen, reloadFrame, reopenFocused, scrollToSrid, seenStorageKey,
-  selectionAction, setMode, showThreads, snipScreen, startRecording, startReply, stepVersion, submitComposer,
+  selectionAction, setCompareLayout, setMode, showThreads, snipScreen, startRecording, startReply, stepVersion, submitComposer,
   submitWithVerdict, switchVersion, toggleBaseKind, toggleHidden, toggleNav, togglePick, toggleSidebar,
   toggleSingleKeys, toggleSnip,
 } from './actions.js';
 import {
-  actorLabel, agentName, canSendNow, filterCounts, FILTERS, hasMode, kindCaps, modesFor, numericVersion, panelItems, relTime,
-  staleApproveText, statusInfo, threadRowTitle, versionNumbers,
+  acceptableThreads, actorLabel, agentName, canSendNow, declinedToVerify, filterCounts, FILTERS, hasMode, kindCaps, modesFor, numericVersion, panelItems, relTime,
+  showsDoc, staleApproveText, statusInfo, threadRowTitle, versionNumbers,
 } from './model.js';
 
 /** @typedef {import('./state.js').UiState} UiState */
@@ -139,9 +139,9 @@ function threadWhen(s) {
   return focusedThread() ? true : 'focus a thread first (j / k, or click its card)';
 }
 
-/** Review / Changes for commands that show something in the rendered doc. @param {UiState} s */
+/** A mode that shows the rendered doc (Read, Review, Changes) for commands that show something in it. @param {UiState} s */
 function toDocMode(s) {
-  if (s.mode !== 'review' && s.mode !== 'changes') setMode('review');
+  if (!showsDoc(s.mode)) setMode('review');
 }
 
 /** "Go to thread…": every thread and new-thread draft, in document order. @param {UiState} s @returns {PaletteItem[]} */
@@ -289,9 +289,10 @@ const MODE_COMMANDS = modesFor(null).map((m) => /** @type {Command} */ ({
   title: `Switch to ${m.label} mode`,
   category: 'Navigate',
   description: (s) => modesFor(s.ds).find((x) => x.key === m.key)?.description ?? m.description,
-  keywords: [m.label.toLowerCase(), 'mode', 'tab', 'view', ...(m.key === 'review' ? ['files'] : [])],
+  keywords: [m.label.toLowerCase(), 'mode', 'tab', 'view', ...(m.key === 'review' ? ['files'] : []),
+    ...(m.key === 'read' ? ['clean', 'latest', 'final', 'preview', 'plain', 'reader'] : [])],
   keys: [String(m.n)],
-  help: { row: 'modes', label: 'Review / Changes / Source / History' },
+  help: { row: 'modes', label: 'Read / Review / Changes / Source / History' },
   when: (s) => (s.ds && !hasMode(s.ds, m.key) ? 'not in a code review' : s.mode === m.key ? 'shown now' : true),
   run: () => setMode(m.key),
 }));
@@ -374,7 +375,7 @@ export const COMMANDS = Object.freeze([
     keywords: ['image', 'diagram', 'table', 'code', 'element', 'select'],
     keys: [KEYS.pick],
     help: { label: 'Pick an image, diagram, table or code block ([ ] parent / child, Shift-drag a region, Esc exits)' },
-    when: (s) => capturable(s, s.mode === 'review' || s.mode === 'changes' ? undefined : 'switch to Review or Changes first'),
+    when: (s) => capturable(s, showsDoc(s.mode) ? undefined : 'switch to Review or Changes first'),
     run: () => togglePick(),
   },
   {
@@ -503,6 +504,27 @@ export const COMMANDS = Object.freeze([
     },
     run: () => {
       acceptDecline();
+    },
+  },
+  {
+    id: 'accept-all',
+    title: 'Accept all addressed threads',
+    category: 'Review',
+    description: (s) => {
+      const n = acceptableThreads(s.ds).length;
+      const d = declinedToVerify(s.ds).length;
+      return `${n} addressed or answered in Verify${d ? `; ${d} declined stay for you to decide` : ''}. You can undo it`;
+    },
+    keywords: ['accept', 'resolve', 'all', 'everything', 'bulk', 'verify', 'addressed', 'answered'],
+    keys: ['shift+X'],
+    help: { label: 'Accept all addressed or answered threads in Verify (Undo in the toast)' },
+    when: (s) => {
+      if (!s.ds) return 'open a document first';
+      if (s.version === 'live') return READ_ONLY;
+      return acceptableThreads(s.ds).length ? true : 'nothing addressed or answered is waiting in Verify';
+    },
+    run: () => {
+      acceptAll();
     },
   },
   {
@@ -662,6 +684,33 @@ export const COMMANDS = Object.freeze([
     placeholder: 'Compare from which version?',
     when: (s) => (versionNumbers(s.ds).length > 1 ? (busyEditing(s) ? BUSY : true) : 'there is only one version'),
     items: compareItems,
+  },
+  {
+    id: 'compare-split',
+    title: 'Compare side by side',
+    category: 'View',
+    description: 'Changes: the older version beside the newer one, scrolled together (removed text in red, added in green)',
+    keywords: ['split', 'two columns', 'diff', 'before after', 'compare', 'versions', 'parallel'],
+    when: (s) => {
+      if (s.ds && !kindCaps(s.ds).frame) return 'a code review has its own split diff';
+      if (s.narrow) return 'needs a wider window';
+      if (versionNumbers(s.ds).length < 2) return 'there is only one version';
+      return s.compareLayout === 'split' && s.mode === 'changes' ? 'shown now' : true;
+    },
+    run: () => setCompareLayout('split'),
+  },
+  {
+    id: 'compare-inline',
+    title: 'Compare inline',
+    category: 'View',
+    description: 'Changes: what changed drawn over the newer version',
+    keywords: ['unified', 'overlay', 'single', 'diff', 'compare'],
+    when: (s) => (s.ds && !kindCaps(s.ds).frame ? 'a code review has its own diff layouts'
+      : s.compareLayout !== 'split' && s.mode === 'changes' ? 'shown now' : true),
+    run: (s) => {
+      setCompareLayout('inline');
+      if (s.mode !== 'changes') setMode('changes');
+    },
   },
   ...FILTER_COMMANDS,
 

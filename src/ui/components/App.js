@@ -6,8 +6,10 @@
 // Between 900 and 1199 px (e.g. a desktop app's browser pane) the outline rail is collapsed behind the menu button
 // unless the user opened it (remembered), and the side panel is narrower, so the doc keeps most of the width.
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
+// Read mode shows the doc alone: no thread panel (the side panel appears only for a comment being written).
 // The doc iframe stays mounted in every mode, so switching between Review / Changes and Source / History never
-// reloads the document.
+// reloads the document. Changes side by side adds the older version's frame after it in the DOM, placed on its
+// left by CSS grid, so the newer version's iframe never moves.
 // The Outline rail setting (Auto / Always / Never) and the menu button's choice for the page decide whether the rail
 // is beside the doc from 900 px up (railShown).
 // While a screen snip (Shift+B) waits for the reviewer in the macOS picker, a floating hint says what to do; it
@@ -16,12 +18,13 @@
 // belongs to the doc view. One dialog shows at a time.
 
 import { html } from 'preact-htm';
-import { navigate, railShown, toggleNav, toggleSidebar } from '../actions.js';
+import { navigate, railShown, splitShown, toggleNav, toggleSidebar } from '../actions.js';
 import { docKindOf } from '../model.js';
 import { store, useStore } from '../state.js';
 import { Banners } from './Banners.js';
 import { ChangesView } from './ChangesView.js';
 import { CommandPalette } from './CommandPalette.js';
+import { ComparePane } from './ComparePane.js';
 import { Composer } from './Composer.js';
 import { DocFrame } from './DocFrame.js';
 import { HelpOverlay } from './HelpOverlay.js';
@@ -85,6 +88,8 @@ function DocView() {
     drawer: st.drawer,
     nav: st.nav,
     sidebar: st.sidebar,
+    composing: !!st.composer,
+    split: splitShown(st),
     dialog: st.dialog,
     railTitle: docKindOf(st.ds) === 'code' ? 'Files' : 'Outline',
   }));
@@ -96,6 +101,9 @@ function DocView() {
     </div>`;
   }
   if (!s.hasDs) return html`<div class="page-message"><span class="spinner"></span> Loading document…</div>`;
+  // Read mode has no thread panel: the side panel (drawer) shows only while a comment is being written there
+  const reading = s.mode === 'read';
+  const panelShown = reading ? s.composing : s.sidebar;
   const cls = [
     'doc-view',
     `mode-${s.mode}`,
@@ -103,9 +111,9 @@ function DocView() {
     !s.narrow && s.medium ? 'is-medium' : '',
     !s.narrow && s.medium && s.rail ? 'rail-open' : '',
     !s.narrow && !s.medium && !s.rail ? 'rail-closed' : '',
-    s.drawer ? 'drawer-open' : '',
+    s.drawer && (!reading || s.composing) ? 'drawer-open' : '',
     s.nav ? 'nav-open' : '',
-    s.sidebar ? '' : 'sidebar-hidden',
+    panelShown ? '' : 'sidebar-hidden',
   ].filter(Boolean).join(' ');
   return html`<div class=${cls} data-mode=${s.mode}>
     <${TopBar} />
@@ -116,15 +124,16 @@ function DocView() {
           <button type="button" class="icon-btn" aria-label=${`Close ${s.railTitle.toLowerCase()}`} onClick=${toggleNav}><${Icon} name="close" /></button></div>` : null}
         <${RailSlot} />
       </aside>
-      <main class="center" aria-label="Document">
+      <main class=${`center ${s.split ? 'is-split' : ''}`} aria-label="Document">
         <${MainSlot} />
         ${s.mode === 'source' ? html`<${SourceView} />` : null}
         ${s.mode === 'history' ? html`<${HistoryView} />` : null}
+        ${s.split ? html`<${ComparePane} />` : null}
       </main>
       <aside class="rail-right" aria-label="Review panel" id="sr-side">
         <${SidePanel} narrow=${s.narrow} mode=${s.mode} />
       </aside>
-      ${s.narrow && (s.drawer || s.nav)
+      ${s.narrow && ((s.drawer && (!reading || s.composing)) || s.nav)
         ? html`<div class="scrim" onClick=${() => store.set({ drawer: false, nav: false })} aria-hidden="true"></div>` : null}
     </div>
     <${StatusBar} />
@@ -168,6 +177,6 @@ function SidePanel({ narrow, mode }) {
       <button type="button" role="tab" aria-selected=${pane === 'threads'} class=${pane === 'threads' ? 'active' : ''}
         onClick=${() => store.set({ sidePane: 'threads' })}>Threads</button>
     </div>` : null}
-    ${showChanges ? KindSide({ ds }) ?? html`<${ChangesView} />` : html`<${ThreadPanel} />`}
+    ${mode === 'read' ? null : showChanges ? KindSide({ ds }) ?? html`<${ChangesView} />` : html`<${ThreadPanel} />`}
   </div>`;
 }

@@ -215,6 +215,19 @@ export function registerApiRoutes(router, deps) {
     sendJson(res, 200, review);
   });
 
+  // Accept all (the Verify queue) and its Undo: {threads: ['t1', 't3']} -> {resolved, unchanged} / {reopened, unchanged}
+  router.post(`${D}/threads/resolve`, async ({ req, res, params }) => {
+    const { wsId, docId } = await resolveDoc(params);
+    const ids = threadIds((await readJsonBody(req)).threads);
+    sendJson(res, 200, await engine.call('resolveThreads', wsId, docId, ids, { by: await engine.reviewer(wsId) }));
+  });
+
+  router.post(`${D}/threads/unresolve`, async ({ req, res, params }) => {
+    const { wsId, docId } = await resolveDoc(params);
+    const ids = threadIds((await readJsonBody(req)).threads);
+    sendJson(res, 200, await engine.call('unresolveThreads', wsId, docId, ids, { by: await engine.reviewer(wsId) }));
+  });
+
   router.post(`${D}/threads/:tid/resolve`, async ({ req, res, params }) => {
     const { wsId, docId } = await resolveDoc(params);
     const body = await readJsonBody(req);
@@ -279,7 +292,8 @@ export function registerApiRoutes(router, deps) {
 
   router.get(`${D}/diff`, async ({ res, params, query }) => {
     const { wsId, docId, doc } = await resolveDoc(params);
-    sendJson(res, 200, await engine.call('changes', wsId, docId, diffRange(doc, query)));
+    // the review UI also places the changes in the older version (Changes side by side)
+    sendJson(res, 200, await engine.call('changes', wsId, docId, { ...diffRange(doc, query), oldSide: true }));
   });
 
   router.get(`${D}/diff/source`, async ({ res, params, query }) => {
@@ -554,6 +568,22 @@ function diffRange(doc, query) {
 function itemId(id) {
   if (typeof id !== 'string' || !ITEM_ID_RE.test(id)) throw notFound(`unknown id: ${id}`);
   return id;
+}
+
+/** At most this many threads in one bulk request (Accept all). */
+const MAX_BULK_THREADS = 1000;
+
+/**
+ * The thread ids of a bulk request body (`threads`): a non-empty array of ids, else 400.
+ * @param {unknown} list
+ * @returns {string[]}
+ */
+function threadIds(list) {
+  if (!Array.isArray(list) || !list.length || list.length > MAX_BULK_THREADS
+    || !list.every((t) => typeof t === 'string' && ITEM_ID_RE.test(t))) {
+    throw invalid(`threads must be an array of 1 to ${MAX_BULK_THREADS} thread ids`);
+  }
+  return [...new Set(/** @type {string[]} */ (list))];
 }
 
 /**

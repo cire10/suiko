@@ -7,7 +7,7 @@
 //   only H1 (the spec title would otherwise prefix every section).
 // - Linked threads and `other` explanations per hunk, plus guard badges of the version.
 // - Changed assets (images) as a before / after pair.
-// - "Round results": the agent's replies in this range, with Accept / Reopen.
+// - "Round results": the agent's replies in this range, with Accept / Reopen, and Accept all (AcceptAllBar).
 
 import { html, useEffect, useMemo, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
@@ -21,6 +21,7 @@ import {
 import { store, useStore } from '../state.js';
 import { contentUrl, scrollIntoViewSoft, wordParts } from '../util.js';
 import { Chip } from './common.js';
+import { AcceptAllBar } from './ThreadPanel.js';
 
 /** Hunks longer than this many display lines are collapsed behind "Show more". */
 const HUNK_LINES = 6;
@@ -92,6 +93,7 @@ export function ChangesView() {
     outline: st.guest.outline.length ? st.guest.outline : st.targets?.outline,
     seenKey: seenStorageKey(st),
     seenRev: st.seenRev,
+    busyThreads: st.busyThreads,
   }));
   const r = /** @type {any} */ (s.route);
   const seen = useMemo(() => readSeen(s.seenKey), [s.seenKey, s.seenRev]);
@@ -186,6 +188,7 @@ export function ChangesView() {
     </section>` : null}
     ${results.length ? html`<section class="round-results" aria-label="Round results">
       <h3 class="group-title">Round results</h3>
+      <${AcceptAllBar} ds=${ds} busy=${s.busyThreads} live=${s.version === 'live'} />
       ${results.map(({ thread: t, comment: c }) => {
         const st = statusInfo(t, agent);
         const verifiable = isVerifiable(t, ds.drafts);

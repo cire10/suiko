@@ -7,20 +7,26 @@
 //   - a 3 px bar left of every element in `srids` (green for add, amber for mod / changed assets);
 //   - `sr-ins` CSS highlights on the inserted/replaced `words` (searched inside their srid element, else document);
 //   - a "⊖ N lines removed" tab before `insertBefore` (pure deletions; end of document when null) and a
-//     "⊖ was" tab on modified hunks that removed text (above the element when there is a margin, else after the
-//     end of its first line, so it never covers text). For elements in a table cell (and for <tr>s) the tab and
+//     "⊖ was" tab on modified hunks that removed text (both above the element when there is a margin, else after
+//     the end of its first line, so they never cover text). For elements in a table cell (and for <tr>s) the tab and
 //     badges stay inside that cell: after the first line when they fit, else compact ("⊖" / "⊖ N") in the cell's
 //     top-right corner, never over a neighbouring cell's text. A tab toggles a popover (in the closed shadow root) showing
 //     `deleted.html` (sanitised: no scripts, frames, forms, styles, event handlers or javascript: URLs) or
 //     `deleted.text` as monospace;
 //   - badges with the linked thread ids (click -> activate {id}) or an orange 'other' badge whose title is the reason.
 // Hunk positions (document coordinates of the first visible bar/tab, null when hidden) are exposed to Main.
+//
+// The older version of a side-by-side comparison gets the same payload with `side: 'old'` and draws each hunk's
+// `oldSide` ({srids, words, insertBefore, insertAfter}, placed in that version's render) instead: `sr-del`
+// highlights (red, struck through) on the removed / replaced words, a red bar left of every block that lost or
+// changed text, and a green "⊕ N lines added" tab where an added hunk's lines go in the newer version (before
+// `insertBefore`, else at the end). No thread badges, no popovers: the removed text is right there.
 
 const ChangesOverlay = (() => {
   /**
-   * @typedef {{id: string, kind: 'hunk'|'asset', op: 'add'|'del'|'mod', els: Element[], before: Element|null,
-   *   deleted: {text?: string, html?: string|null, lines?: number}|null, oldLines: number, threads: string[],
-   *   other: string|null, title: string}} Mark
+   * @typedef {{id: string, kind: 'hunk'|'asset', op: 'add'|'del'|'mod', side: 'new'|'old', els: Element[],
+   *   before: Element|null, deleted: {text?: string, html?: string|null, lines?: number}|null, oldLines: number,
+   *   newLines: number, threads: string[], other: string|null, title: string}} Mark
    */
   /** @type {any} */
   let changes = null;
@@ -28,6 +34,8 @@ const ChangesOverlay = (() => {
   let marks = [];
   /** @type {Range[]} */
   let insRanges = [];
+  /** @type {Range[]} removed / replaced words, in the older version of a side-by-side comparison */
+  let delRanges = [];
   let hidden = false;
   /** @type {Record<string, number|null>} */
   let positions = {};
@@ -63,10 +71,35 @@ const ChangesOverlay = (() => {
   function resolve() {
     marks = [];
     insRanges = [];
+    delRanges = [];
     if (changes) {
+      const oldSide = changes.side === 'old';
       for (const h of changes.hunks) {
         if (!h || typeof h !== 'object' || h.id == null) continue;
         const op = h.op === 'add' || h.op === 'del' ? h.op : 'mod';
+        if (oldSide) {
+          const o = h.oldSide && typeof h.oldSide === 'object' ? h.oldSide : null;
+          if (!o) continue;
+          for (const w of Array.isArray(o.words) ? o.words : []) {
+            const r = wordRange(w);
+            if (r) delRanges.push(r);
+          }
+          marks.push({
+            id: String(h.id),
+            kind: 'hunk',
+            op,
+            side: 'old',
+            els: elementsFor(o.srids),
+            before: op === 'add' && o.insertBefore && o.insertBefore.srid != null ? elementBySrid(o.insertBefore.srid) : null,
+            deleted: null,
+            oldLines: 0,
+            newLines: h.new && Number.isFinite(Number(h.new.lines)) ? Number(h.new.lines) : 0,
+            threads: [],
+            other: null,
+            title: `${h.id}: ${op === 'add' ? 'added in the newer version' : op === 'del' ? 'removed' : 'changed'}`,
+          });
+          continue;
+        }
         for (const w of Array.isArray(h.words) ? h.words : []) {
           const r = wordRange(w);
           if (r) insRanges.push(r);
@@ -76,10 +109,12 @@ const ChangesOverlay = (() => {
           id: String(h.id),
           kind: 'hunk',
           op,
+          side: 'new',
           els: elementsFor(h.srids),
           before: h.insertBefore && h.insertBefore.srid != null ? elementBySrid(h.insertBefore.srid) : null,
           deleted: h.deleted && typeof h.deleted === 'object' ? h.deleted : null,
           oldLines: h.old && Number.isFinite(Number(h.old.lines)) ? Number(h.old.lines) : 0,
+          newLines: 0,
           threads: Array.isArray(h.threads) ? h.threads.map(String) : [],
           other,
           title: `${h.id}: ${op === 'add' ? 'added' : op === 'del' ? 'removed' : 'changed'}` +
@@ -88,13 +123,19 @@ const ChangesOverlay = (() => {
       }
       for (const a of Array.isArray(changes.assets) ? changes.assets : []) {
         if (!a || typeof a !== 'object') continue;
-        const els = elementsFor(a.srids);
+        const els = elementsFor(oldSide ? a.oldSrids : a.srids);
         if (!els.length) continue;
-        marks.push({ id: 'asset:' + String(a.path || ''), kind: 'asset', op: 'mod', els, before: null, deleted: null,
-          oldLines: 0, threads: [], other: null, title: 'Image changed: ' + String(a.path || '') });
+        marks.push({ id: 'asset:' + String(a.path || ''), kind: 'asset', op: 'mod', side: oldSide ? 'old' : 'new', els,
+          before: null, deleted: null, oldLines: 0, newLines: 0, threads: [], other: null,
+          title: 'Image changed: ' + String(a.path || '') });
       }
     }
+    paintWords();
+  }
+
+  function paintWords() {
     Highlights.set('sr-ins', hidden ? [] : insRanges);
+    Highlights.set('sr-del', hidden ? [] : delRanges);
   }
 
   /** Removes anything active from deleted HTML before it is shown in the overlay. @param {string} html */
@@ -158,8 +199,9 @@ const ChangesOverlay = (() => {
   /**
    * Where a row of change marks (the tab, then the badges) goes, in viewport coordinates:
    *   'above' / 'inline'  the row starts at (x, y) and grows to the right (tab 18 px high, badges centred on it);
-   *   'cell'              compact, inside the table cell / row `box`: right-aligned to x (the box's right edge, inset)
-   *                       from y (its top edge, inset) and growing to the left, wrapping inside the box.
+   *   'cell'              compact, inside the table cell / row (or the changed element itself, when nothing else
+   *                       fits) `box`: right-aligned to x (the box's right edge, inset) from y (its top edge, inset)
+   *                       and growing to the left, wrapping inside the box.
    * @typedef {{where: 'above'|'inline'|'cell', x: number, y: number, box?: DOMRect}} RowAnchor
    */
 
@@ -221,8 +263,8 @@ const ChangesOverlay = (() => {
   /**
    * Where the row of a changed element's tab / badges goes: just above the element when the space there is free
    * (a margin of at least 18 px), else right after the end of its first text line, so the row does not cover text
-   * of the line above (list items, consecutive paragraphs). Falls back to "above" when that line has no room left
-   * inside the element's own box (a full first line).
+   * of the line above (list items, consecutive paragraphs). When that line has no room left inside the element's own
+   * box (a full first line, a narrow column), the row goes compact into the element's top-right corner.
    * Inside a table cell, "above" is used only while it stays inside the cell (a later paragraph of the cell), and
    * the fallback is the cell's top-right corner ('cell', compact) instead: never over a neighbouring cell's text.
    * @param {Element} el first visible changed element @param {DOMRect} first its client rect
@@ -244,7 +286,10 @@ const ChangesOverlay = (() => {
     if (line && line.right + 6 + width <= limit) {
       return { where: 'inline', x: line.right + 6, y: line.top + Math.max(0, (line.height - 16) / 2) };
     }
-    return cell ? cellCorner(cell) : above;
+    if (cell) return cellCorner(cell);
+    // No room above or after the first line (a narrow column, a full line): compact, in the element's own top-right
+    // corner, rather than over the text of the element before it.
+    return { where: 'cell', x: first.right - 2, y: first.top + 1, box: first };
   }
 
   /**
@@ -292,15 +337,17 @@ const ChangesOverlay = (() => {
           firstEl = el;
         }
         if (hidden) continue;
-        const bar = pool.el(`bar:${m.id}:${sridOf(el)}`, 'bar ' + (m.op === 'add' ? 'add' : 'mod'));
+        const bar = pool.el(`bar:${m.id}:${sridOf(el)}`, 'bar ' + (m.side === 'old' ? 'del' : m.op === 'add' ? 'add' : 'mod'));
         Overlay.place(bar, Math.max(1, r.left - 8), r.top, null, r.height);
       }
 
-      // The tab: before the next element for a pure deletion, on the changed element's row for a modification.
-      const del = m.kind === 'hunk' && m.op === 'del';
+      // The tab: before the next element for a pure deletion, on the changed element's row for a modification; on
+      // the older side of a side-by-side comparison, where an added hunk's lines go.
+      const old = m.side === 'old';
+      const del = m.kind === 'hunk' && (old ? m.op === 'add' : m.op === 'del');
       /** @type {RowAnchor|null} */
-      let anchor = del && (!!m.deleted || m.oldLines > 0) ? deletionAnchor(m) : null;
-      const withTab = del ? !!anchor : m.kind === 'hunk' && hasRemovedText(m) && !!first;
+      let anchor = del && (old ? m.newLines > 0 : !!m.deleted || m.oldLines > 0) ? deletionAnchor(m) : null;
+      const withTab = del ? !!anchor : !old && m.kind === 'hunk' && hasRemovedText(m) && !!first;
       if (!first && !anchor) {
         if (m.kind === 'hunk') pos[m.id] = null;
         continue;
@@ -313,11 +360,22 @@ const ChangesOverlay = (() => {
       // Build the row (tab, then badges with the linked thread ids / the 'other' reason) and measure it.
       /** @type {HTMLElement[]} */
       const row = [];
-      const lines = m.deleted && Number(m.deleted.lines) ? Number(m.deleted.lines) : m.oldLines;
+      const lines = old ? m.newLines : m.deleted && Number(m.deleted.lines) ? Number(m.deleted.lines) : m.oldLines;
       const removed = `${lines} line${lines === 1 ? '' : 's'} removed`;
       /** @type {HTMLElement|null} */
       let tabEl = null;
-      if (withTab) {
+      if (withTab && old) {
+        // informational: the added lines are shown (green) in the newer version beside this one
+        tabEl = pool.el('tab:' + m.id, 'tab add');
+        tabEl.textContent = `⊕ ${lines} line${lines === 1 ? '' : 's'} added`;
+        tabEl.title = `${m.id}: ${lines} line${lines === 1 ? '' : 's'} added here in the newer version`;
+        tabEl.setAttribute('role', 'note');
+        tabEl.setAttribute('aria-label', tabEl.title);
+        tabEl.removeAttribute('tabindex');
+        tabEl.onclick = null;
+        tabEl.onkeydown = null;
+        row.push(tabEl);
+      } else if (withTab) {
         tabEl = pool.el('tab:' + m.id, 'tab' + (openKey === m.id ? ' open' : ''));
         tabEl.textContent = del ? `⊖ ${removed}` : '⊖ was';
         tabEl.title = del ? `${removed}: show the removed content` : 'Show the replaced text';
@@ -352,12 +410,17 @@ const ChangesOverlay = (() => {
       if (!anchor) {
         const width = row.reduce((w, e) => w + (e.offsetWidth || 24) + GAP, -GAP);
         anchor = rowAnchor(/** @type {Element} */ (firstEl), /** @type {DOMRect} */ (first), Math.max(0, width));
+      } else if (del && m.before && anchor.where === 'above') {
+        // Above the next element only where there is room (a margin); else after the end of its first line, so the
+        // tab never covers the line before it (consecutive list items, paragraphs without spacing).
+        const width = row.reduce((w, e) => w + (e.offsetWidth || 24) + GAP, -GAP);
+        anchor = rowAnchor(m.before, m.before.getBoundingClientRect(), Math.max(0, width));
       }
 
       if (anchor.where === 'cell') {
         // Compact, inside the cell: right-aligned from its top-right corner, growing left, wrapping downwards while
         // the next row still fits in the cell (else squeezed against its left edge).
-        if (tabEl) tabEl.textContent = del ? `⊖ ${lines}` : '⊖';
+        if (tabEl) tabEl.textContent = old ? `⊕ ${lines}` : del ? `⊖ ${lines}` : '⊖';
         for (const e of row) e.classList.add('compact');
         const box = /** @type {DOMRect} */ (anchor.box);
         let x = anchor.x;
@@ -417,7 +480,7 @@ const ChangesOverlay = (() => {
     setHidden(h) {
       hidden = !!h;
       if (hidden) Overlay.popover.hide();
-      Highlights.set('sr-ins', hidden ? [] : insRanges);
+      paintWords();
       Scheduler.requestLayout();
     },
     positions() {
@@ -436,7 +499,7 @@ const ChangesOverlay = (() => {
     },
     /** Debug summary. */
     debug() {
-      return marks.map((m) => ({ id: m.id, op: m.op, els: m.els.length, before: !!m.before, threads: m.threads, other: m.other }));
+      return marks.map((m) => ({ id: m.id, op: m.op, side: m.side, els: m.els.length, before: !!m.before, threads: m.threads, other: m.other }));
     },
   };
 })();

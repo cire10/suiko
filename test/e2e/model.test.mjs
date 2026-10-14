@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  agentPrompt, anchorAt, anchorChipParts, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
+  acceptableThreads, declinedToVerify, showsDoc, agentPrompt, anchorAt, anchorChipParts, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
   canSendNow, coalesceWordParts, docKindOf, hasMode, kindCaps, modesFor, defaultBase, defaultVerdict, diffLines, draftVersion, fuzzyMatch, groupHunks,
   highlightParts, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isSingleKeyCombo,
   isVerifiable, keyLabel, linesLabel, matchRow, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary,
@@ -124,7 +124,7 @@ test('round summary and round results count the agent replies of the range', () 
       thread('t3', 'open', [{ by: human, body: 'a', version: 1 }]),
     ],
   });
-  assert.equal(roundSummary(ds)?.text, 'v2 ready - 1 addressed, 1 needs you');
+  assert.equal(roundSummary(ds)?.text, 'v2 ready - 1 to verify, 1 needs you');
   assert.deepEqual(roundResults(ds, 1, 2).map((r) => r.thread.id), ['t1', 't2']);
   assert.deepEqual(roundResults(ds, 2, 2), []);
 });
@@ -460,12 +460,41 @@ test('doc kinds: docKindOf, kindCaps and modesFor (code reviews: no frame, no lo
   assert.equal(kindCaps(snapshot).applyNow, false, 'a snapshot agent applies suggestions when it revises');
   assert.equal(kindCaps(snapshot).frame, true);
   assert.deepEqual(kindCaps(code), { frame: false, pick: false, snip: false, hide: false, pageErrors: false, applyNow: true, liveBanners: false, locks: false });
-  assert.deepEqual(modesFor(file).map((m) => [m.key, m.label, m.n]), [['review', 'Review', 1], ['changes', 'Changes', 2], ['source', 'Source', 3], ['history', 'History', 4]]);
+  assert.deepEqual(modesFor(file).map((m) => [m.key, m.label, m.n]),
+    [['read', 'Read', 0], ['review', 'Review', 1], ['changes', 'Changes', 2], ['source', 'Source', 3], ['history', 'History', 4]]);
   assert.deepEqual(modesFor(snapshot), modesFor(file));
   assert.deepEqual(modesFor(code).map((m) => [m.key, m.label, m.n]), [['review', 'Files', 1], ['changes', 'Changes', 2], ['history', 'History', 4]]);
   assert.equal(hasMode(code, 'source'), false);
+  assert.equal(hasMode(code, 'read'), false, 'a code review has no rendered doc to read');
   assert.equal(hasMode(code, 'review'), true);
   assert.equal(hasMode(file, 'source'), true);
+  assert.equal(hasMode(file, 'read'), true);
+  // the modes that show the rendered doc (select, pick, snip work there)
+  assert.deepEqual(['read', 'review', 'changes', 'source', 'history'].filter(showsDoc), ['read', 'review', 'changes']);
+});
+
+test('Accept all: the addressed and answered threads of the Verify queue; declines stay', () => {
+  const replied = (/** @type {string} */ id, /** @type {string} */ status) => thread(id, status,
+    [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'done', version: 2, status }]);
+  const ds = docState({
+    threads: [
+      replied('t1', 'addressed'),
+      replied('t2', 'answered'),
+      replied('t3', 'declined'),
+      thread('t4', 'open', [{ by: human, body: 'still open', version: 1 }]),
+      thread('t5', 'resolved', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'b', version: 2, status: 'addressed' }]),
+      // the reviewer answered after the agent: not in Verify any more
+      thread('t6', 'addressed', [{ by: agent, body: 'done', version: 2, status: 'addressed' }, { by: human, body: 'but...', version: 2 }]),
+      // a reply draft pending on it: not in Verify either
+      replied('t7', 'addressed'),
+      thread('t8', 'needs_input', [{ by: agent, body: 'which?', version: 2, status: 'needs_input' }]),
+    ],
+    drafts: { schema: 1, items: [{ id: 'd1', kind: 'reply', thread: 't7', body: 'hm' }] },
+  });
+  assert.deepEqual(acceptableThreads(ds).map((t) => t.id), ['t1', 't2']);
+  assert.deepEqual(declinedToVerify(ds).map((t) => t.id), ['t3']);
+  assert.deepEqual(acceptableThreads(null), []);
+  assert.deepEqual(declinedToVerify(docState()), []);
 });
 
 test('code anchors: card targets name the file, side and lines; panel order is by file', () => {
