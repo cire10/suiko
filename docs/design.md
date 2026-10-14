@@ -225,8 +225,9 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
 PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
-  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
-NEXT: edits -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
+  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
+NEXT: edits, if any -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
 ```
 After stdout has flushed, the review is marked delivered. The UI shows "Delivered to claude 14:02 · revising…".
 
@@ -304,7 +305,8 @@ Reviewer summary: Close. Caption still unclear.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L173-199)
 DECISIONS to keep true: D1 (t1) 30 s reuse-detection grace window · D2 (t3) retries: up to 5, exponential backoff, full jitter
-NEXT: edits -> specreview revise token-service --replies - -> specreview wait token-service (background)
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
+NEXT: edits, if any -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
 ```
 
 ### 3.12 Approve and finalise
@@ -1196,7 +1198,7 @@ The UI renders them as a unified table or a two-column table with word highlight
 | Command | Behaviour | Exit |
 |---|---|---|
 | `open <file...> [--title T] [--browser pane\|system\|none] [--json]` | Tracks the doc and records v1 if it is new. Ensures the daemon is running. Prints the URL, and a warning if the working copy is dirty. | 0 |
-| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Exits 3 at once if the working copy differs from head (prints `run specreview revise` first), unless `--allow-dirty`. Registers a waiter with a 10 s heartbeat. Returns immediately if undelivered reviews exist. Otherwise watches `reviews/` (fs.watch plus a 2 s poll) until a review or a `session.closed` event arrives. Prints the packet covering **all** undelivered reviews and marks them delivered. | 0 / 2 / 3 / 5 |
+| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--allow-unanswered] [--json]` | Exits 3 at once if the working copy differs from head (prints `run specreview revise` first), unless `--allow-dirty`; and while a thread this agent received has no reply on it (it is still open, or the reviewer spoke last), unless `--allow-unanswered`: answers belong on the threads, where the reviewer reads them, not in the agent's chat. Registers a waiter with a 10 s heartbeat. Returns immediately if undelivered reviews exist. Otherwise watches `reviews/` (fs.watch plus a 2 s poll) until a review or a `session.closed` event arrives. Prints the packet covering **all** undelivered reviews and marks them delivered. | 0 / 2 / 3 / 5 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Same packet as `wait`, without blocking. Marks it delivered unless `--peek`. `--all-open` also lists threads that are waiting on the reviewer. | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Applies suggestions verbatim (see 9.4) and stages tagged edits. | 0 / 3 |
 | `edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Thread-tagged exact replace with Edit-tool semantics: `old` must be unique unless `--all`. | 0 / 3 |
@@ -1378,7 +1380,7 @@ Body:
 4. **On a packet:**
    - SUGGESTION: run `specreview apply <doc> <tid>`. Never retype it.
    - Change: edit with `src>` as old_string; keep the diff minimal and local.
-   - Question: answer in the reply; edit only if the answer belongs in the spec (`answered` vs `addressed`).
+   - Question: answer in the thread's reply, where the reviewer reads it; edit only if the answer belongs in the spec (`answered` vs `addressed`).
    - Disagree: `declined` with a reason.
    - Unclear: `needs_input` with a precise question.
    - Image or diagram comments: Read the crop. Edit the diagram source (mermaid fence, inline SVG, or the generator script), then regenerate.

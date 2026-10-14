@@ -472,7 +472,7 @@ The MCP tool `suiko_snapshot` does the same for public pages only.
 | `suiko last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
 | `suiko snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page (uses the network); run it again to record the next version. See [Snapshot a web page](#snapshot-a-web-page) |
 | `suiko review [<range>] [--uncommitted \| --staged \| --base <ref> [--committed] \| --commit <sha> \| --pr <n\|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T]` | Open a code review of your changes or of a GitHub PR; run it again to record the next round. See [Code review](#code-review) |
-| `suiko wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted; print the packet |
+| `suiko wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--allow-unanswered] [--json]` | Block until a review is submitted; print the packet. Refuses while a thread the agent received has no reply on it |
 | `suiko feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `suiko apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
 | `suiko edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Exact replace tagged to threads (`--stdin` for a JSON batch) |
@@ -500,7 +500,7 @@ The MCP tool `suiko_snapshot` does the same for public pages only.
 
 Global: `--as <name>` sets the agent name (default: `$SPECREVIEW_AGENT`, else `claude` inside Claude Code, else `agent`). Environment: `SPECREVIEW_HOME` (runtime state, default `~/.specreview`), `SPECREVIEW_PORT` (UI port; documents use the next port), `SPECREVIEW_OFFLINE=1` (refuse `snapshot <url>`).
 
-Exit codes: `0` ok or delivered · `1` error · `2` wait timed out · `3` refused (guard, dirty working copy, conflict, not unique) · `4` not found · `5` session closed · `6` superseded by a newer `wait`.
+Exit codes: `0` ok or delivered · `1` error · `2` wait timed out · `3` refused (guard, dirty working copy, a thread without a reply, conflict, not unique) · `4` not found · `5` session closed · `6` superseded by a newer `wait`.
 
 ## Storage layout and git
 
@@ -605,7 +605,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 | A screen snip shows only the wallpaper or empty windows | macOS has not granted Screen Recording. Turn it on for the app that started Suiko (or Shortcuts) in System Settings > Privacy & Security > Screen & System Audio Recording, quit and reopen that app, then `suiko stop` and open the doc again. |
 | `B` or `suiko snip` says screen snips are unsupported | They need macOS (`/usr/sbin/screencapture`). Use `b` to snip inside the doc, or paste an image into the comment box. |
 | An area snip has no picture | The browser could not draw that area (for example a cross-origin image or a video frame). The comment still carries the source lines; use `B` to attach a real screenshot. |
-| `wait` exits 3 immediately | The spec has unrecorded edits. The agent should run `suiko revise`; if the edits are yours, click **Record as my revision**. `--allow-dirty` skips the check. |
+| `wait` exits 3 immediately | Either the spec has unrecorded edits (the agent should run `suiko revise`; if the edits are yours, click **Record as my revision**; `--allow-dirty` skips the check), or a thread the agent received has no reply yet: the message names it, and the agent answers on it with `suiko revise --replies -` or `suiko reply` (`--allow-unanswered` skips the check). |
 | `revise` says REFUSED | Read each `ERR` line and its `fix:`. Typical fixes: `suiko revert <doc> --hunk hN`, an `other` explanation, or asking the reviewer to unlock text. |
 | Claude says a Write was denied "under Suiko" | Working as intended: the doc is under review, so Claude must use targeted edits. Set `guards.writeHook` to `warn` or `off` to change this. |
 | You submitted but the agent did nothing | Its background wait is not running (for example the session restarted). Tell it "done", or paste the **Copy prompt** text from the Submit dialog. In Claude Code the prompt hook also reminds it on your next message. |

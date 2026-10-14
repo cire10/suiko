@@ -82,12 +82,13 @@ export const TOOLS = [
     name: 'suiko_wait',
     title: 'Wait for the review',
     description:
-      'Block until the reviewer submits a review (or closes the session), up to timeout_sec (default 50, max 600). Returns the feedback packet, {"status":"waiting"} (call it again), or {"status":"closed"} (stop waiting).',
+      'Block until the reviewer submits a review (or closes the session), up to timeout_sec (default 50, max 600). Returns the feedback packet, {"status":"waiting"} (call it again), or {"status":"closed"} (stop waiting). Refused while a thread you received has no reply: reply on each thread (suiko_revise or suiko_reply), where the reviewer reads it, then wait again.',
     schema: z.object({
       doc: docArg.optional(),
       all: z.boolean().optional().describe('Wait on every doc of the workspace'),
       timeout_sec: z.number().int().min(1).max(WAIT_MAX_SEC).optional().describe(`Seconds to wait (default ${WAIT_DEFAULT_SEC}, max ${WAIT_MAX_SEC})`),
       allow_dirty: z.boolean().optional().describe('Wait even if the working copy has unrecorded edits'),
+      allow_unanswered: z.boolean().optional().describe('Wait even while a thread you received has no reply yet'),
       workspace: workspaceArg,
     }),
     command: 'wait',
@@ -96,6 +97,7 @@ export const TOOLS = [
       all: Boolean(a.all),
       timeoutMs: Math.min(a.timeout_sec ?? WAIT_DEFAULT_SEC, WAIT_MAX_SEC) * 1000,
       allowDirty: Boolean(a.allow_dirty),
+      allowUnanswered: Boolean(a.allow_unanswered),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     wait: true,

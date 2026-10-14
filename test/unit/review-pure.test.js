@@ -197,7 +197,8 @@ describe('packet size cap', () => {
     assert.match(text, /^\[t40\] comment · L40 · §S · suiko show d t40$/m);
     const beforeOverflow = text.slice(0, text.indexOf('(' + more + ' more threads'));
     assert.ok(beforeOverflow.length <= 10000, `${beforeOverflow.length} chars before the overflow list`);
-    assert.match(text, /\nNEXT: edits -> suiko revise d --replies - -> suiko wait d \(background\)\n$/);
+    // every packet with threads to act on, not only the first, says where replies go and what the JSON holds
+    assert.match(text, /\nREPLIES: answer every thread above on the thread itself, with a status \(the reviewer reads replies in Suiko, not in this chat\)\.\nNEXT: edits -> suiko revise d --replies - \(JSON, one entry per thread\) -> suiko wait d \(background\)\n$/);
   });
 });
 

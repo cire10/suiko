@@ -1,5 +1,6 @@
 // @ts-check
-// `wait` / `feedback` delivery (design 5.4 "Delivery", 9.2; BUILD_AMENDMENTS 2.4): dirty working copy refusal,
+// `wait` / `feedback` delivery (design 5.4 "Delivery", 9.2; BUILD_AMENDMENTS 2.4): dirty working copy refusal, the
+// refusal while a delivered thread has no reply (requireAnswers),
 // timeouts and aborts, a single waiter per (doc, agent) (a newer wait supersedes the older one and the review is
 // delivered exactly once), delivery only after the write resolved (a failed write re-delivers), closed sessions,
 // `wait --all`, `feedback --peek` / `--include-drafts`, and the ack of delivered reviews by the agent's next op.
@@ -59,6 +60,45 @@ async function until(/** @type {() => Promise<boolean> | boolean} */ pred) {
 }
 
 describe('wait', () => {
+  test('requireAnswers: refused while a delivered thread has no reply on it; replies with a status clear it', async () => {
+    const { ctx, v1 } = await opened();
+    await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'rotated on every use'), body: 'Grace window?' });
+    await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'question', capture: { kind: 'doc' }, body: 'Why Redis?' });
+    await ops.submitReview(ctx, DOC, { verdict: 'comment', body: '' });
+    const q = { docIds: [DOC], pollMs: 20, timeoutMs: 80, write: () => {} };
+    // nothing delivered yet: the wait delivers (the check never stands in the way of a delivery)
+    assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'delivered');
+
+    // delivered, no replies: refused, both named; nothing is registered
+    let r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
+    assert.deepEqual([r.status, r.docId, r.threads], ['unanswered', DOC, [
+      { id: 't1', type: 'comment', status: 'open' }, { id: 't2', type: 'question', status: 'open' }]]);
+    assert.deepEqual(await ctx.store.listWaiters(DOC, { liveOnly: false }), [], 'no waiter registered');
+    // without requireAnswers (the plan gate, --allow-unanswered) the wait blocks as before
+    assert.equal((await ops.waitForFeedback(ctx, q)).status, 'timeout');
+
+    // a reply without a status leaves the thread open: still refused
+    await ops.reply(ctx, DOC, 't2', { body: 'Lower latency.' });
+    r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
+    assert.deepEqual(r.threads?.map((t) => t.id), ['t1', 't2']);
+    await ops.reply(ctx, DOC, 't2', { body: 'Lower latency; sessions are ephemeral.', status: 'answered' });
+    r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
+    assert.deepEqual(r.threads?.map((t) => t.id), ['t1']);
+    await ops.revise(ctx, DOC, { threads: { t1: { status: 'declined', reply: 'Out of scope for v1.' } } });
+    assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'timeout');
+
+    // the reviewer answers back without reopening (a reply in a new review): delivered first, then the thread waits
+    // on the agent's reply although it keeps the agent's status
+    await ops.saveDraft(ctx, DOC, { kind: 'reply', thread: 't1', body: 'It is in scope: we need it before launch.', reopen: false });
+    await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
+    assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'delivered');
+    r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
+    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined' }]);
+    // resolved by the reviewer: nothing left to answer
+    await ops.resolveThread(ctx, DOC, 't1', {});
+    assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'timeout');
+  });
+
   test('a dirty working copy is refused unless allowDirty', async () => {
     const { ctx, v1 } = await opened();
     await submitOne(ctx, v1);

@@ -9,6 +9,8 @@ description: Iterative, commentable review loop for HTML/Markdown specs, plans, 
 
 The user reviews the spec in a local web UI and comments on exact parts of it. You receive located feedback, make **targeted edits**, and record each revision as a version. The file on disk is the source of truth. Never regenerate it.
 
+**The conversation lives in Suiko.** Every answer, explanation or question for the reviewer goes on its thread (the replies of `suiko revise`, `suiko reply`, `suiko ask`), where the reviewer reads it next to the doc and can keep iterating on it. Your chat only gets a short summary.
+
 ## 1. Write the spec once
 
 - Write the document its readers need, in the form that serves them best, in the repo (e.g. under `docs/specs/`): Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included.
@@ -36,7 +38,7 @@ It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. 
 |---|---|---|
 | 0 | A packet was printed (any verdict) | Handle it (section 4), or finish (section 7) if it says APPROVED. A `COMMENT` packet with one thread is a comment the user sent at once (**Send now**): handle it the same way |
 | 2 | The `--timeout` you passed expired | Start the wait again only if a review is still expected |
-| 3 | The working copy differs from the head version | Unrecorded edits. If yours, record them with `revise` (section 5); if not, ask the user (the UI has **Record as my revision**). Then wait again |
+| 3 | The working copy differs from the head version, or a thread you received has no reply yet | Unrecorded edits: if yours, record them with `revise` (section 5); if not, ask the user (the UI has **Record as my revision**). A thread without a reply (the message names it): reply on it (section 5). Then wait again |
 | 5 | The reviewer closed the session | Stop waiting and tell the user |
 | 6 | Superseded by a newer `wait` | Ignore it and end the turn quietly |
 | 1, 4 | Error, or doc not found | Read the message and fix the command |
@@ -58,7 +60,7 @@ It prints the doc id (`tracking … as "<doc>"`) and a `review UI: <url>` line. 
 2. Per thread:
    - **suggestion** (`apply verbatim: suiko apply <doc> tN`): do not retype it; apply it in step 3.
    - **comment**: Edit with `old_string` = the `src>` text. Make the smallest local change that resolves it. Keep the formatting; do not re-wrap paragraphs.
-   - **question**: answer in the reply (`answered`). Also edit only if the answer belongs in the spec (`addressed`).
+   - **question**: answer it on the thread, in its reply (`answered`): the reviewer reads the answer in Suiko, not in your chat. Also edit only if the answer belongs in the spec (`addressed`).
    - **disagree**: `declined` with the reason. **Unclear**: `needs_input` with one precise question.
    - **`image:` and `crop:` lines** are pictures the user attached: a snipped area of the doc, a screenshot of their screen, a pasted image, or a region crop. **Read every one with the Read tool before acting on that thread.** A snip's `src>` covers all blocks under the snipped area: edit only what the comment is about. A `GENERAL` screenshot may show something outside the doc (the running app, a terminal); if you cannot tell which part of the spec it concerns, use `needs_input`.
    - **a picture, diagram, chart or interactive part**: change whatever produces it (its markup, its data, its styles, or the script or file it comes from).
@@ -93,7 +95,7 @@ JSON
 
 ## 6. Report and wait again
 
-Give one line per thread in chat: what you changed, or what you asked. Then start `suiko wait <doc>` in the background again and end the turn.
+In chat, give one line per thread (what you changed, answered or asked); the full replies are on the threads. Then start `suiko wait <doc>` in the background again and end the turn. `wait` exits 3 while a thread you received has no reply: reply on it, then wait again.
 
 ## 7. Approval, recovery and other requests
 
@@ -162,6 +164,6 @@ Record the round with `suiko revise <doc> --replies -`, with the same JSON as se
 | `suiko review [--uncommitted \| --staged \| --base <ref> \| A..B \| --commit <sha> \| --pr <n>]` | Open a code review of your changes, or of a PR; again records the next round |
 | `suiko diff <doc> v1..v2` / `suiko show <doc> --file <path>` | Code reviews: what changed between rounds / one file of a round |
 
-Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, conflict, not unique) · 4 not found · 5 closed · 6 superseded.
+Exit codes: 0 ok · 1 error · 2 timeout · 3 refused (guard, dirty working copy, a thread without a reply, conflict, not unique) · 4 not found · 5 closed · 6 superseded.
 
 The full packet format, revise JSON, guards, hooks and MCP tools are in [reference.md](reference.md).

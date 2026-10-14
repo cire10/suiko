@@ -164,7 +164,8 @@ describe('lookup from a directory above the workspace root', () => {
   });
 
   test('a timed-out wait <path> repeats the path in its retry hint', async () => {
-    const t = await cli(PROJ, ['wait', 'docs/my-spec.md', '--timeout', '1s']);
+    // (the threads delivered above have no replies yet: --allow-unanswered, this is about the hint)
+    const t = await cli(PROJ, ['wait', 'docs/my-spec.md', '--timeout', '1s', '--allow-unanswered']);
     assert.equal(t.code, 2, t.stderr);
     assert.match(t.stdout, /no review yet for my-spec after 1s\. Run `suiko wait docs\/my-spec\.md` again/, t.stdout);
   });

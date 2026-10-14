@@ -271,7 +271,7 @@ The **Verify** filter (`v`) lists threads the agent marked addressed, answered o
 | `X` (Shift+X) | **Accept all**: every addressed or answered thread in the queue (the **Accept all** button at the top of Verify, and in Changes' round results). Declined threads stay for you to accept or reopen one by one. The toast has **Undo** |
 | `o` | **Reopen**: opens a reply box; the reply goes into your next review |
 | `y` | Accept a decline |
-| `r` | Reply to the focused thread |
+| `r` | Reply to the focused thread without reopening it: a follow-up question or comment the agent answers on the thread |
 
 Accepting takes effect immediately, Accept all included. Reopens, replies and new comments wait in your pending review until you submit. Only you can resolve a thread; the agent never closes its own work.
 
@@ -281,7 +281,7 @@ Accepting takes effect immediately, Accept all included. Reopens, replies and ne
 - **Body:** the quoted text (or "was … / now …" when the text changed under the comment), then the conversation, each message tagged with its author and version.
 - **Suggestion block:** the `-` / `+` lines and their status (Pending, Staged, Applied in v2, Conflict), with **Apply now** when the working copy is clean.
 - **Mini-diff:** for addressed or changed threads.
-- **Actions:** Open threads: Reply, Resolve, and Edit or Delete for your own drafts. Addressed or answered: **Accept** and **Reopen**; declined: **Accept decline** and **Reopen**. Needs input: an orange "claude asked you" banner and an **Answer claude** button (the agent's name) that opens the reply box. Outdated or orphaned: **Move here** (re-anchor to your current selection or pick), **View on vN**, **Resolve**.
+- **Actions:** Open threads: Reply, Resolve, and Edit or Delete for your own drafts. Addressed or answered: **Accept**, **Reply** and **Reopen**; declined: **Accept decline**, **Reply** and **Reopen**. **Reply** keeps the thread's status and sends a follow-up (a question about the answer, say) that the agent answers on the same thread; **Reopen** asks for more work. Needs input: an orange "claude asked you" banner and an **Answer claude** button (the agent's name) that opens the reply box. Outdated or orphaned: **Move here** (re-anchor to your current selection or pick), **View on vN**, **Resolve**.
 
 **Orphaned threads** (their text could not be found after an edit) collect in the orphan tray in the status bar, under their last known section, with **Move here**, **Keep as general** and **Resolve**. A thread whose target is inside a closed `<details>` or an inactive tab is marked **Hidden**; focusing it reveals the target.
 

@@ -72,7 +72,7 @@ reviewer verifies changes  ──> accepts / reopens / replies, submits again ..
 | 0 | OK | Success, or a packet was delivered (any verdict) |
 | 1 | ERROR | Generic error or bad usage |
 | 2 | TIMEOUT | `wait --timeout` expired |
-| 3 | REFUSED | A guard refused, the working copy is dirty, a compare-and-swap conflict, or `old` is not unique |
+| 3 | REFUSED | A guard refused, the working copy is dirty, a thread you received has no reply yet (`wait`), a compare-and-swap conflict, or `old` is not unique |
 | 4 | NOT_FOUND | Doc, thread or version not found |
 | 5 | CLOSED | The review session was closed (UI or `suiko close`) |
 | 6 | SUPERSEDED | A newer `wait` for the same doc and agent replaced this one; ignore it |
@@ -153,8 +153,9 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
 PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
-  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
-NEXT: edits -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
+  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
+NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
 ```
 
 ### 6.2 Text form (later rounds and approval)
@@ -178,7 +179,8 @@ Reviewer summary: Close. Caption still unclear.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L173-199)
 DECISIONS to keep true: D1 (t1) 30 s reuse-detection grace window · D2 (t3) retries: up to 5, exponential backoff, full jitter
-NEXT: edits -> suiko revise token-service --replies - -> suiko wait token-service (background)
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
+NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
 ```
 
 ```text
@@ -223,7 +225,7 @@ NEXT: suiko final token-service --decisions   (then stop waiting)
 - **Suggestion:** `apply verbatim: suiko apply <doc> <tid>` in the header, then `- old` / `+ new` lines.
 - **Conversation:** the last agent reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment after it. Older comments collapse to `(+2 earlier, suiko show <doc> t2)`.
 - **Anchor notes:** `(outdated: text changed)`; `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)`.
-- **Footer:** `LOCKED (agreed - do not modify): …`, `DECISIONS to keep true: …`, drafts (only with `--include-drafts`, labelled as not submitted), `PROTOCOL: …`, `NEXT: …`.
+- **Footer:** `LOCKED (agreed - do not modify): …`, `DECISIONS to keep true: …`, drafts (only with `--include-drafts`, labelled as not submitted), `PROTOCOL: …` (the first packet), `REPLIES: …` (every packet with threads to act on: replies go on the threads, where the reviewer reads them in Suiko), `NEXT: …`.
 - **Size cap:** 10,000 characters. Threads beyond the cap are listed one per line with `suiko show <doc> tN`.
 
 ### 6.4 JSON form (`--json`, MCP `structuredContent`)
@@ -512,7 +514,7 @@ The plugin registers the hooks as `suiko hook pre-write` and `suiko hook prompt`
 | `suiko_open` | `{path, title?}` | `{doc, version, url}` |
 | `suiko_review` | `{mode?, base?, range?, commit?, paths?, title?}` | the `review --json` shape: a code review (section 20; no PR mode) |
 | `suiko_snapshot` | `{url, title?}` | `{doc, version, recorded, url, page}`; public hosts only (a private host or the network turned off is refused); see section 19 |
-| `suiko_wait` | `{doc?, timeout_sec?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}` |
+| `suiko_wait` | `{doc?, timeout_sec?, allow_unanswered?}` (default 50, max 600) | the packet, `{status: "waiting", hint: "call again"}`, or `{status: "closed"}`; an error `{status: "unanswered", threads}` while a thread you received has no reply |
 | `suiko_feedback` | `{doc, peek?, include_drafts?}` | the packet |
 | `suiko_apply` | `{doc, thread_ids}` | `{applied, conflicts}` |
 | `suiko_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` | `{lines}` |
@@ -539,7 +541,7 @@ While `suiko_wait` blocks, it sends progress notifications every 15 s when the r
 | `last [--session <id>] [--transcript <path>] [--title T] [--browser pane\|system\|none]` | The agent's last message (Claude Code transcript) as a snapshot doc; prints the URL and the wait command | 0 / 4 |
 | `snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->] [--browser pane\|system\|none]` | A web page as a snapshot doc (the only command that uses the network); again for the same URL records the next version when the page changed; `--replies` posts replies with it | 0 / 1 / 3 / 4 |
 | `review [<range>] [--uncommitted \| --staged \| --base <ref> [--committed] \| --commit <sha> \| --pr <n\|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T] [--browser pane\|system\|none]` | Open a code review of the changes (section 20); again with the same arguments: a new round when the files changed | 0 / 1 / 3 / 4 |
-| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review arrives; print the packet; mark it delivered | 0 / 2 / 3 / 5 / 6 |
+| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--allow-unanswered] [--json]` | Block until a review arrives; print the packet; mark it delivered. Exits 3 at once while a thread you received has no reply (unless `--allow-unanswered`) | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The packet, without blocking; marks delivered unless `--peek` | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim; stage tagged edits | 0 / 3 |
 | `edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Thread-tagged exact replace | 0 / 3 |
@@ -659,7 +661,8 @@ Line numbers = files in your working tree now (all identical to v1).
 
 DECISIONS to keep true: (none yet)
 PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
-  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+  Suggestions: `suiko apply`. Questions: answer in the thread's reply; change code only if the answer needs it. Unsure: status needs_input.
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
 NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> suiko wait cr-feat-token-refresh (background)
 ```
 
