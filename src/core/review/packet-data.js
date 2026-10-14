@@ -528,7 +528,7 @@ function nextStep(doc, { approved, finalNow }, actionable) {
     return `approved: answer each thread with suiko reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> suiko final ${doc.id} --decisions   (then stop waiting)`;
   }
   if (actionable === 0) return `nothing to act on; suiko wait ${doc.id} (background)`;
-  return `edits -> suiko revise ${doc.id} --replies - -> suiko wait ${doc.id} (background)`;
+  return `edits, if any -> suiko revise ${doc.id} --replies - -> suiko wait ${doc.id} (background)`;
 }
 
 /**

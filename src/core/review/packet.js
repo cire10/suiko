@@ -48,19 +48,25 @@ export function attachmentLine(absPath, kind) {
 
 const PROTOCOL = [
   'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
-  '  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.',
+  "  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.",
 ];
+
+/**
+ * Every packet with threads to act on (not a plan's: plan mode answers in the plan or the chat): replies belong on
+ * the threads, where the reviewer reads them in Suiko and the conversation stays with the doc.
+ */
+const REPLIES = 'REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).';
 
 /** The protocol reminder of a snapshot doc (no working file: no `suiko apply`, no Edit of a workspace file). */
 const SNAPSHOT_PROTOCOL = [
   'PROTOCOL: change only what the threads ask for and keep the rest of the text as it is; src> lines quote the current version.',
-  '  Questions: answer in the reply; change the text only if the answer belongs in it. Unsure: status needs_input.',
+  "  Questions: answer in the thread's reply; change the text only if the answer belongs in it. Unsure: status needs_input.",
 ];
 
 /** The protocol reminder of a web-page snapshot of a page you build (a private host): change its sources. */
 const PAGE_SOURCES_PROTOCOL = [
   'PROTOCOL: the doc is a snapshot of a web page, not a file: change the sources that produce the page (only what the threads ask for), then snapshot it again.',
-  '  src> lines quote Suiko\'s conversion of the page. Questions: answer in the reply. Unsure: status needs_input.',
+  "  src> lines quote Suiko's conversion of the page. Questions: answer in the thread's reply. Unsure: status needs_input.",
 ];
 
 /** The protocol reminder of a public web page's snapshot: there is nothing to edit; threads get replies. */
@@ -78,7 +84,7 @@ const PLAN_PROTOCOL = [
 /** The protocol reminder of a code review: repo files, paths relative to the repo root. */
 const CODE_PROTOCOL = [
   'PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.',
-  '  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.',
+  "  Suggestions: `suiko apply`. Questions: answer in the thread's reply; change code only if the answer needs it. Unsure: status needs_input.",
 ];
 
 /** @param {string | null | undefined} v */
@@ -159,6 +165,7 @@ export function formatPacket(packet, opts = {}) {
   }
   if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the spec (it must stay identical to the final version).`);
   else if (p.firstPacket && !approvedDone && items.length) footer.push(...protocolLines(p));
+  if (!p.replyOnly && !approvedDone && p.counts.actionable > 0 && !(snapshot && p.origin === 'plan')) footer.push(REPLIES);
   footer.push(`NEXT: ${nextText(p)}`);
 
   return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
@@ -197,6 +204,7 @@ function formatCodePacket(p, maxChars) {
   }
   if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not change the reviewed files (they must stay identical to the final version).`);
   else if (p.firstPacket && !approvedDone && items.length) footer.push(...CODE_PROTOCOL);
+  if (!p.replyOnly && !approvedDone && p.counts.actionable > 0) footer.push(REPLIES);
   footer.push(`NEXT: ${nextText(p)}`);
   return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
 }
@@ -384,7 +392,7 @@ function typeBreakdown(threads) {
 
 /** @param {Packet} p */
 function nextText(p) {
-  if (p.firstPacket && p.next.includes('--replies - ->')) return p.next.replace('--replies - ->', '--replies - (JSON, one entry per thread) ->');
+  if (p.next.includes('--replies - ->')) return p.next.replace('--replies - ->', '--replies - (JSON, one entry per thread) ->');
   return p.next;
 }
 

@@ -3,10 +3,11 @@
 // Header: id, type / severity chips, status chip, anchor-state chip, target label.
 // Body: the quote ("was ... / now ..." when outdated), comments as sanitised Markdown, a suggestion block, and a
 // collapsible mini-diff.
-// Actions depend on the state: Reply / Resolve for open threads; Accept (+ optional decision) / Reopen for
-// addressed, answered or declined threads; a "claude asked you" banner with a reply box for needs_input; and
-// Move here / Keep as general / View on vN for outdated or orphaned anchors. While an action request is in flight
-// (busy), its buttons are disabled so a double click cannot send it twice.
+// Actions depend on the state: Reply / Resolve for open threads; Accept (+ optional decision) / Reply / Reopen for
+// addressed, answered or declined threads (Reply continues the conversation on the thread without reopening it); a
+// "claude asked you" banner with a reply box for needs_input; and Move here / Keep as general / View on vN for
+// outdated or orphaned anchors. While an action request is in flight (busy), its buttons are disabled so a double
+// click cannot send it twice.
 // A draft made on another version than the one shown says so: it is not painted on this version (the daemon carries
 // it forward when the review is submitted), and its line numbers refer to its own version.
 // Screenshots attached to a thread or draft (snips, picked regions, pasted images, `suiko snip`) show as
@@ -132,6 +133,8 @@ export function ThreadCard({ t, ds, version, agent, focused, reply, position, bu
           ? html`
             <button type="button" class="btn btn-sm btn-ok" data-testid=${TESTID.verifyAccept} disabled=${busy} onClick=${() => resolveThread(t.id, decisionOpen ? decision : '')}
               title=${verifiable ? 'Accept and resolve (x)' : 'Accept and resolve'}>Accept${t.status === 'declined' ? ' decline' : ''}</button>
+            <button type="button" class="btn btn-sm" onClick=${() => startReply(t.id)}
+              title=${`Reply without reopening: a follow-up question or comment; ${agent} answers on this thread (r)`}>Reply</button>
             <button type="button" class="btn btn-sm" data-testid=${TESTID.verifyReopen} onClick=${() => startReply(t.id, { reopen: true })}
               title="Reopen with a reply (o)">Reopen</button>
             <button type="button" class=${`link-btn ${decisionOpen ? 'active' : ''}`} aria-expanded=${decisionOpen}

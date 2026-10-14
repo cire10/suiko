@@ -172,7 +172,12 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.ok(JSON.parse(fs.readFileSync(reviewFile('rv1'), 'utf8')).deliveredTo.claude, 'delivered after the write');
 
     assert.equal(await hook('prompt', { cwd: ws.root }), null, 'delivered recently: the prompt hook is silent');
-    const again = await cli(['wait', DOC, '--timeout', '200ms']);
+    // waiting again before replying: refused, the threads named (answers go on the threads, not in the chat)
+    const early = await cli(['wait', DOC, '--timeout', '200ms']);
+    assert.equal(early.code, 3, early.stderr);
+    assert.match(early.stderr, /^suiko: kitchen-sink: 2 threads you received have no reply yet: t1 \(comment\), t2 \(suggestion\)\. The reviewer reads your answers on the threads in Suiko, not in this chat\.$/m);
+    assert.match(early.stderr, /`suiko reply kitchen-sink <tid> -m <answer> --status answered`/);
+    const again = await cli(['wait', DOC, '--timeout', '200ms', '--allow-unanswered']);
     assert.equal(again.code, 2, 'nothing left to deliver');
   });
 
@@ -348,7 +353,13 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
       assert.equal(delivered.structuredContent.doc, DOC);
       assert.deepEqual(delivered.structuredContent.reviews.map((/** @type {any} */ r) => r.id), [rv.id]);
       assert.ok(JSON.parse(fs.readFileSync(reviewFile(rv.id), 'utf8')).deliveredTo.claude);
-      const wait = await call('suiko_wait', { doc: DOC, timeout_sec: 1 });
+      // waiting again before replying on the delivered thread: refused, the thread named
+      const early = await call('suiko_wait', { doc: DOC, timeout_sec: 1 });
+      assert.equal(early.isError, true);
+      assert.equal(early.structuredContent.status, 'unanswered');
+      assert.ok(early.structuredContent.threads.length >= 1, JSON.stringify(early.structuredContent));
+      assert.match(early.content.map((/** @type {any} */ c) => c.text).join('\n'), /no reply yet: .*The reviewer reads your answers on the threads in Suiko/s);
+      const wait = await call('suiko_wait', { doc: DOC, timeout_sec: 1, allow_unanswered: true });
       assert.deepEqual(wait.structuredContent, { status: 'waiting', hint: 'call again' });
     } finally {
       await server.close();
@@ -371,9 +382,10 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
   });
 
   test('real processes: a newer wait supersedes an older one (exit 6); SIGINT exits 130 and removes the waiter', async () => {
-    const older = spawnCli(['wait', DOC]);
+    // (earlier tests left delivered threads without replies: these waits are about the waiter mechanics)
+    const older = spawnCli(['wait', DOC, '--allow-unanswered']);
     await until(async () => (await ctx.store.listWaiters(DOC)).some((/** @type {any} */ w) => w.pid === older.child.pid));
-    const newer = spawnCli(['wait', DOC]);
+    const newer = spawnCli(['wait', DOC, '--allow-unanswered']);
     const o = /** @type {any} */ (await older.done);
     assert.equal(o.code, 6, o.stderr);
     assert.match(o.stderr, /^suiko: superseded by pid \d+ \(a newer wait is listening\); ignore this\.$/m);
@@ -387,7 +399,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
   });
 
   test('close: a running wait exits 5', async () => {
-    const waiting = spawnCli(['wait', DOC]);
+    const waiting = spawnCli(['wait', DOC, '--allow-unanswered']);
     await until(async () => (await ctx.store.listWaiters(DOC)).some((/** @type {any} */ w) => w.pid === waiting.child.pid));
     const c = await cli(['close', DOC]);
     assert.equal(c.code, 0, c.stderr);

@@ -1,13 +1,16 @@
 // @ts-check
-// `suiko wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--json]` (design 3.4/3.6/9.2, amendments 2.4).
+// `suiko wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--allow-unanswered] [--json]` (design 3.4/3.6/9.2,
+// amendments 2.4).
 //
 // Flow
 //   1. Resolve the doc (or every doc with --all; with no argument, the workspace's only doc).
-//   2. engine.waitForFeedback(ctx, { docIds, timeoutMs, allowDirty, signal, onStart, write, heartbeatMs }).
+//   2. engine.waitForFeedback(ctx, { docIds, timeoutMs, allowDirty, requireAnswers, signal, onStart, write,
+//      heartbeatMs }). requireAnswers (unless --allow-unanswered): a thread already handed to this agent that has no
+//      reply yet refuses the wait, so answers reach the reviewer in Suiko instead of staying in the agent's chat.
 //      The engine registers the waiter (`<home>/ws/<wsId>/waiters/<doc|_all>/<pid>.json`, heartbeat every 10 s,
 //      supersedes older waits of the same doc + agent), watches for reviews and, under the doc lock, calls our
 //      write(text): we print the packet and resolve only after stdout flushed; then it records the delivery.
-//   3. Map the outcome to an exit code: delivered 0 · timeout 2 · dirty 3 · closed 5 · superseded 6 ·
+//   3. Map the outcome to an exit code: delivered 0 · timeout 2 · dirty 3 · unanswered 3 · closed 5 · superseded 6 ·
 //      interrupted 128+signal (SIGINT 130, SIGTERM 143; nothing was delivered).
 // The command does not rely on the engine alone to honour `signal`/`timeoutMs`: it races them itself and, once it
 // has given up, rejects any late write() so a delivery can never be recorded without reaching stdout. It then
@@ -23,18 +26,20 @@ import { callOp, docContext, openContext } from '../runtime.js';
 
 export const spec = {
   name: 'wait',
-  usage: 'wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--json]',
+  usage: 'wait [<doc>] [--all] [--timeout 0|30m] [--allow-dirty] [--allow-unanswered] [--json]',
   summary: 'Block until the reviewer submits a review (or closes the session) and print the feedback packet.',
   options: {
     all: { type: 'boolean' },
     timeout: { type: 'string' },
     'allow-dirty': { type: 'boolean' },
+    'allow-unanswered': { type: 'boolean' },
   },
   details: [
     'Run it in the background (Claude Code: Bash with run_in_background) and end the turn; you are re-invoked when it exits.',
     '--timeout 0 (default) waits indefinitely; 30m, 90s, 2h... give up with exit 2.',
     'Exits 3 at once when the working copy has unrecorded edits (run `suiko revise` first) unless --allow-dirty.',
-    'Exit codes: 0 delivered · 2 timeout · 3 dirty · 5 session closed · 6 superseded by a newer wait (ignore it).',
+    'Exits 3 at once when a thread you received has no reply yet (reply on it: `suiko revise` or `suiko reply`) unless --allow-unanswered.',
+    'Exit codes: 0 delivered · 2 timeout · 3 dirty or unanswered · 5 session closed · 6 superseded by a newer wait (ignore it).',
     '--json prints each delivered packet as one JSON line.',
   ],
 };
@@ -56,6 +61,7 @@ export async function parse({ values, positionals }) {
     all: Boolean(values.all),
     timeoutMs: values.timeout === undefined ? 0 : parseDuration(values.timeout),
     allowDirty: Boolean(values['allow-dirty']),
+    allowUnanswered: Boolean(values['allow-unanswered']),
   };
 }
 
@@ -65,6 +71,7 @@ export async function parse({ values, positionals }) {
  * @property {boolean} [all]
  * @property {number} [timeoutMs] 0 = no limit
  * @property {boolean} [allowDirty]
+ * @property {boolean} [allowUnanswered] wait even while a thread handed to the agent has no reply
  * @property {AbortSignal} [signal] extra cancellation (MCP request cancel)
  */
 
@@ -121,6 +128,7 @@ export async function execute(rt, input) {
       all: Boolean(input.all),
       timeoutMs,
       allowDirty: Boolean(input.allowDirty),
+      requireAnswers: !input.allowUnanswered,
       signal: controller.signal,
       onStart: announce,
       write: delivery.write,
@@ -240,6 +248,24 @@ async function finish(rt, engine, s) {
           `Record them first: \`suiko revise ${ref} --replies -\` (or pass --allow-dirty).`,
       ],
       json: { status: 'dirty', doc, head: head ?? null },
+    };
+  }
+  if (status === 'unanswered') {
+    const doc = outcome.docId ?? outcome.doc ?? (s.input.all ? label : s.noun);
+    const ref = s.input.all ? doc : label;
+    /** @type {Array<{ id: string, type: string, status: string }>} */
+    const threads = Array.isArray(outcome.threads) ? outcome.threads : [];
+    const list = threads.map((t) => `${t.id} (${t.type}${t.status && t.status !== 'open' ? `, ${t.status.replace('_', ' ')}` : ''})`).join(', ');
+    const one = threads.length === 1;
+    return {
+      exit: EXIT.REFUSED,
+      stderr: [
+        `suiko: ${doc}: ${one ? 'a thread you received has' : `${threads.length} threads you received have`} no reply yet: ${list || '?'}. ` +
+          'The reviewer reads your answers on the threads in Suiko, not in this chat.',
+        `  Reply on ${one ? 'it' : 'each'}: \`suiko revise ${ref} --replies -\` (one entry per thread, with your edits if any), or ` +
+          `\`suiko reply ${ref} <tid> -m <answer> --status answered\` (or declined, needs_input). Then wait again (--allow-unanswered skips this check).`,
+      ],
+      json: { status: 'unanswered', doc, threads },
     };
   }
   throw new Error(`waitForFeedback returned an unexpected result: ${JSON.stringify(outcome)}`);

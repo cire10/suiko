@@ -292,7 +292,8 @@ const WHY_LABEL = /** @type {Record<string, string>} */ ({ reopened: 'REOPENED',
 
 const PROTOCOL_LINES = [
   'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
-  '  Questions: answer in the reply; edit only if the answer belongs in the spec. Unsure: status needs_input.',
+  "  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.",
+  'REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).',
 ];
 
 /**

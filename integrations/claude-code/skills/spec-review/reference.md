@@ -36,7 +36,7 @@
 | `last [--session <id>] [--transcript <path>] [--title T]` | Open your last message (Claude Code transcript of `$CLAUDE_CODE_SESSION_ID`) as a snapshot doc; prints the URL and the background `wait` command and returns. Codex transcripts are not supported. | 0 / 4 |
 | `snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page as a snapshot doc (the only command that uses the network; refused when `SPECREVIEW_OFFLINE=1`). Public hosts only unless `--allow-private`. Again for the same URL records the next version when the page changed; `--replies -` posts replies with it. | 0 / 1 / 3 / 4 |
 | `review [<range>] [--uncommitted \| --staged \| --base <ref> [--committed] \| --commit <sha> \| --pr <n\|url>] [--path <pathspec>]... [--context N] [--max-files N] [--title T]` | Open a **code review** of your changes (doc kind `code`, see Code reviews), print the URL and the `wait` command. Again with the same arguments: a new round when the files changed. | 0 / 1 / 3 / 4 |
-| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--json]` | Block until a review is submitted, print the packet for **all** undelivered reviews, mark them delivered. Returns at once if one is already waiting. Exits 3 at once if the working copy differs from head (unless `--allow-dirty`). | 0 / 2 / 3 / 5 / 6 |
+| `wait [<doc>] [--all] [--timeout 0\|30m] [--allow-dirty] [--allow-unanswered] [--json]` | Block until a review is submitted, print the packet for **all** undelivered reviews, mark them delivered. Returns at once if one is already waiting. Exits 3 at once if the working copy differs from head (unless `--allow-dirty`), or if a thread you received has no reply yet (unless `--allow-unanswered`): it names the threads; reply on each, then wait again. | 0 / 2 / 3 / 5 / 6 |
 | `feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | The same packet without blocking. Marks it delivered unless `--peek`. `--all-open` also lists threads waiting on the reviewer. | 0 |
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestion threads verbatim to the working copy (staged, not recorded). | 0 / 3 |
 | `edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Thread-tagged exact replace. `old` must be unique unless `--all`. | 0 / 3 |
@@ -61,7 +61,7 @@
 | `plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (PermissionRequest hook, matcher ExitPlanMode). | always 0 |
 | `install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]`, `install agents-md [--apply]` | Print (or with `--apply`, write) the integration files. | 0 |
 
-Exit codes: 0 ok or delivered · 1 error or bad usage · 2 wait timed out · 3 refused (guard, dirty working copy, conflict, `old` not unique) · 4 doc, thread or version not found · 5 session closed · 6 superseded by a newer `wait` for the same doc and agent.
+Exit codes: 0 ok or delivered · 1 error or bad usage · 2 wait timed out · 3 refused (guard, dirty working copy, a thread without a reply, conflict, `old` not unique) · 4 doc, thread or version not found · 5 session closed · 6 superseded by a newer `wait` for the same doc and agent.
 
 ## The feedback packet
 
@@ -96,7 +96,9 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
 PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
-NEXT: edits -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
+  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
+NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
 ```
 
 - **Header:** doc, path, the review(s) and the version they were made on, and the verdict (`COMMENT`, `CHANGES REQUESTED`, `APPROVED`; `· FINAL = vN` when the reviewer marked a final version). The second line says whether the working copy is identical to head or differs (`lines mapped`).
@@ -326,7 +328,8 @@ Line numbers = files in your working tree now (all identical to v1).
 
 DECISIONS to keep true: (none yet)
 PROTOCOL: Read each cited file (or range) before editing; paths are relative to the repo root above; src> lines are exact Edit old_string for that file; edit bottom-up per file.
-  Suggestions: `suiko apply`. Questions: answer in the reply; change code only if the answer needs it. Unsure: status needs_input.
+  Suggestions: `suiko apply`. Questions: answer in the thread's reply; change code only if the answer needs it. Unsure: status needs_input.
+REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
 NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records round v2 from your working tree) -> suiko wait cr-feat-token-refresh (background)
 ```
 
@@ -383,7 +386,7 @@ Edit the files with your editor tools. Use `apply <doc> <tid>` for suggestions, 
 | `suiko_open` | `{path, title?}` -> `{doc, version, url}` |
 | `suiko_snapshot` | `{url, title?}` -> `{doc, version, url, page}`: a public web page only |
 | `suiko_review` | `{mode?, base?, range?, commit?, paths?, title?}` -> a code review (modes as in Code reviews, without PR mode) |
-| `suiko_wait` | `{doc?, timeout_sec?}` (default 50, max 600) -> the packet, `{status:"waiting"}` (call again) or `{status:"closed"}` |
+| `suiko_wait` | `{doc?, timeout_sec?, allow_unanswered?}` (default 50, max 600) -> the packet, `{status:"waiting"}` (call again) or `{status:"closed"}`; refused (`{status:"unanswered", threads}`) while a thread you received has no reply |
 | `suiko_feedback` | `{doc, peek?, include_drafts?}` |
 | `suiko_apply` | `{doc, thread_ids}` |
 | `suiko_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` |

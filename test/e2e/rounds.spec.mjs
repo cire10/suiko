@@ -127,6 +127,27 @@ test('Verify queue: accept, reopen with a reply, keep an orphaned thread as a ge
   expect(ui.errors).toEqual([]);
 });
 
+test('Reply on an answered thread: a follow-up on the thread, without reopening it', async ({ page, ui, mock }) => {
+  await ui.open('kitchen-sink');
+  await focusUi(page);
+  await page.keyboard.press('v');
+  const t2 = ui.card('t2');
+  await expect(t2.locator('.status-chip')).toHaveText('Answered');
+  await t2.getByRole('button', { name: 'Reply', exact: true }).click();
+  const reply = t2.getByTestId(TESTID.replyTextarea);
+  await expect(reply).toBeFocused();
+  await expect(t2.getByRole('checkbox', { name: 'Reopen the thread' })).not.toBeChecked();
+  await reply.fill('Thanks. Does the diagram show the cache too?');
+  await t2.getByTestId(TESTID.replyAdd).click();
+  await expect.poll(() => mock.doc('kitchen-sink').drafts.items.length).toBe(1);
+  expect(mock.doc('kitchen-sink').drafts.items[0]).toMatchObject({ kind: 'reply', thread: 't2', reopen: false });
+  // the follow-up waits in the review; the thread keeps its status
+  await page.locator('.filter[data-filter="drafts"]').click();
+  await expect(ui.card('t2').locator('.pending-reply')).toContainText('Reply (draft)');
+  await expect(ui.card('t2').locator('.status-chip')).toHaveText('Answered');
+  expect(ui.errors).toEqual([]);
+});
+
 test('thread mini-diffs: text before / after and an image pair', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   await modeTab(page, 'review').click();

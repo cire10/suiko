@@ -1,9 +1,13 @@
 // @ts-check
 // Blocking wait for reviewer feedback (design 9.2 `wait`, C10; BUILD_AMENDMENTS 2.4):
-//   waitForFeedback(ctx, { docIds, timeoutMs, allowDirty, signal, onStart, write, pid, pollMs, heartbeatMs, minVersion })
-//     -> { status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'superseded', packets, text, docId?, by?, aborted? }
+//   waitForFeedback(ctx, { docIds, timeoutMs, allowDirty, requireAnswers, signal, onStart, write, pid, pollMs,
+//                          heartbeatMs, minVersion })
+//     -> { status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets, text, docId?,
+//          threads?, by?, aborted? }
 // 1. Refuses at once ('dirty') when a working copy differs from head, unless allowDirty; 'closed' when a doc's
-//    session is closed.
+//    session is closed. With requireAnswers (`suiko wait`; never the plan gate), also refuses ('unanswered', with
+//    the threads) when every review of a doc reached this agent but a thread they handed over still waits on its
+//    reply: the reviewer reads replies in Suiko, so an answer given only in the agent's chat never reaches them.
 // 2. Registers a waiter per doc (or '_all' for every doc), which supersedes older waiters of the same agent;
 //    heartbeats every heartbeatMs (10 s). A superseded waiter returns 'superseded' and never delivers.
 // 3. Checks for undelivered reviews now and on every change: fs.watch on each doc's reviews/ directory and its
@@ -24,6 +28,7 @@ import { NotFoundError } from '../../store/errors.js';
 import { ALL_DOCS } from '../../store/store.js';
 import { isGated, isVirtual } from '../../store/snapshot.js';
 import { createLogger } from '../../util/log.js';
+import { isActionable } from '../threadstate.js';
 import { deliverPacket } from './feedback.js';
 import { readHead, readWorkingState, resolveDoc } from './common.js';
 
@@ -33,9 +38,35 @@ const log = createLogger('review:wait');
  * @typedef {import('../context.js').Ctx} Ctx
  * @typedef {import('../../../shared/types.js').Doc} Doc
  * @typedef {import('../packet-data.js').Packet} Packet
- * @typedef {{ status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'superseded', packets: Packet[], text: string,
- *   docId?: string, by?: number, aborted?: boolean }} WaitResult
+ * @typedef {{ id: string, type: string, status: string }} UnansweredThread
+ * @typedef {{ status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets: Packet[],
+ *   text: string, docId?: string, threads?: UnansweredThread[], by?: number, aborted?: boolean }} WaitResult
  */
+
+/**
+ * The threads a doc's delivered reviews handed to `agent` that still wait on its reply (actionable: open, or the
+ * reviewer spoke last). Empty while any review has not reached the agent yet: the wait delivers it at once, together
+ * with every thread that needs action.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {string} agent
+ * @returns {Promise<UnansweredThread[]>}
+ */
+export async function unansweredThreads(ctx, doc, agent) {
+  const reviews = await ctx.store.listReviews(doc.id);
+  if (!reviews.length || reviews.some((r) => !r.deliveredTo?.[agent])) return [];
+  /** @type {Set<string>} */
+  const handed = new Set();
+  for (const r of reviews) {
+    for (const id of r.newThreads ?? []) handed.add(id);
+    for (const x of r.replies ?? []) handed.add(x.thread);
+    for (const id of r.reopened ?? []) handed.add(id);
+  }
+  if (!handed.size) return [];
+  return (await ctx.store.listThreads(doc.id))
+    .filter((t) => handed.has(t.id) && isActionable(t))
+    .map((t) => ({ id: t.id, type: t.type, status: t.status }));
+}
 
 /**
  * @param {Ctx} ctx
@@ -43,6 +74,7 @@ const log = createLogger('review:wait');
  * @param {string[] | string | null} [opts.docIds] doc ids/paths; null or '*' = all docs
  * @param {number} [opts.timeoutMs] 0 / undefined = no timeout
  * @param {boolean} [opts.allowDirty]
+ * @param {boolean} [opts.requireAnswers] refuse ('unanswered') while a thread handed to this agent has no reply
  * @param {AbortSignal} [opts.signal]
  * @param {(info: { docs: Array<{ id: string, head: number, path: string }>, agent: string, pid: number }) => void} [opts.onStart]
  * @param {(text: string, packet: Packet) => Promise<void> | void} [opts.write] called under the doc lock with the
@@ -55,7 +87,7 @@ const log = createLogger('review:wait');
  * @returns {Promise<WaitResult>}
  */
 export async function waitForFeedback(ctx, opts = {}) {
-  const { timeoutMs = 0, allowDirty = false, signal, onStart, write, pid = process.pid, pollMs = 2000, heartbeatMs = 10000, minVersion = 0 } = opts;
+  const { timeoutMs = 0, allowDirty = false, requireAnswers = false, signal, onStart, write, pid = process.pid, pollMs = 2000, heartbeatMs = 10000, minVersion = 0 } = opts;
   const all = opts.docIds == null || opts.docIds === '*' || (Array.isArray(opts.docIds) && opts.docIds.length === 0);
   const refs = all ? [] : Array.isArray(opts.docIds) ? opts.docIds : [/** @type {string} */ (opts.docIds)];
   const listDocs = async () => (all ? (await ctx.store.listDocs()).filter((d) => !isGated(d)) : Promise.all(refs.map((r) => resolveDoc(ctx, r))));
@@ -68,6 +100,12 @@ export async function waitForFeedback(ctx, opts = {}) {
       const head = await readHead(ctx, doc);
       const w = await readWorkingState(ctx, doc, head);
       if (w.dirty) return { status: 'dirty', packets: [], text: '', docId: doc.id };
+    }
+  }
+  if (requireAnswers) {
+    for (const doc of initial) {
+      const threads = await unansweredThreads(ctx, doc, ctx.agent);
+      if (threads.length) return { status: 'unanswered', packets: [], text: '', docId: doc.id, threads };
     }
   }
 

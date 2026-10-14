@@ -122,7 +122,8 @@ test('approved without a final version, with a reopened thread: the usual revise
   assert.match(w.text, /^\[t1\] REOPENED /m);
   assert.equal(w.packets[0].replyOnly, false);
   assert.doesNotMatch(w.text, /suiko final|no edits/, w.text);
-  assert.match(w.text, /^NEXT: edits -> suiko revise kitchen-sink --replies - -> suiko wait kitchen-sink \(background\)$/m);
+  assert.match(w.text, /^NEXT: edits, if any -> suiko revise kitchen-sink --replies - \(JSON, one entry per thread\) -> suiko wait kitchen-sink \(background\)$/m);
+  assert.match(w.text, /^REPLIES: answer every thread above on the thread itself, with a status/m);
 });
 
 test('an older final version that is no longer head: an approval without "Mark final" never points at `final`', async () => {
