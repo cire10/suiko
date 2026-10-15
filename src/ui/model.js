@@ -73,8 +73,8 @@ export function kindCaps(ds) {
 /** @type {readonly ModeInfo[]} */
 const FILE_MODES = Object.freeze([
   { key: 'read', label: 'Read', n: 0, description: 'The latest version as its readers see it: no highlights, change marks or threads' },
-  { key: 'review', label: 'Review', n: 1, description: 'Comment on the rendered document' },
-  { key: 'changes', label: 'Changes', n: 2, description: 'What changed since your last review' },
+  { key: 'review', label: 'Review', n: 1, description: 'Comment on the rendered document, with your threads highlighted' },
+  { key: 'changes', label: 'Changes', n: 2, description: 'What changed since your last review, marked in the document' },
   { key: 'source', label: 'Source', n: 3, description: 'The source with line numbers and its diff' },
   { key: 'history', label: 'History', n: 4, description: 'Versions and reviews, newest first' },
 ]);
@@ -108,6 +108,32 @@ export function hasMode(ds, mode) {
  */
 export function showsDoc(mode) {
   return mode === 'read' || mode === 'review' || mode === 'changes';
+}
+
+/**
+ * The mode a doc opens in (Settings: Default view). 'read' and 'review' as chosen (a code review has no Read: it
+ * opens on its files); 'auto': Changes when the agent revised the doc since the reviewer's last review or acceptance,
+ * else Review.
+ * @param {DocState} ds
+ * @param {'auto'|'read'|'review'} pref
+ * @returns {'read'|'review'|'changes'}
+ */
+export function openingMode(ds, pref) {
+  if (pref === 'read' || pref === 'review') return plainMode(ds, pref);
+  const head = Number(ds?.doc?.head) || 1;
+  const since = reviewedThrough(ds);
+  return since != null && head > since ? 'changes' : 'review';
+}
+
+/**
+ * The mode without change marks that the reviewer prefers (Settings: Default view): Read when they chose it, else
+ * Review. Turning "Show changes" off goes there when the doc was opened on its changes.
+ * @param {DocState} ds
+ * @param {'auto'|'read'|'review'} pref
+ * @returns {'read'|'review'}
+ */
+export function plainMode(ds, pref) {
+  return pref === 'read' && hasMode(ds, 'read') ? 'read' : 'review';
 }
 
 /** @param {string|null|undefined} iso */
@@ -185,8 +211,49 @@ export function numericVersion(ds, version) {
 }
 
 /**
- * Default Changes base: 'last' = the version of the newest review if older than the shown version, else the
- * previous version; 'prev' = the previous version. Null when there is nothing to compare (v1).
+ * Where "since your last review" starts: the newer of the version the reviewer last submitted a review on and the
+ * version whose revisions they accepted all at once (Accept all revisions). Null before either.
+ * @param {DocState} ds
+ * @returns {number|null}
+ */
+export function reviewedThrough(ds) {
+  const last = Number(ds?.doc?.lastReviewedVersion);
+  const accepted = Number(ds?.doc?.acceptedVersion);
+  const v = Math.max(last >= 1 ? last : 0, accepted >= 1 ? accepted : 0);
+  return v >= 1 ? v : null;
+}
+
+/**
+ * What a version is to the reviewer, for the comparison labels: 'review' (their last review), 'accepted' (the
+ * revisions they accepted, when newer than that review), or null.
+ * @param {DocState} ds
+ * @param {number|null} v
+ * @returns {'review'|'accepted'|null}
+ */
+export function baseTag(ds, v) {
+  if (v == null) return null;
+  const last = Number(ds?.doc?.lastReviewedVersion);
+  const accepted = Number(ds?.doc?.acceptedVersion);
+  if (accepted >= 1 && v === accepted && !(last >= accepted)) return 'accepted';
+  return last >= 1 && v === last ? 'review' : null;
+}
+
+/**
+ * The revisions "Accept all revisions" accepts: those of the newest version, when it is newer than the reviewer's
+ * last review and acceptance (`since`, null before either). Null when there is nothing new (or only v1).
+ * @param {DocState} ds
+ * @returns {{ version: number, since: number|null }|null}
+ */
+export function revisionsToAccept(ds) {
+  const head = Number(ds?.doc?.head) || 0;
+  if (head < 2) return null;
+  const since = reviewedThrough(ds);
+  return since != null && since >= head ? null : { version: head, since };
+}
+
+/**
+ * Default Changes base: 'last' = where "since your last review" starts (reviewedThrough) if older than the shown
+ * version, else the previous version; 'prev' = the previous version. Null when there is nothing to compare (v1).
  * @param {DocState} ds
  * @param {number|'live'|null} version
  * @param {'last'|'prev'|'custom'} kind
@@ -194,12 +261,9 @@ export function numericVersion(ds, version) {
  */
 export function defaultBase(ds, version, kind) {
   const head = Number(ds?.doc?.head) || 1;
-  if (version === 'live') {
-    const last = Number(ds?.doc?.lastReviewedVersion);
-    return kind === 'last' && last >= 1 && last <= head ? last : head;
-  }
+  const last = reviewedThrough(ds) ?? 0;
+  if (version === 'live') return kind === 'last' && last >= 1 && last <= head ? last : head;
   const v = Number(version ?? head);
-  const last = Number(ds?.doc?.lastReviewedVersion);
   if (kind === 'last' && last >= 1 && last < v) return last;
   return v > 1 ? v - 1 : null;
 }

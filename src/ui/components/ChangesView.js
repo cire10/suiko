@@ -15,8 +15,8 @@ import { docApi } from '../api.js';
 import { focusItem, goToHunk, navChange, readSeen, resolveThread, seenStorageKey, setChangesSeen, startReply } from '../actions.js';
 import { Markdown } from '../markdown.js';
 import {
-  agentName, coalesceWordParts, diffLines, guardBadges, groupHunks, hunkLines, hunkPreview, hunkSourceText, isVerifiable, numericVersion,
-  roundResults, singleH1, statusInfo, targetLabel, anchorAt, trimDiffContext, versionMeta,
+  agentName, baseTag, coalesceWordParts, diffLines, guardBadges, groupHunks, hunkLines, hunkPreview, hunkSourceText, isVerifiable,
+  numericVersion, roundResults, singleH1, statusInfo, targetLabel, anchorAt, trimDiffContext, versionMeta,
 } from '../model.js';
 import { store, useStore } from '../state.js';
 import { contentUrl, scrollIntoViewSoft, wordParts } from '../util.js';
@@ -122,7 +122,7 @@ export function ChangesView() {
   const badges = guardBadges(meta);
   const results = roundResults(ds, s.base, v);
   const agent = agentName(ds);
-  const last = Number(ds.doc.lastReviewedVersion);
+  const tag = baseTag(ds, s.base);
 
   /** @param {string} id @param {boolean} on */
   const toggleSeen = (id, on) => setChangesSeen([id], on);
@@ -131,7 +131,7 @@ export function ChangesView() {
     <div class="changes-head">
       <div class="changes-title">
         <strong>v${s.base} → ${s.version === 'live' ? 'working copy' : `v${v}`}</strong>
-        ${s.base === last ? html`<span class="small muted">since your last review</span>` : null}
+        ${tag ? html`<span class="small muted">${tag === 'accepted' ? 'since the revisions you accepted' : 'since your last review'}</span>` : null}
       </div>
       ${s.changes ? html`<div class="changes-stats small">
         <span class="ins-text">+${s.changes.stats?.added ?? 0}</span> <span class="del-text">−${s.changes.stats?.removed ?? 0}</span>

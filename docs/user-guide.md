@@ -57,6 +57,8 @@ Narrow layout (below 900 px, typical for the pane next to a chat): the outline a
 | **Source** (`3`) | Numbered source, or a source diff against the base (unified or split) | Check exact text; comment on raw lines (head metadata, attributes, script config) |
 | **History** (`4`) | A timeline of versions and reviews | Go back in time; compare any two versions |
 
+Hover a tab to see what it shows. **Show changes**, the switch in the second row of the top bar, turns the change marks on and off from Read, Review or Changes: on shows Changes, off goes back to where you were (Read or Review). While the latest version has changes you have not reviewed or accepted yet, the switch shows how many, with **Accept all revisions** beside it (see [Reviewing what changed](#reviewing-what-changed)). The mode a document opens in is the **Default view** setting: Changes when the agent revised it since your last review, else Review, unless you choose Read or Review there.
+
 You can comment on any recorded version. On an older version a banner says the comments will be carried forward to the latest one. When the file on disk has edits that are not recorded yet, a banner says "Unrecorded changes on disk" with **Preview live** (a read-only live view that updates as the agent edits) and **Record as my revision**. You cannot comment on the unrecorded preview, because comments must point at text that will not change under them.
 
 ## Commenting on anything
@@ -260,6 +262,14 @@ In the inline view:
 
 The change list groups changes by section, with a "seen" checkbox per change and a progress count ("5/9 reviewed"). `n` and `p` jump to the next and previous change. Source mode shows the same comparison as a source diff (unified or split), with hunk ids and thread chips.
 
+**Accept all revisions** (beside the **Show changes** switch, and in the command palette) is for when you are happy with what the agent did:
+
+- the latest version's changes stop showing as new: the switch loses its count, the document no longer opens on them, and the next version is compared with this one (`v3 · accepted` in the range);
+- every addressed or answered thread waiting in Verify is resolved, as with **Accept all**; declined threads stay for you to decide;
+- the change marks go away (you are back in Read or Review), and the changes are ticked as seen.
+
+It takes effect at once and sends nothing to the agent; the toast has **Undo**.
+
 ## Verifying the agent's replies
 
 The **Verify** filter (`v`) lists threads the agent marked addressed, answered or declined that you have not responded to yet. Each card shows your comment, the agent's reply, and a word-level mini-diff of the change linked to it (with **View in Changes**).
@@ -363,6 +373,8 @@ The palette lists every action that has a key, plus these, which have none:
 | **Compare versions** | Changes mode for any two versions: pick the older one, then the newer one |
 | **Compare side by side / Compare inline** | Changes with the older version beside the newer one, or the changes drawn over the newer one |
 | **Accept all addressed threads** | Resolve every addressed or answered thread in Verify (`Shift+X`); declined ones stay |
+| **Accept all revisions** | Accept the latest version (its changes stop showing as new) and resolve the addressed or answered threads in Verify |
+| **Show changes / Hide changes** | The **Show changes** switch: Changes, or back to Read or Review |
 | **Filters** | Show **Open**, **Needs me**, **Verify**, **Drafts**, **Resolved**, **Outdated** or **All** threads |
 | **Submit review as Comment / Request changes / Approve** | Open **Submit review** with that verdict already chosen; nothing is sent until you submit there |
 | **General comment** | A comment about the whole document |
@@ -388,6 +400,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 | **Outline rail** | Auto, Always, Never | Auto shows the outline beside the document when the window is wide and keeps it behind the `=` menu button when it is narrower, such as the pane next to a chat. Always keeps it beside the document when there is room; Never keeps it behind the button |
 | **Thread panel open by default** | On, Off | Whether the thread panel is showing when you open a doc. `\` still shows or hides it at any time |
 | **Single-letter shortcuts** | On, Off | Off: every one-key shortcut (letters such as `c`, `j` and `b`, digits, and `?`, `[`, `]`, `\`, `B`) does nothing, in the UI and in the document. Turn this off if the document has its own keyboard controls, you use speech input, or you press keys by accident. `Esc`, the `Cmd` shortcuts, the buttons and the command palette still work, and the composer's `1`-`3` severity keys keep working while you type a comment |
+| **Default view** | Changes when revised, Read, Review | The mode a document opens in. Changes when revised (the default): what changed since your last review (or the revisions you accepted), when the agent revised it since; Review otherwise. Read: the latest version, nothing drawn over it. Review: your threads highlighted. Turning **Show changes** off goes back to this view when the document opened on its changes |
 | **When the agent records a new version** | Show a toast, Switch to Changes | A toast with **Review changes** and **Verify**, or go straight to Changes mode against your last review. The UI never switches while you are writing a comment or reply, or while a dialog is open; you get the toast then |
 | **Ask before Send now** | On, Off | On: **Send now** (`Cmd+Shift+Enter` in the composer, or its button) asks you to confirm in the composer first; press it again to send, or `Esc` to go back |
 | **Default verdict** | Comment, Request changes | The verdict **Submit review** starts on when nothing in the review is blocking (a blocking comment always starts it on **Request changes**). You can still change it there, including to **Approve** |
@@ -396,7 +409,7 @@ Press `Cmd+,`, or click the gear in the top bar, to open Settings. Settings appl
 ## Theme, accessibility and clean reading
 
 - `t` cycles light, dark and system themes (or pick one in [Settings](#settings)). Markdown documents follow the theme (including mermaid diagrams); raw HTML documents keep their own styling.
-- **Read** mode (`0`) shows the latest version with nothing drawn over it and no thread panel. `h` hides every highlight, pin and change mark in the other modes; press it again to bring them back.
+- **Read** mode (`0`) shows the latest version with nothing drawn over it and no thread panel; choose it as the **Default view** in [Settings](#settings) to open every document that way. The **Show changes** switch turns the change marks on and off. `h` hides every highlight, pin and change mark in the other modes; press it again to bring them back.
 - All controls are labelled buttons with visible focus rings. The thread and change lists are the keyboard-accessible counterparts of the highlights. States are shown with icons and text, not colour alone. Reduced-motion settings are respected.
 - If one-key shortcuts get in your way (speech input, or a document with its own keyboard controls), turn off **Single-letter shortcuts** in [Settings](#settings); every action stays available from the buttons and the [command palette](#command-palette).
 

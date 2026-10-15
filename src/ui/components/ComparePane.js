@@ -11,6 +11,7 @@ import { html, useEffect, useRef } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { baseFrameNavigating, baseFrameUrl, contentOrigin, setSyncLeader } from '../actions.js';
 import { baseGuest, frameSandbox } from '../frame.js';
+import { baseTag } from '../model.js';
 import { useStore } from '../state.js';
 
 /** The labels over the two frames and the older version's frame. */
@@ -19,14 +20,15 @@ export function ComparePane() {
     base: st.base,
     version: st.version,
     head: st.ds ? Number(st.ds.doc.head) : null,
-    last: st.ds ? Number(st.ds.doc.lastReviewedVersion) : null,
+    ds: st.ds,
   }));
   /** @param {number|'live'|null} v */
   const label = (v) => {
     if (v === 'live') return 'Working copy (unrecorded)';
     if (v == null) return '';
     const notes = [];
-    if (v === s.last) notes.push('your last review');
+    const tag = baseTag(s.ds, v);
+    if (tag) notes.push(tag === 'accepted' ? 'accepted' : 'your last review');
     if (v === s.head) notes.push('latest');
     return `v${v}${notes.length ? ` · ${notes.join(', ')}` : ''}`;
   };

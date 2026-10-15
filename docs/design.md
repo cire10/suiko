@@ -1162,8 +1162,8 @@ Script-generated regions cannot be diffed by source. Their container gets a "cha
 The UI renders them as a unified table or a two-column table with word highlights, hunk ids and thread chips. With no base it shows plain numbered source. Selecting lines and pressing `c` creates a `source` anchor.
 
 ### 8.8 "Since my last review", Verify and the mini-diff
-- `doc.lastReviewedVersion` = the version of the newest submitted review.
-- When `head > lastReviewedVersion`, the UI opens in Changes mode with base = lastReviewedVersion and shows the banner. The base picker offers "your last review", "previous version", or any vN. Any pair vA to vB, or vN to live, is allowed.
+- `doc.lastReviewedVersion` = the version of the newest submitted review. `doc.acceptedVersion` (absent until then) = the newest version whose revisions the reviewer accepted all at once (**Accept all revisions**: it also resolves the Verify queue's addressed and answered threads; Undo restores both). "Since your last review" starts at the newer of the two.
+- When `head` is newer than that, the UI opens in Changes mode with that base and shows the banner (the reviewer's **Default view** setting can open docs in Read or Review instead). A "Show changes" switch in the top bar turns Changes on and off from Read and Review. The base picker offers "your last review", "previous version", or any vN. Any pair vA to vB, or vN to live, is allowed.
 - **Verify queue:** threads with status `addressed`, `answered` or `declined` that have no newer reviewer comment. Keys: `j`/`k` move, `x` accepts (resolves, optionally recording a decision), `o` reopens with a reply draft, `y` accepts a decline.
 - **Mini-diff on each card:** `threadMiniDiff` returns the word diff between the thread's anchored source at the version where the comment was made (or last delivered) and its anchored source at head, clipped to 6 lines, plus "View in Changes".
 
@@ -1434,6 +1434,8 @@ These checks apply to every route:
 | `POST /api/docs/:ws/:doc/threads/:tid/unresolve` | | `Thread` |
 | `POST /api/docs/:ws/:doc/threads/resolve` | `{threads: string[]}` (1-1000 ids) | `{resolved, unchanged}` ("Accept all": every id checked first, already resolved ones unchanged) |
 | `POST /api/docs/:ws/:doc/threads/unresolve` | `{threads: string[]}` | `{reopened, unchanged}` (the Undo of "Accept all") |
+| `POST /api/docs/:ws/:doc/revisions/accept` | `{version, threads?: string[]}` (0-1000 ids) | `{accepted, previous, resolved, unchanged}` ("Accept all revisions": `doc.acceptedVersion` only moves forward; the threads are resolved like "Accept all") |
+| `POST /api/docs/:ws/:doc/revisions/unaccept` | `{version, previous, threads?}` | `{accepted, reopened, unchanged}` (its Undo: `acceptedVersion` back to `previous` while it is still `version`) |
 | `POST /api/docs/:ws/:doc/threads/:tid/move` | `{version, capture}` | `Thread` |
 | `POST /api/docs/:ws/:doc/threads/:tid/apply` | | `VersionManifest` (reviewer applies a suggestion; 409 if the working copy is dirty) |
 | `GET /api/docs/:ws/:doc/threads/:tid/minidiff` | | `{version, before, after, words}` |

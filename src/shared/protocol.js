@@ -68,6 +68,7 @@ export const SSE = Object.freeze({
   REVIEW_DELIVERED: 'review.delivered',
   REVIEW_ACKED: 'review.acked',
   THREAD_UPDATED: 'thread.updated',
+  REVISIONS_ACCEPTED: 'revisions.accepted',
   LOCK_CHANGED: 'lock.changed',
   DRAFTS_CHANGED: 'drafts.changed',
   DOC_APPROVED: 'doc.approved',
@@ -141,6 +142,8 @@ export const TESTID = Object.freeze({
   verifyAccept: 'verify-accept',
   verifyReopen: 'verify-reopen',
   verifyAcceptAll: 'verify-accept-all', // Accept all (the Verify queue's addressed / answered threads)
+  acceptRevisions: 'accept-revisions', // top bar: Accept all revisions (the latest version's, and the Verify queue)
+  showChanges: 'show-changes',         // top bar: the "Show changes" switch (Changes on / off)
   compareFrom: 'compare-from',         // Changes / Source: the older version of the comparison (#sr-base)
   compareLayout: 'compare-layout',     // Changes: Inline / Side by side (buttons carry data-layout="inline|split")
   compareBaseFrame: 'compare-base-frame', // Changes side by side: the older version's doc frame

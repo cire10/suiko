@@ -28,6 +28,9 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  *   (never while a composer, a reply, a dialog or a capture tool is open)
  * @property {boolean} confirmSendNow Send now asks for confirmation first
  * @property {'comment'|'changes_requested'} defaultVerdict the Submit dialog's verdict when nothing is blocking
+ * @property {'auto'|'read'|'review'} openIn the mode a doc opens in (Default view): Read, Review, or 'auto' (Changes
+ *   when the agent revised it since the reviewer's last review or acceptance, else Review); also where turning
+ *   "Show changes" off goes when the doc was opened on its changes
  */
 
 /**
@@ -131,6 +134,7 @@ export function readPrefs() {
     onNewVersion: readPref('onNewVersion', ['toast', 'changes'], 'toast'),
     confirmSendNow: readPref('confirmSendNow', ['1', '0'], '0') === '1',
     defaultVerdict: readPref('defaultVerdict', ['comment', 'changes_requested'], 'comment'),
+    openIn: readPref('openIn', ['auto', 'read', 'review'], 'auto'),
   };
 }
 

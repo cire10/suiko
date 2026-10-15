@@ -177,6 +177,41 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   expect(ui.errors).toEqual([]);
 });
 
+test('Accept all revisions against the real engine: the version is accepted, the doc then opens without its changes', async (/** @type {any} */ { page, ui, real }) => {
+  /** @type {Real} */
+  const r = real;
+  const id = r.docId('kitchen-sink');
+  // a round driven through the engine: rv1 asks a question (t1), v2 answers it and changes a line
+  await r.ops.saveDraft(r.ctx, id, { kind: 'thread', type: 'question', capture: { kind: 'doc' }, body: 'Why rotate on every use?' });
+  await r.ops.submitReview(r.ctx, id, { verdict: 'comment', body: '' });
+  await r.agentFeedback('kitchen-sink');
+  r.write('docs/kitchen-sink.md', r.read('docs/kitchen-sink.md').replace('rotated on every use, and', 'rotated on every use with a grace window, and'));
+  const res = await r.revise('kitchen-sink', {
+    summary: 'Grace window',
+    threads: { t1: { status: 'answered', reply: 'It limits replay.' } },
+    other: [{ at: 'L51', why: 'Added a grace window' }],
+  });
+  expect(res.refused).toBe(false);
+  expect(res.version).toBe(2);
+
+  await ui.open('kitchen-sink');
+  await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('1');
+  await page.getByTestId(TESTID.acceptRevisions).click();
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 1 thread (t1).' })).toBeVisible();
+  await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+  const st = await r.state('kitchen-sink');
+  expect([st.doc.acceptedVersion, st.doc.lastReviewedVersion]).toEqual([2, 1]);
+  expect(st.threads.find((/** @type {any} */ t) => t.id === 't1').status).toBe('resolved');
+  // opened again: nothing new since the accepted version
+  await page.reload();
+  await ui.ready();
+  await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId(TESTID.acceptRevisions)).toHaveCount(0);
+  await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveCount(0);
+  expect(ui.errors).toEqual([]);
+});
+
 test('section comment, Mark agreed and Apply now against the real engine', async (/** @type {any} */ { page, ui, real }) => {
   /** @type {Real} */
   const r = real;

@@ -1,9 +1,10 @@
 // @ts-check
 // Top bar (design 11.1): doc title, version picker (in Changes / Source preceded by the older version's picker, so
-// the comparison reads "[v1 · last review] → [v3 (latest)]"), mode tabs (a dropdown below 900 px), the command palette
-// button (⌘K), comment / pick / snip / screen-snip / hide / theme tools, Settings (gear) and the keyboard shortcuts;
-// then presence chip, round status, the review progress chip, Changes' Inline / Side by side switch (wide layouts),
-// Drafts count and Submit review. The
+// the comparison reads "[v1 · last review] → [v3 (latest)]"), mode tabs (a dropdown below 900 px; each tab's tooltip
+// says what it shows), the command palette button (⌘K), comment / pick / snip / screen-snip / hide / theme tools,
+// Settings (gear) and the keyboard shortcuts; then presence chip, round status, the review progress chip, the changes
+// controls (the "Show changes" switch and Accept all revisions, in Read / Review / Changes), Changes' Inline / Side by
+// side switch (wide layouts), Drafts count and Submit review. The
 // modes and tools follow the doc kind (model.js modesFor / kindCaps: a code review has no Source, pick, snip, hide). The
 // capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are discoverable; the screen-snip button
 // disappears once the daemon said it cannot capture the screen (not macOS). The menu button (outline drawer / rail)
@@ -15,13 +16,14 @@
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import {
-  cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase, setCompareLayout, setMode,
-  snipScreen, switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar, toggleSnip,
+  acceptRevisions, cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase,
+  setCompareLayout, setMode, showChanges, snipScreen, switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar,
+  toggleSnip,
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import {
-  agentName, draftCount, filterCounts, kindCaps, modesFor, presenceInfo, reviewProgress, roundSummary, showsDoc,
-  versionNumbers,
+  acceptableThreads, agentName, baseTag, defaultBase, draftCount, filterCounts, kindCaps, modesFor, presenceInfo,
+  reviewProgress, revisionsToAccept, roundSummary, showsDoc, versionNumbers,
 } from '../model.js';
 import { useStore } from '../state.js';
 import { Chip, Icon } from './common.js';
@@ -47,6 +49,8 @@ export function TopBar() {
     screenRunning: st.screenSnip.running,
     screenSupported: st.screenSnip.supported,
     compareLayout: st.compareLayout,
+    changes: st.changes,
+    busyThreads: st.busyThreads,
   }));
   const ds = s.ds;
   if (!ds) return null;
@@ -64,7 +68,6 @@ export function TopBar() {
   const canPick = s.version !== 'live' && showsDoc(s.mode);
   const showBase = s.mode === 'changes' || s.mode === 'source';
   const numericV = s.version === 'live' ? head + 1 : Number(s.version);
-  const last = Number(ds.doc.lastReviewedVersion);
   // the older end of a comparison: any version before the shown one (every recorded version for the working copy)
   const olders = versions.filter((v) => v < numericV || (s.version === 'live' && v <= head)).reverse();
 
@@ -95,15 +98,18 @@ export function TopBar() {
           disabled=${!olders.length} title="The older version: what changed since it is shown (d: your last review / the previous version)"
           onChange=${(/** @type {any} */ e) => setBase(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
           ${s.base == null ? html`<option value="">${olders.length ? 'none' : 'no earlier version'}</option>` : null}
-          ${olders.map((v) => html`<option value=${String(v)}>
-            v${v}${v === last ? ' · last review' : v === numericV - 1 ? ' · previous' : ''}</option>`)}
+          ${olders.map((v) => {
+            const tag = baseTag(ds, v);
+            return html`<option value=${String(v)}>
+              v${v}${tag === 'accepted' ? ' · accepted' : tag === 'review' ? ' · last review' : v === numericV - 1 ? ' · previous' : ''}</option>`;
+          })}
         </select>
         <span class="compare-arrow" aria-hidden="true">→</span>
         ${versionSelect}
       </span>` : versionSelect}
       <nav class="mode-tabs" role="tablist" aria-label="Mode">
         ${MODES.map((m) => html`<button type="button" role="tab" data-testid=${TESTID.modeTab} data-mode=${m.key}
-          aria-selected=${s.mode === m.key} class=${s.mode === m.key ? 'active' : ''} title=${`${m.label} (${m.n})`}
+          aria-selected=${s.mode === m.key} class=${s.mode === m.key ? 'active' : ''} title=${`${m.label}: ${m.description} (${m.n})`}
           onClick=${() => setMode(m.key)}>${m.label}</button>`)}
       </nav>
       <label class="sr-only" for="sr-mode">Mode</label>
@@ -159,15 +165,47 @@ export function TopBar() {
       <span key="progress" class="progress-slot">${progress && progress.stage !== 'ready'
         ? html`<${Chip} tone=${progress.tone} class="review-progress">${progress.label}<//>` : null}</span>
       <span key="spacer" class="spacer"></span>
+      <span key="changes" class="changes-slot">${caps.frame && showsDoc(s.mode)
+        ? html`<${ChangesControls} ds=${ds} mode=${s.mode} version=${s.version} changes=${s.changes} busy=${s.busyThreads} />` : null}</span>
       <span key="layout" class="layout-slot">${s.mode === 'changes' && caps.frame && !s.narrow ? html`<${CompareLayout} layout=${s.compareLayout} />` : null}</span>
-      <button key="threads" type="button" class="btn btn-sm threads-toggle" aria-controls="sr-side"
+      <button key="threads" type="button" class="btn btn-sm threads-toggle" aria-controls="sr-side" aria-label=${`Threads (${open})`}
         aria-expanded=${s.narrow ? s.drawer : s.sidebar} onClick=${toggleSidebar} title="Toggle the thread panel (\\)">
-        <${Icon} name="threads" size=${14} /> Threads (${open})
+        <${Icon} name="threads" size=${14} /> <span class="lbl-long">Threads (${open})</span><span class="lbl-short">${open}</span>
       </button>
       <span key="drafts" class="drafts-count" title="Unsubmitted comments">Drafts <strong>${drafts}</strong></span>
       <${SubmitButton} key="submit" />
     </div>
   </header>`;
+}
+
+/**
+ * The changes controls, in Read / Review / Changes: the "Show changes" switch (the change marks on or off: Changes, or
+ * back to Read / Review), with the number of changes when the latest version has revisions you have not reviewed or
+ * accepted yet, and then "Accept all revisions" on that version. Nothing for a doc with only one version.
+ * @param {{ ds: any, mode: string, version: number|'live'|null, changes: any, busy: string[] }} props
+ */
+function ChangesControls({ ds, mode, version, changes, busy }) {
+  const on = mode === 'changes';
+  if (!on && defaultBase(ds, version, 'last') == null) return null;
+  const todo = revisionsToAccept(ds);
+  const onNew = !!todo && version === todo.version;
+  const n = onNew ? (changes?.hunks || []).length : 0;
+  const threads = onNew ? acceptableThreads(ds).length : 0;
+  const since = todo?.since != null ? `since v${todo.since}` : '';
+  return html`<label class="switch changes-switch" data-testid=${TESTID.showChanges}
+      title=${on ? 'Showing what changed, marked in the document. Turn off to see the version without change marks'
+        : 'Show what changed since your last review, marked in the document (Changes)'}>
+      <input type="checkbox" role="switch" checked=${on} aria-checked=${on ? 'true' : 'false'}
+        aria-label=${`Show changes${n ? ` (${n} new)` : ''}`} onChange=${(/** @type {any} */ e) => showChanges(!!e.currentTarget.checked)} />
+      <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+      <span class="changes-switch-text" aria-hidden="true"><span class="lbl-long">Show changes</span><span class="lbl-short">Changes</span></span>
+      ${n ? html`<span class="badge tone-accent" aria-hidden="true">${n}</span>` : null}
+    </label>
+    ${onNew && todo ? html`<button type="button" class="btn btn-sm btn-ok accept-revisions" data-testid=${TESTID.acceptRevisions}
+      aria-label="Accept all revisions" disabled=${busy.length > 0} onClick=${() => acceptRevisions()}
+      title=${`Accept the revisions of v${todo.version}${since ? ` (${since})` : ''}: they stop showing as new${threads
+        ? `, and the ${threads} thread${threads === 1 ? '' : 's'} ${agentName(ds)} addressed or answered ${threads === 1 ? 'is' : 'are'} resolved` : ''}. You can undo it`}>
+      <span class="lbl-long">Accept all revisions</span><span class="lbl-short">Accept all</span></button>` : null}`;
 }
 
 /**

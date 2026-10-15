@@ -23,9 +23,9 @@ import { MSG, SSE } from 'protocol';
 import { api, docApi, onConnection, onReconnect, token } from './api.js';
 import { baseGuest, guest } from './frame.js';
 import {
-  acceptableThreads, agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, declinedToVerify, defaultBase,
-  draftVersion, isComposerDirty, hasMode, isReplyDirty, kindCaps, numericVersion, panelItems, replyDraftsFor,
-  showsDoc, staleApproveText, suggestionMode, versionNumbers,
+  acceptableThreads, agentPrompt, anchorAt, anchorColumn, applyErrorText, backupHasInput, baseTag, declinedToVerify,
+  defaultBase, draftVersion, isComposerDirty, hasMode, isReplyDirty, kindCaps, numericVersion, openingMode, panelItems,
+  plainMode, replyDraftsFor, revisionsToAccept, showsDoc, staleApproveText, suggestionMode, versionNumbers,
 } from './model.js';
 import { EventStream } from './sse.js';
 import { store, writePref } from './state.js';
@@ -73,6 +73,9 @@ let autoChanges = null;
 /** The doc list request in flight (loadDocList). */
 /** @type {Promise<void>|null} */
 let docListLoading = null;
+/** The mode the reviewer left for Changes (Read or Review), where turning "Show changes" off goes back to. */
+/** @type {'read'|'review'|null} */
+let changesReturn = null;
 
 /**
  * A second request to open the same composer (same capture and type) within this window is a duplicate: the guest
@@ -178,6 +181,7 @@ export async function openDoc(ws, doc) {
   lastScroll = null;
   pendingRestore = null;
   pendingFocus = null;
+  changesReturn = null;
   set({
     route: { view: 'doc', ws, doc },
     ds: null,
@@ -220,9 +224,9 @@ export async function openDoc(ws, doc) {
   }
   if (client !== c) return;
   const head = Number(ds?.doc?.head) || 1;
-  const last = Number(ds?.doc?.lastReviewedVersion);
-  // "Since my last review" is the entry point when the agent has revised since (design 8.8).
-  const mode = last >= 1 && head > last ? 'changes' : 'review';
+  // Settings: Default view. Its default, 'auto', opens on "since my last review" when the agent has revised since
+  // (design 8.8).
+  const mode = openingMode(ds, get().prefs.openIn);
   set({ ds, version: head, mode, base: defaultBase(ds, head, 'last'), baseKind: 'last' });
   updateTitle();
   stream = new EventStream({ ws, doc, onEvent: onDocEvent, onOpen: () => refresh() });
@@ -1046,6 +1050,7 @@ export function setMode(mode) {
     if (cur.version !== 'live' && cur.version !== head && !switchVersion(head)) return;
   }
   const s = get();
+  if (mode === 'changes' && (s.mode === 'read' || s.mode === 'review')) changesReturn = s.mode;
   let base = s.base;
   if (base == null) base = defaultBase(s.ds, s.version, s.baseKind === 'custom' ? 'last' : s.baseKind);
   if (s.tool !== 'select') guest.send(MSG.SET_TOOL, { tool: 'select' });
@@ -1056,6 +1061,18 @@ export function setMode(mode) {
   updateTitle();
   sendInit();
   if (base !== s.base || (!s.changes && base != null)) loadChanges();
+}
+
+/**
+ * The "Show changes" switch: Changes (what changed, marked in the doc), or back to the mode the reviewer came from
+ * (Read or Review; their Default view when the doc opened on its changes).
+ * @param {boolean} [on] default: the opposite of what is shown
+ */
+export function showChanges(on = get().mode !== 'changes') {
+  const s = get();
+  if (!s.ds) return;
+  if (on) setMode('changes');
+  else if (s.mode === 'changes') setMode(changesReturn ?? plainMode(s.ds, s.prefs.openIn));
 }
 
 /**
@@ -1115,7 +1132,9 @@ export function toggleBaseKind() {
   const kind = s.baseKind === 'prev' ? 'last' : 'prev';
   const base = defaultBase(s.ds, s.version, kind);
   set({ baseKind: kind, base });
-  toast(base == null ? 'No earlier version to compare with.' : `Comparing with v${base} (${kind === 'last' ? 'your last review' : 'previous version'}).`, { timeout: 2500 });
+  const tag = kind === 'last' ? baseTag(s.ds, base) : null;
+  const what = tag === 'accepted' ? 'the revisions you accepted' : tag === 'review' ? 'your last review' : 'previous version';
+  toast(base == null ? 'No earlier version to compare with.' : `Comparing with v${base} (${what}).`, { timeout: 2500 });
   loadChanges();
 }
 
@@ -1875,6 +1894,85 @@ async function undoAcceptAll(c, ids) {
   await refreshNow();
 }
 
+/**
+ * Accept all revisions: accepts the newest version's revisions (the doc stops opening on them, and Changes compares
+ * later versions with it) and resolves the Verify queue's addressed and answered threads, in one request; marks the
+ * changes shown as seen and leaves Changes for the doc without change marks. Declined threads stay in Verify, like
+ * with Accept all. The toast has Undo.
+ * @returns {Promise<boolean>} false when there was nothing to accept
+ */
+export async function acceptRevisions() {
+  const c = client;
+  const s = get();
+  if (!c || !s.ds) return false;
+  if (s.version === 'live') {
+    toast('The working copy is a read-only preview. Switch to the latest version to accept its revisions.', { tone: 'warn' });
+    return false;
+  }
+  const todo = revisionsToAccept(s.ds);
+  if (!todo) {
+    toast('Nothing new to accept: you reviewed or accepted the latest version already.', { timeout: 4000 });
+    return false;
+  }
+  if (s.version !== todo.version) {
+    toast(`Switch to v${todo.version} (latest) to accept its revisions.`, { timeout: 4000 });
+    return false;
+  }
+  const ids = acceptableThreads(s.ds).map((/** @type {any} */ t) => String(t.id)).filter((id) => !s.busyThreads.includes(id));
+  // the changes shown, when they end at the accepted version (seen marks are kept per comparison)
+  const seenKey = seenStorageKey(s);
+  const before = readSeen(seenKey);
+  const newlySeen = (s.changes?.hunks || []).map((/** @type {any} */ h) => String(h.id)).filter((id) => !before.has(id));
+  set((st) => ({ busyThreads: [...st.busyThreads, ...ids] }));
+  /** @type {any} */
+  let r;
+  try {
+    r = await c.acceptRevisions(todo.version, ids);
+  } catch (err) {
+    toast(`Could not accept the revisions: ${errorText(err)}`, { tone: 'danger' });
+    return true;
+  } finally {
+    set((st) => ({ busyThreads: st.busyThreads.filter((x) => !ids.includes(x)) }));
+  }
+  if (client !== c) return true;
+  writeSeen(seenKey, newlySeen, true);
+  if (get().mode === 'changes') showChanges(false);
+  const done = Array.isArray(r?.resolved) ? r.resolved.map(String) : ids;
+  const declined = declinedToVerify(get().ds).length;
+  const threads = done.length ? ` and ${done.length} thread${done.length === 1 ? '' : 's'} (${listIds(done)})` : '';
+  toast(`Accepted the revisions of v${todo.version}${threads}.${declined
+    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}`, {
+    tone: 'ok',
+    timeout: 12000,
+    actions: [{
+      label: 'Undo',
+      run: () => undoAcceptRevisions(c, { version: Number(r?.accepted) || todo.version, previous: r?.previous ?? null, threads: done, seenKey, seen: newlySeen }),
+    }],
+  });
+  await refreshNow();
+  return true;
+}
+
+/**
+ * The Undo of Accept all revisions: the version's revisions are new again (the accepted version goes back to what it
+ * was), and the threads go back to Verify.
+ * @param {NonNullable<typeof client>} c the doc they were accepted on
+ * @param {{ version: number, previous: number|null, threads: string[], seenKey: string|null, seen: string[] }} a
+ */
+async function undoAcceptRevisions(c, a) {
+  if (client !== c) return;
+  try {
+    await c.unacceptRevisions(a.version, a.previous, a.threads);
+  } catch (err) {
+    toast(`Could not undo: ${errorText(err)}`, { tone: 'danger' });
+    return;
+  }
+  writeSeen(a.seenKey, a.seen, false);
+  const n = a.threads.length;
+  toast(`The revisions of v${a.version} are to review again${n ? `; ${n} thread${n === 1 ? ' is' : 's are'} back in Verify` : ''}.`, { timeout: 3000 });
+  await refreshNow();
+}
+
 /** "t1, t2, t5", or "t1, t2, t3 and 4 more" for a long list. @param {string[]} ids */
 function listIds(ids) {
   return ids.length <= 5 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')} and ${ids.length - 3} more`;
@@ -2325,7 +2423,7 @@ export function toggleDialog(name) {
 
 const PREF_KEYS = /** @type {const} */ ({
   railMode: 'railMode', panelOpen: 'sidebar', singleKeys: 'singleKeys', onNewVersion: 'onNewVersion',
-  confirmSendNow: 'confirmSendNow', defaultVerdict: 'defaultVerdict',
+  confirmSendNow: 'confirmSendNow', defaultVerdict: 'defaultVerdict', openIn: 'openIn',
 });
 
 /**
@@ -2514,8 +2612,17 @@ export function readSeen(key) {
  * @param {boolean} on
  */
 export function setChangesSeen(ids, on) {
-  const key = seenStorageKey(get());
-  if (!key) return;
+  writeSeen(seenStorageKey(get()), ids, on);
+}
+
+/**
+ * Marks changes of a comparison (its seenStorageKey) as seen, or not.
+ * @param {string|null} key
+ * @param {string[]} ids
+ * @param {boolean} on
+ */
+function writeSeen(key, ids, on) {
+  if (!key || !ids.length) return;
   const seen = readSeen(key);
   for (const id of ids) {
     if (on) seen.add(id);

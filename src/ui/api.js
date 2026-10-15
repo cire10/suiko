@@ -285,6 +285,16 @@ export function docApi(ws, doc) {
     resolveMany: (threads) => request('POST', `${base}/threads/resolve`, { threads }),
     /** The Undo of Accept all. @param {string[]} threads -> {reopened, unchanged} */
     unresolveMany: (threads) => request('POST', `${base}/threads/unresolve`, { threads }),
+    /**
+     * Accept all revisions: up to `version`, resolving these threads. @param {number} version @param {string[]} threads
+     * -> {accepted, previous, resolved, unchanged}
+     */
+    acceptRevisions: (version, threads) => request('POST', `${base}/revisions/accept`, { version, threads }),
+    /**
+     * Its Undo. @param {number} version @param {number|null} previous @param {string[]} threads
+     * -> {accepted, reopened, unchanged}
+     */
+    unacceptRevisions: (version, previous, threads) => request('POST', `${base}/revisions/unaccept`, { version, previous, threads }),
     /** @param {string} tid @param {{ version: number, capture: any }} body */
     move: (tid, body) => request('POST', `${base}/threads/${enc(tid)}/move`, body),
     /** @param {string} tid */

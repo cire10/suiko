@@ -239,6 +239,15 @@ const ops = {
     calls.push(['unresolveThreads', { docId, ids }]);
     return { reopened: ids, unchanged: [] };
   },
+  async acceptRevisions(/** @type {any} */ _ctx, /** @type {string} */ docId, /** @type {any} */ input) {
+    calls.push(['acceptRevisions', { docId, ...input }]);
+    if (input.threads.includes('t9')) throw new NotFoundError('thread t9 not found');
+    return { accepted: input.version, previous: null, resolved: input.threads, unchanged: [] };
+  },
+  async unacceptRevisions(/** @type {any} */ _ctx, /** @type {string} */ docId, /** @type {any} */ input) {
+    calls.push(['unacceptRevisions', { docId, ...input }]);
+    return { accepted: input.previous, reopened: input.threads, unchanged: [] };
+  },
   async applySuggestionAsReviewer() {
     throw new RefusedError('the working copy has unrecorded changes');
   },
@@ -862,6 +871,32 @@ describe('API', () => {
     assert.equal((await api(`${base}/unresolve`, {})).status, 422);
     // the per-thread routes are unchanged
     assert.equal((await api(`${base}/t1/resolve`, { decision: 'x' })).status, 409);
+  });
+
+  test('Accept all revisions (revisions/accept) and its Undo (revisions/unaccept): validated, as the reviewer', async () => {
+    const base = `/api/docs/${store1.wsId}/spec/revisions`;
+    for (const bad of [{}, { version: 0 }, { version: 'v2' }, { version: 1.5 }, { version: 2, threads: 't1' }, { version: 2, threads: ['Bad Id'] }]) {
+      assert.equal((await api(`${base}/accept`, bad)).status, 422, JSON.stringify(bad));
+    }
+    const r = await api(`${base}/accept`, { version: 2, threads: ['t1', 't3', 't1'] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json(), { accepted: 2, previous: null, resolved: ['t1', 't3'], unchanged: [] });
+    const call = calls.findLast((c) => c[0] === 'acceptRevisions')?.[1];
+    assert.deepEqual([call.docId, call.version, call.threads], ['spec', 2, ['t1', 't3']]);
+    assert.ok(typeof call.by === 'string' && call.by.length > 0, 'by is the reviewer name');
+    // no threads to resolve: still accepted
+    assert.equal((await api(`${base}/accept`, { version: 2 })).status, 200);
+    assert.deepEqual(calls.findLast((c) => c[0] === 'acceptRevisions')?.[1].threads, []);
+    assert.equal((await api(`${base}/accept`, { version: 2, threads: ['t9'] })).status, 404);
+
+    assert.equal((await api(`${base}/unaccept`, { version: 2, previous: 'v1' })).status, 422);
+    const undo = await api(`${base}/unaccept`, { version: 2, previous: 1, threads: ['t1'] });
+    assert.equal(undo.status, 200);
+    assert.deepEqual(undo.json(), { accepted: 1, reopened: ['t1'], unchanged: [] });
+    const u = calls.findLast((c) => c[0] === 'unacceptRevisions')?.[1];
+    assert.deepEqual([u.version, u.previous, u.threads], [2, 1, ['t1']]);
+    assert.equal((await api(`${base}/unaccept`, { version: 2 })).status, 200);
+    assert.equal(calls.findLast((c) => c[0] === 'unacceptRevisions')?.[1].previous, null, 'no previous: none');
   });
 
   test('engine errors map to HTTP statuses', async () => {
