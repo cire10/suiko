@@ -78,6 +78,8 @@ export {};
  * @property {'in_review' | 'approved' | 'closed'} state
  * @property {number} head latest committed version (0 before v1)
  * @property {number | null} lastReviewedVersion version of the newest submitted review
+ * @property {number | null} [acceptedVersion] the newest version whose revisions the reviewer accepted all at once
+ *   (Accept all revisions); absent until then
  * @property {DocFinal | null} final
  * @property {Record<IdKind, number>} counters last allocated number per id kind
  */

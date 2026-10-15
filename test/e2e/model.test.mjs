@@ -11,7 +11,7 @@ import {
   highlightParts, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isSingleKeyCombo,
   isVerifiable, keyLabel, linesLabel, matchRow, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary,
   singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches, threadRowTitle, timeline,
-  trimDiffContext,
+  trimDiffContext, baseTag, openingMode, plainMode, reviewedThrough, revisionsToAccept,
 } from '../../src/ui/model.js';
 import { contentUrl, docUrl, wordParts } from '../../src/ui/util.js';
 
@@ -56,6 +56,48 @@ test('defaultBase: the last review when older than the shown version, else the p
   assert.equal(defaultBase(docState({ doc: { ...ds.doc, lastReviewedVersion: 3 } }), 3, 'last'), 2);
   assert.equal(defaultBase(ds, 'live', 'last'), 1);
   assert.equal(defaultBase(ds, 'live', 'prev'), 3);
+});
+
+test('accepted revisions: "since your last review" starts at the newer of the last review and the accepted version', () => {
+  const ds = docState();
+  /** @param {Record<string, any>} doc */
+  const at = (doc) => docState({ doc: { ...ds.doc, ...doc } });
+  assert.equal(reviewedThrough(ds), 1);
+  assert.equal(reviewedThrough(at({ acceptedVersion: 2 })), 2);
+  assert.equal(reviewedThrough(at({ lastReviewedVersion: 3, acceptedVersion: 2 })), 3);
+  assert.equal(reviewedThrough(at({ lastReviewedVersion: null })), null);
+  // the Changes base follows it
+  assert.equal(defaultBase(at({ acceptedVersion: 2 }), 3, 'last'), 2);
+  assert.equal(defaultBase(at({ acceptedVersion: 3 }), 3, 'last'), 2, 'nothing newer: the previous version');
+  assert.equal(defaultBase(at({ acceptedVersion: 2 }), 'live', 'last'), 2);
+  // labels: the last review, or the accepted version when it is newer
+  assert.equal(baseTag(ds, 1), 'review');
+  assert.equal(baseTag(at({ acceptedVersion: 2 }), 2), 'accepted');
+  assert.equal(baseTag(at({ acceptedVersion: 2 }), 1), 'review');
+  assert.equal(baseTag(at({ lastReviewedVersion: 2, acceptedVersion: 2 }), 2), 'review');
+  assert.equal(baseTag(ds, 2), null);
+  assert.equal(baseTag(ds, null), null);
+  // what Accept all revisions accepts: the latest version, while it is newer than both
+  assert.deepEqual(revisionsToAccept(ds), { version: 3, since: 1 });
+  assert.equal(revisionsToAccept(at({ acceptedVersion: 3 })), null);
+  assert.equal(revisionsToAccept(at({ lastReviewedVersion: 3 })), null);
+  assert.deepEqual(revisionsToAccept(at({ lastReviewedVersion: null })), { version: 3, since: null }, 'never reviewed');
+  assert.equal(revisionsToAccept(at({ head: 1, lastReviewedVersion: null })), null, 'only v1');
+});
+
+test('openingMode / plainMode: the Default view setting, and Changes when revised since the last review or acceptance', () => {
+  const ds = docState();
+  const code = docState({ doc: { ...ds.doc, kind: 'code' } });
+  assert.equal(openingMode(ds, 'auto'), 'changes');
+  assert.equal(openingMode(docState({ doc: { ...ds.doc, acceptedVersion: 3 } }), 'auto'), 'review', 'accepted: nothing new');
+  assert.equal(openingMode(docState({ doc: { ...ds.doc, lastReviewedVersion: null } }), 'auto'), 'review', 'never reviewed');
+  assert.equal(openingMode(ds, 'read'), 'read');
+  assert.equal(openingMode(ds, 'review'), 'review');
+  assert.equal(openingMode(code, 'read'), 'review', 'a code review has no Read');
+  assert.equal(plainMode(ds, 'read'), 'read');
+  assert.equal(plainMode(ds, 'auto'), 'review');
+  assert.equal(plainMode(ds, 'review'), 'review');
+  assert.equal(plainMode(code, 'read'), 'review');
 });
 
 test('anchorAt: the exact version, else the newest earlier anchor, else the oldest', () => {

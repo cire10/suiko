@@ -139,6 +139,28 @@
   display: contents;
 }
 
+/* Same for the changes controls ("Show changes" and Accept all revisions, TopBar ChangesControls). */
+.changes-slot {
+  display: contents;
+}
+
+/* "Show changes": a switch with its label (the whole label toggles it) and the number of new changes. */
+.changes-switch {
+  gap: 6px;
+  color: var(--fg);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.accept-revisions {
+  white-space: nowrap;
+}
+
+/* A label and its short form for narrow layouts (the changes controls). */
+.lbl-short {
+  display: none;
+}
+
 .tools {
   display: inline-flex;
   gap: 2px;
@@ -483,8 +505,13 @@
   .brand-text,
   .drafts-count,
   .round-status,
-  .palette-btn-text {
+  .palette-btn-text,
+  .lbl-long {
     display: none;
+  }
+
+  .lbl-short {
+    display: inline;
   }
 
   .doc-name {

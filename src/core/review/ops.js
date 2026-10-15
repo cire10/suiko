@@ -16,7 +16,9 @@ export { threads, show } from './ops/threads.js';
 // reviewer: drafts, submit, threads, locks, recorded versions
 export { resolveCapture, saveDraft, updateDraft, deleteDraft, listDrafts } from './ops/drafts.js';
 export { submitReview } from './ops/submit.js';
-export { resolveThread, unresolveThread, resolveThreads, unresolveThreads, moveThread } from './ops/threads.js';
+export {
+  resolveThread, unresolveThread, resolveThreads, unresolveThreads, acceptRevisions, unacceptRevisions, moveThread,
+} from './ops/threads.js';
 export { addLock, removeLock, relock } from './ops/locks.js';
 export { recordReviewerVersion, applySuggestionAsReviewer } from './ops/revise.js';
 

@@ -4,8 +4,9 @@
 //   Appearance  Theme: System / Light / Dark (the same state as the `t` key).
 //   Layout      Outline rail: Auto / Always / Never; Thread panel open by default.
 //   Keyboard    Single-letter shortcuts on / off (off: c, j, b, 1, ? ... do nothing, in the UI and in the doc).
-//   Behaviour   When the agent records a new version: toast / switch to Changes; Ask before Send now; the default
-//               verdict when nothing is blocking.
+//   Behaviour   Default view (what a doc opens in: Changes when revised / Read / Review); when the agent records a
+//               new version: toast / switch to Changes; Ask before Send now; the default verdict when nothing is
+//               blocking.
 //   About       Suiko version, workspace root, spec path, the UI / content ports, and the "tell the agent"
 //               prompt to copy.
 
@@ -102,6 +103,11 @@ export function SettingsDialog() {
 
       <section class="settings-section" aria-labelledby="sr-set-h-behaviour">
         <h3 id="sr-set-h-behaviour">Behaviour</h3>
+        <${Setting} id="sr-set-open" title="Default view"
+          hint="What a document opens in. Read: the latest version, nothing drawn over it. Review: your threads highlighted. Changes when revised: what changed since your last review, if the agent revised it since (else Review).">
+          <${Choice} name="openIn" label="Default view" value=${p.openIn}
+            options=${[['auto', 'Changes when revised'], ['read', 'Read'], ['review', 'Review']]} onChange=${(/** @type {any} */ v) => setPref('openIn', v)} />
+        <//>
         <${Setting} id="sr-set-version" title="When the agent records a new version"
           hint="Switching never happens while you are writing a comment or a dialog is open; you get the toast then.">
           <${Choice} name="onNewVersion" label="When the agent records a new version" value=${p.onNewVersion}

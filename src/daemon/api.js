@@ -228,6 +228,29 @@ export function registerApiRoutes(router, deps) {
     sendJson(res, 200, await engine.call('unresolveThreads', wsId, docId, ids, { by: await engine.reviewer(wsId) }));
   });
 
+  // Accept all revisions and its Undo: {version, threads} -> {accepted, previous, resolved, unchanged};
+  // {version, previous, threads} -> {accepted, reopened, unchanged}. threads may be empty.
+  router.post(`${D}/revisions/accept`, async ({ req, res, params }) => {
+    const { wsId, docId } = await resolveDoc(params);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await engine.call('acceptRevisions', wsId, docId, {
+      version: versionNumber(body.version, 'version'),
+      threads: threadIds(body.threads ?? [], { allowEmpty: true }),
+      by: await engine.reviewer(wsId),
+    }));
+  });
+
+  router.post(`${D}/revisions/unaccept`, async ({ req, res, params }) => {
+    const { wsId, docId } = await resolveDoc(params);
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await engine.call('unacceptRevisions', wsId, docId, {
+      version: versionNumber(body.version, 'version'),
+      previous: body.previous == null ? null : versionNumber(body.previous, 'previous'),
+      threads: threadIds(body.threads ?? [], { allowEmpty: true }),
+      by: await engine.reviewer(wsId),
+    }));
+  });
+
   router.post(`${D}/threads/:tid/resolve`, async ({ req, res, params }) => {
     const { wsId, docId } = await resolveDoc(params);
     const body = await readJsonBody(req);
@@ -574,16 +597,28 @@ function itemId(id) {
 const MAX_BULK_THREADS = 1000;
 
 /**
- * The thread ids of a bulk request body (`threads`): a non-empty array of ids, else 400.
+ * The thread ids of a bulk request body (`threads`): an array of ids (non-empty unless allowEmpty), else 400.
  * @param {unknown} list
+ * @param {{ allowEmpty?: boolean }} [opts]
  * @returns {string[]}
  */
-function threadIds(list) {
-  if (!Array.isArray(list) || !list.length || list.length > MAX_BULK_THREADS
+function threadIds(list, { allowEmpty = false } = {}) {
+  if (!Array.isArray(list) || (!list.length && !allowEmpty) || list.length > MAX_BULK_THREADS
     || !list.every((t) => typeof t === 'string' && ITEM_ID_RE.test(t))) {
-    throw invalid(`threads must be an array of 1 to ${MAX_BULK_THREADS} thread ids`);
+    throw invalid(`threads must be an array of ${allowEmpty ? 0 : 1} to ${MAX_BULK_THREADS} thread ids`);
   }
   return [...new Set(/** @type {string[]} */ (list))];
+}
+
+/**
+ * A version number in a JSON body (a positive integer; the engine checks that it is recorded), else 422.
+ * @param {unknown} v
+ * @param {string} name
+ * @returns {number}
+ */
+function versionNumber(v, name) {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) throw invalid(`${name} must be a version number`);
+  return v;
 }
 
 /**

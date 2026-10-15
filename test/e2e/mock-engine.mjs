@@ -815,9 +815,9 @@ export class MockDoc {
     return { resolved, unchanged };
   }
 
-  /** The Undo of Accept all. @param {unknown} ids */
-  unresolveMany(ids) {
-    const list = this.bulkThreads(ids);
+  /** The Undo of Accept all. @param {unknown} ids @param {{ allowEmpty?: boolean }} [opts] */
+  unresolveMany(ids, opts) {
+    const list = this.bulkThreads(ids, opts);
     const reopened = [];
     const unchanged = [];
     for (const t of list) {
@@ -831,11 +831,52 @@ export class MockDoc {
   }
 
   /** @param {unknown} ids */
-  bulkThreads(ids) {
-    if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === 'string')) {
+  bulkThreads(ids, { allowEmpty = false } = {}) {
+    if (!Array.isArray(ids) || (!ids.length && !allowEmpty) || !ids.every((x) => typeof x === 'string')) {
       throw httpError(422, 'threads must be a non-empty list of thread ids');
     }
     return [...new Set(ids)].map((id) => this.thread(String(id)));
+  }
+
+  /** @param {unknown} v @param {string} name */
+  recordedVersion(v, name) {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > this.head) throw httpError(422, `${name} must be a recorded version`);
+    return v;
+  }
+
+  /**
+   * Accept all revisions (like the engine's acceptRevisions): resolves the threads and moves acceptedVersion forward.
+   * @param {{ version: unknown, threads?: unknown }} p
+   */
+  acceptRevisions(p) {
+    const v = this.recordedVersion(p.version, 'version');
+    const list = this.bulkThreads(p.threads ?? [], { allowEmpty: true });
+    const previous = this.doc.acceptedVersion ?? null;
+    const resolved = [];
+    const unchanged = [];
+    for (const t of list) {
+      if (t.status === 'resolved') unchanged.push(t.id);
+      else {
+        this.resolve(t.id);
+        resolved.push(t.id);
+      }
+    }
+    if (previous == null || v > previous) this.doc.acceptedVersion = v;
+    this.emit('revisions.accepted', { version: this.doc.acceptedVersion, previous });
+    return { accepted: this.doc.acceptedVersion, previous, resolved, unchanged };
+  }
+
+  /** Its Undo. @param {{ version: unknown, previous?: unknown, threads?: unknown }} p */
+  unacceptRevisions(p) {
+    const v = this.recordedVersion(p.version, 'version');
+    const prev = p.previous == null ? null : this.recordedVersion(p.previous, 'previous');
+    const out = this.unresolveMany(p.threads ?? [], { allowEmpty: true });
+    if (this.doc.acceptedVersion === v && prev !== v) {
+      if (prev == null) delete this.doc.acceptedVersion;
+      else this.doc.acceptedVersion = prev;
+    }
+    this.emit('revisions.accepted', { version: this.doc.acceptedVersion ?? null, previous: v });
+    return { accepted: this.doc.acceptedVersion ?? null, ...out };
   }
 
   /** @param {string} tid @param {{ version: number, capture: any }} p */

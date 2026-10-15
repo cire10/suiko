@@ -1,7 +1,8 @@
 // @ts-check
 // Thread operations (design 3.7-3.10, 7.6, 8.8, 9.2, 9.6):
 //   reviewer: resolveThread (Accept, optional decision), unresolveThread, resolveThreads / unresolveThreads (Accept
-//             all, and its Undo), moveThread ("Move here")
+//             all, and its Undo), acceptRevisions / unacceptRevisions (Accept all revisions, and its Undo),
+//             moveThread ("Move here")
 //   agent:    reply (no version), ask (agent-question thread, status needs_input), reanchorThread (override;
 //             applied to head when the working copy is clean, else staged until the next revise)
 //   readers:  threads (one line per thread), show (a thread's timeline, or exact old source lines)
@@ -89,24 +90,9 @@ export async function resolveThreads(ctx, ref, tids, { by } = {}) {
   return withDoc(ctx, ref, async (doc) => {
     const list = [];
     for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
-    const at = ctx.now();
-    const name = humanActor(ctx, by).name;
-    /** @type {string[]} */
-    const resolved = [];
-    /** @type {string[]} */
-    const unchanged = [];
-    for (const t of list) {
-      if (t.status === 'resolved') {
-        unchanged.push(t.id);
-        continue;
-      }
-      resolveInPlace(ctx, doc, t, { at, head: doc.head });
-      /** @type {any} */ (t).resolvedBy = name;
-      await ctx.store.saveThread(doc.id, t);
-      resolved.push(t.id);
-    }
-    for (const id of resolved) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: id, status: 'resolved' });
-    return { resolved, unchanged };
+    const out = await resolveListed(ctx, doc, list, by);
+    for (const id of out.resolved) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: id, status: 'resolved' });
+    return out;
   });
 }
 
@@ -124,25 +110,148 @@ export async function unresolveThreads(ctx, ref, tids, _opts = {}) {
   return withDoc(ctx, ref, async (doc) => {
     const list = [];
     for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
-    const at = ctx.now();
-    /** @type {string[]} */
-    const reopened = [];
-    /** @type {string[]} */
-    const unchanged = [];
+    const out = await unresolveListed(ctx, doc, list);
     for (const t of list) {
-      if (t.status !== 'resolved') {
-        unchanged.push(t.id);
-        continue;
-      }
-      unresolveInPlace(t, at);
-      await ctx.store.saveThread(doc.id, t);
-      reopened.push(t.id);
+      if (out.reopened.includes(t.id)) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
     }
-    for (const t of list) {
-      if (reopened.includes(t.id)) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
-    }
-    return { reopened, unchanged };
+    return out;
   });
+}
+
+/**
+ * Accept all revisions: the reviewer accepts the agent's versions up to `version` and, in the same critical section,
+ * resolves the threads given (the UI sends the Verify queue's addressed and answered ones). The accepted version is
+ * where "since your last review" starts from until a newer review or acceptance: the review UI compares later
+ * versions with it and stops opening the doc on the accepted changes. It only moves forward (accepting an older
+ * version keeps it). Every id is checked before anything changes; threads already resolved are left as they are.
+ * @param {Ctx} ctx
+ * @param {string | Doc} ref
+ * @param {{ version?: unknown, threads?: unknown, by?: string }} input
+ * @returns {Promise<{ accepted: number, previous: number | null, resolved: string[], unchanged: string[] }>}
+ */
+export async function acceptRevisions(ctx, ref, { version, threads = [], by } = {}) {
+  const ids = threadIdList(threads, { allowEmpty: true });
+  return withDoc(ctx, ref, async (doc) => {
+    const v = recordedVersion(doc, version, 'version');
+    const list = [];
+    for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
+    const previous = acceptedOf(doc);
+    const out = await resolveListed(ctx, doc, list, by);
+    if (previous == null || v > previous) {
+      doc.acceptedVersion = v;
+      await ctx.store.saveDoc(doc);
+    }
+    for (const id of out.resolved) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: id, status: 'resolved' });
+    const accepted = /** @type {number} */ (acceptedOf(doc));
+    await emit(ctx, doc.id, SSE.REVISIONS_ACCEPTED, { version: accepted, previous });
+    return { accepted, previous, ...out };
+  });
+}
+
+/**
+ * The Undo of Accept all revisions: the threads go back to the agent's last reply status (or open), and the accepted
+ * version returns to `previous` (what acceptRevisions returned) while it is still `version` (an acceptance made
+ * since is kept).
+ * @param {Ctx} ctx
+ * @param {string | Doc} ref
+ * @param {{ version?: unknown, previous?: unknown, threads?: unknown, by?: string }} input
+ * @returns {Promise<{ accepted: number | null, reopened: string[], unchanged: string[] }>}
+ */
+export async function unacceptRevisions(ctx, ref, { version, previous = null, threads = [] } = {}) {
+  const ids = threadIdList(threads, { allowEmpty: true });
+  return withDoc(ctx, ref, async (doc) => {
+    const v = recordedVersion(doc, version, 'version');
+    const prev = previous == null ? null : recordedVersion(doc, previous, 'previous');
+    if (prev != null && prev > v) throw new UsageError(`previous must not be newer than version ${v}, not ${prev}`);
+    const list = [];
+    for (const tid of ids) list.push(await requireThread(ctx, doc.id, tid));
+    const out = await unresolveListed(ctx, doc, list);
+    // previous === version: the acceptance being undone did not move it
+    if (acceptedOf(doc) === v && prev !== v) {
+      if (prev == null) delete doc.acceptedVersion;
+      else doc.acceptedVersion = prev;
+      await ctx.store.saveDoc(doc);
+    }
+    for (const t of list) {
+      if (out.reopened.includes(t.id)) await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
+    }
+    const accepted = acceptedOf(doc);
+    await emit(ctx, doc.id, SSE.REVISIONS_ACCEPTED, { version: accepted, previous: v });
+    return { accepted, ...out };
+  });
+}
+
+/**
+ * Resolves the listed threads (the caller holds the doc lock and emits the events); resolved ones are left alone.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Thread[]} list
+ * @param {string | undefined} by
+ * @returns {Promise<{ resolved: string[], unchanged: string[] }>}
+ */
+async function resolveListed(ctx, doc, list, by) {
+  const at = ctx.now();
+  const name = humanActor(ctx, by).name;
+  /** @type {string[]} */
+  const resolved = [];
+  /** @type {string[]} */
+  const unchanged = [];
+  for (const t of list) {
+    if (t.status === 'resolved') {
+      unchanged.push(t.id);
+      continue;
+    }
+    resolveInPlace(ctx, doc, t, { at, head: doc.head });
+    /** @type {any} */ (t).resolvedBy = name;
+    await ctx.store.saveThread(doc.id, t);
+    resolved.push(t.id);
+  }
+  return { resolved, unchanged };
+}
+
+/**
+ * Unresolves the listed threads (the caller holds the doc lock and emits the events); open ones are left alone.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Thread[]} list
+ * @returns {Promise<{ reopened: string[], unchanged: string[] }>}
+ */
+async function unresolveListed(ctx, doc, list) {
+  const at = ctx.now();
+  /** @type {string[]} */
+  const reopened = [];
+  /** @type {string[]} */
+  const unchanged = [];
+  for (const t of list) {
+    if (t.status !== 'resolved') {
+      unchanged.push(t.id);
+      continue;
+    }
+    unresolveInPlace(t, at);
+    await ctx.store.saveThread(doc.id, t);
+    reopened.push(t.id);
+  }
+  return { reopened, unchanged };
+}
+
+/** The doc's accepted version, or null. @param {Doc} doc @returns {number | null} */
+function acceptedOf(doc) {
+  const v = doc.acceptedVersion;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? v : null;
+}
+
+/**
+ * A recorded version of the doc (1..head), else UsageError.
+ * @param {Doc} doc
+ * @param {unknown} v
+ * @param {string} name
+ * @returns {number}
+ */
+function recordedVersion(doc, v, name) {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > (doc.head || 0)) {
+    throw new UsageError(`${name} must be a recorded version (1-${doc.head || 0}), not ${JSON.stringify(v)}`);
+  }
+  return v;
 }
 
 /**
@@ -161,13 +270,15 @@ function unresolveInPlace(t, at) {
 }
 
 /**
- * The thread ids of a bulk operation, without duplicates (UsageError when it is not a non-empty list of ids).
+ * The thread ids of a bulk operation, without duplicates (UsageError when it is not a list of ids, or an empty one
+ * unless allowEmpty).
  * @param {unknown} tids
+ * @param {{ allowEmpty?: boolean }} [opts]
  * @returns {string[]}
  */
-function threadIdList(tids) {
-  if (!Array.isArray(tids) || !tids.length || !tids.every((t) => typeof t === 'string' && t.trim())) {
-    throw new UsageError('threads must be a non-empty list of thread ids');
+function threadIdList(tids, { allowEmpty = false } = {}) {
+  if (!Array.isArray(tids) || (!tids.length && !allowEmpty) || !tids.every((t) => typeof t === 'string' && t.trim())) {
+    throw new UsageError(`threads must be a ${allowEmpty ? '' : 'non-empty '}list of thread ids`);
   }
   return [...new Set(tids.map((t) => String(t).trim()))];
 }

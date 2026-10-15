@@ -139,6 +139,52 @@ describe('locks and threads', () => {
     assert.deepEqual([back.resolvedIn, back.resolvedAt, back.resolvedBy], [null, undefined, undefined]);
   });
 
+  test('Accept all revisions: the accepted version only moves forward, the threads given are resolved; its Undo', async () => {
+    const { ctx, v1 } = await opened();
+    for (const [text, body] of [['Prototype the issuer.', 'a'], ['Ship rotation behind a flag.', 'b']]) {
+      await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, text), body });
+    }
+    await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
+    editFile(ws.file(FILE), '## 1 Goals\n', '## 1 Goals\n\nNew intro.\n');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'intro' });
+    await ops.reply(ctx, DOC, 't1', { body: 'Done.', status: 'addressed' });
+    const status = async () => Object.fromEntries((await ctx.store.listThreads(DOC)).map((t) => [t.id, t.status]));
+    const accepted = async () => (await ctx.store.getDoc(DOC))?.acceptedVersion;
+
+    await assert.rejects(ops.acceptRevisions(ctx, DOC, { version: 3 }), UsageError, 'not a recorded version');
+    await assert.rejects(ops.acceptRevisions(ctx, DOC, { version: 2, threads: ['t1', 't9'] }), NotFoundError);
+    await assert.rejects(ops.acceptRevisions(ctx, DOC, { version: 2, threads: 't1' }), UsageError);
+    assert.equal(await accepted(), undefined, 'a refused call changes nothing');
+    assert.deepEqual(await status(), { t1: 'addressed', t2: 'open' });
+
+    const seq = (await ctx.store.readEvents(DOC, 0)).length;
+    assert.deepEqual(await ops.acceptRevisions(ctx, DOC, { version: 2, threads: ['t1'], by: 'Eric' }),
+      { accepted: 2, previous: null, resolved: ['t1'], unchanged: [] });
+    const doc = await ctx.store.getDoc(DOC);
+    assert.deepEqual([doc?.acceptedVersion, doc?.lastReviewedVersion], [2, 1], 'the last review stays what it was');
+    assert.deepEqual(await status(), { t1: 'resolved', t2: 'open' });
+    const events = (await ctx.store.readEvents(DOC, 0)).slice(seq);
+    assert.deepEqual(events.map((e) => e.type), [SSE.THREAD_UPDATED, SSE.REVISIONS_ACCEPTED]);
+    assert.deepEqual([events[1].version, events[1].previous], [2, null]);
+    // an older version never moves it back; no threads is fine
+    assert.deepEqual(await ops.acceptRevisions(ctx, DOC, { version: 1 }), { accepted: 2, previous: 2, resolved: [], unchanged: [] });
+
+    // Undo: no accepted version again, the thread back to the agent's status
+    assert.deepEqual(await ops.unacceptRevisions(ctx, DOC, { version: 2, previous: null, threads: ['t1'] }),
+      { accepted: null, reopened: ['t1'], unchanged: [] });
+    assert.equal(await accepted(), undefined);
+    assert.deepEqual(await status(), { t1: 'addressed', t2: 'open' });
+    await assert.rejects(ops.unacceptRevisions(ctx, DOC, { version: 1, previous: 2 }), UsageError, 'previous is newer');
+
+    // the Undo of an acceptance that moved nothing keeps it; an older acceptance's Undo keeps a newer one
+    await ops.acceptRevisions(ctx, DOC, { version: 2 });
+    assert.deepEqual(await ops.unacceptRevisions(ctx, DOC, { version: 2, previous: 2 }), { accepted: 2, reopened: [], unchanged: [] });
+    editFile(ws.file(FILE), 'New intro.\n', 'Newer intro.\n');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'newer intro' });
+    assert.deepEqual(await ops.acceptRevisions(ctx, DOC, { version: 3 }), { accepted: 3, previous: 2, resolved: [], unchanged: [] });
+    assert.deepEqual(await ops.unacceptRevisions(ctx, DOC, { version: 2, previous: null }), { accepted: 3, reopened: [], unchanged: [] });
+  });
+
   test('DOM targets for a version and for the live working copy', async () => {
     const { ctx, v1 } = await opened();
     await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Prototype the issuer.'), body: 'x' });

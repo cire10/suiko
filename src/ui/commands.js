@@ -17,16 +17,17 @@
 // The palette's "Recent" group (the last commands run) is kept in localStorage.
 
 import {
-  acceptAll, acceptDecline, acceptFocused, applyTheme, closeSession, compareVersions, copyAgentPrompt, copyReviewLink,
-  copySpecPath, cycleTheme, docPath, focusItem, focusedThread, markAllChangesSeen, navChange, navigate, navThread,
-  openComposer, openDialog, openSubmit, readSeen, reloadFrame, reopenFocused, scrollToSrid, seenStorageKey,
-  selectionAction, setCompareLayout, setMode, showThreads, snipScreen, startRecording, startReply, stepVersion, submitComposer,
-  submitWithVerdict, switchVersion, toggleBaseKind, toggleHidden, toggleNav, togglePick, toggleSidebar,
+  acceptAll, acceptDecline, acceptFocused, acceptRevisions, applyTheme, closeSession, compareVersions, copyAgentPrompt,
+  copyReviewLink, copySpecPath, cycleTheme, docPath, focusItem, focusedThread, markAllChangesSeen, navChange, navigate,
+  navThread, openComposer, openDialog, openSubmit, readSeen, reloadFrame, reopenFocused, scrollToSrid, seenStorageKey,
+  selectionAction, setCompareLayout, setMode, showChanges, showThreads, snipScreen, startRecording, startReply, stepVersion,
+  submitComposer, submitWithVerdict, switchVersion, toggleBaseKind, toggleHidden, toggleNav, togglePick, toggleSidebar,
   toggleSingleKeys, toggleSnip,
 } from './actions.js';
 import {
-  acceptableThreads, actorLabel, agentName, canSendNow, declinedToVerify, filterCounts, FILTERS, hasMode, kindCaps, modesFor, numericVersion, panelItems, relTime,
-  showsDoc, staleApproveText, statusInfo, threadRowTitle, versionNumbers,
+  acceptableThreads, actorLabel, agentName, baseTag, canSendNow, declinedToVerify, filterCounts, FILTERS, hasMode, kindCaps,
+  modesFor, numericVersion, panelItems, plainMode, relTime, revisionsToAccept, showsDoc, staleApproveText, statusInfo,
+  threadRowTitle, versionNumbers,
 } from './model.js';
 
 /** @typedef {import('./state.js').UiState} UiState */
@@ -225,12 +226,11 @@ function compareItems(s) {
   const ds = s.ds;
   if (!ds) return [];
   const vs = versionNumbers(ds);
-  const last = Number(ds.doc.lastReviewedVersion);
   const busy = busyEditing(s) ? BUSY : null;
   return vs.slice(0, -1).reverse().map((from) => ({
     id: String(from),
     title: `From v${from}`,
-    description: from === last ? 'your last review' : '',
+    description: { review: 'your last review', accepted: 'the revisions you accepted' }[baseTag(ds, from) ?? ''] ?? '',
     exact: [`v${from}`, String(from)],
     when: busy || true,
     placeholder: `Compare v${from} with which newer version?`,
@@ -270,6 +270,23 @@ function markSeenWhen(s) {
   if (s.base == null || !hunks.length) return 'no changes in this comparison';
   const seen = readSeen(seenStorageKey(s));
   return hunks.some((/** @type {any} */ h) => !seen.has(String(h.id))) ? true : 'all changes are already seen';
+}
+
+/** "Show changes" / "Hide changes": why the switch cannot be used now, or true. @param {UiState} s */
+function changesWhen(s) {
+  if (!s.ds) return 'open a document first';
+  if (!kindCaps(s.ds).frame) return 'a code review shows its changes in Files';
+  return versionNumbers(s.ds).length > 1 || s.version === 'live' ? true : 'there is only one version';
+}
+
+/** "Accept all revisions": why it cannot run now, or true. @param {UiState} s */
+function acceptRevisionsWhen(s) {
+  if (!s.ds) return 'open a document first';
+  if (!kindCaps(s.ds).frame) return 'not in a code review';
+  if (s.version === 'live') return READ_ONLY;
+  const todo = revisionsToAccept(s.ds);
+  if (!todo) return 'no new revisions since your last review';
+  return s.version === todo.version ? true : `switch to v${todo.version} (latest) first`;
 }
 
 /** @param {UiState} s @param {1|-1} dir */
@@ -528,6 +545,22 @@ export const COMMANDS = Object.freeze([
     },
   },
   {
+    id: 'accept-revisions',
+    title: 'Accept all revisions',
+    category: 'Review',
+    description: (s) => {
+      const todo = revisionsToAccept(s.ds);
+      if (!todo) return 'The latest version\'s changes stop showing as new, and the threads the agent addressed or answered are resolved';
+      const n = acceptableThreads(s.ds).length;
+      return `v${todo.version}: its changes stop showing as new${n ? `, and ${n} addressed or answered thread${n === 1 ? ' is' : 's are'} resolved` : ''}. You can undo it`;
+    },
+    keywords: ['accept', 'revisions', 'changes', 'all', 'track changes', 'accept changes', 'markup', 'resolve', 'done', 'version'],
+    when: acceptRevisionsWhen,
+    run: () => {
+      acceptRevisions();
+    },
+  },
+  {
     id: 'verify',
     title: 'Verify queue',
     category: 'Review',
@@ -715,6 +748,27 @@ export const COMMANDS = Object.freeze([
   ...FILTER_COMMANDS,
 
   // ------------------------------------------------------------------------------------------- View
+  {
+    id: 'show-changes',
+    title: 'Show changes',
+    category: 'View',
+    description: 'What changed since your last review, marked in the document (Changes)',
+    keywords: ['changes', 'revisions', 'markup', 'track changes', 'diff', 'marks', 'redline', 'compare', 'toggle'],
+    when: (s) => {
+      const w = changesWhen(s);
+      return w === true && s.mode === 'changes' ? 'shown now' : w;
+    },
+    run: () => showChanges(true),
+  },
+  {
+    id: 'hide-changes',
+    title: 'Hide changes',
+    category: 'View',
+    description: (s) => `The document without change marks (${plainMode(s.ds, s.prefs.openIn) === 'read' ? 'Read' : 'Review'}, or the mode you came from)`,
+    keywords: ['changes', 'clean', 'latest', 'markup', 'no markup', 'revisions', 'track changes', 'marks', 'toggle'],
+    when: (s) => (s.mode !== 'changes' ? 'no changes are shown' : true),
+    run: () => showChanges(false),
+  },
   {
     id: 'hide',
     title: 'Hide all annotations',

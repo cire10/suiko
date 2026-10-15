@@ -279,6 +279,9 @@ export async function startMockServer(opts = {}) {
     // Accept all and its Undo: {threads: [...]}
     if (method === 'POST' && a === 'threads' && b === 'resolve' && !c) return d.resolveMany(body.threads);
     if (method === 'POST' && a === 'threads' && b === 'unresolve' && !c) return d.unresolveMany(body.threads);
+    // Accept all revisions and its Undo: {version, threads} / {version, previous, threads}
+    if (method === 'POST' && a === 'revisions' && b === 'accept' && !c) return d.acceptRevisions(body);
+    if (method === 'POST' && a === 'revisions' && b === 'unaccept' && !c) return d.unacceptRevisions(body);
     if (a === 'threads' && b) {
       if (method === 'POST' && c === 'resolve') return d.resolve(b, body.decision);
       if (method === 'POST' && c === 'unresolve') return d.unresolve(b);

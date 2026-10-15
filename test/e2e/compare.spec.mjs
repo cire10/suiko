@@ -2,7 +2,9 @@
 // Reading and comparing against the mock daemon (scenario 'round2': kitchen-sink.md v2 answers rv1, see
 // mock-data.mjs): Read mode (the latest version with nothing drawn over it), the "[v1 · last review] → [v2]" range of
 // Changes, Changes side by side (the older version in a second, read-only frame, removed text struck through, scrolled
-// together, the newer frame never reloaded), and Accept all in the Verify queue (with Undo; declines stay).
+// together, the newer frame never reloaded), Accept all in the Verify queue (with Undo; declines stay), the "Show
+// changes" switch, Accept all revisions (with Undo; the doc then opens without its changes) and Settings > Default
+// view.
 
 import { TESTID } from '../../src/shared/protocol.js';
 import { expect, test } from './fixtures.mjs';
@@ -245,9 +247,138 @@ test.describe('Accept all', () => {
     await expect(results.getByTestId(TESTID.verifyAcceptAll)).toHaveText('Accept all (2)');
     await page.getByTestId(TESTID.commandPaletteOpen).click();
     await page.getByTestId(TESTID.commandPaletteInput).fill('accept all');
-    await expect(page.locator(`[data-testid="${TESTID.commandItem}"][data-command-id="accept-all"]`)).toContainText('2 addressed or answered');
-    await page.keyboard.press('Enter');
+    const item = page.locator(`[data-testid="${TESTID.commandItem}"][data-command-id="accept-all"]`);
+    await expect(item).toContainText('2 addressed or answered');
+    await item.click();
     await expect.poll(() => mock.doc('kitchen-sink').threads.filter((t) => t.status === 'resolved').length).toBe(3);
     await expect(results.getByTestId(TESTID.verifyAcceptAll)).toHaveCount(0);
+  });
+});
+
+test.describe('Show changes and Accept all revisions', () => {
+  /** @param {import('@playwright/test').Page} page */
+  const changesSwitch = (page) => page.getByTestId(TESTID.showChanges).getByRole('switch');
+  /** Inserted-word marks the guest paints (Changes). @param {import('./fixtures.mjs').Ui} ui */
+  const insMarks = async (ui) => (await ui.inspect()).highlights['sr-ins'] || 0;
+
+  test('the switch turns the change marks on, and off back to where you were', async ({ page, ui }) => {
+    await ui.open('kitchen-sink');
+    // opened on its changes: the agent revised since the last review
+    await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+    await expect(changesSwitch(page)).toBeChecked();
+    await expect(page.getByTestId(TESTID.showChanges)).toContainText('Show changes');
+    await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('3');
+    await expect(changesSwitch(page)).toHaveAccessibleName('Show changes (3 new)');
+    await expect.poll(() => insMarks(ui)).toBeGreaterThan(0);
+
+    // off: the doc opened on its changes, so the Default view (Review)
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+    await expect(changesSwitch(page)).not.toBeChecked();
+    await expect.poll(() => insMarks(ui)).toBe(0);
+
+    // from Read: on, then off goes back to Read
+    await modeTab(page, 'read').click();
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => insMarks(ui)).toBeGreaterThan(0);
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'read')).toHaveAttribute('aria-selected', 'true');
+
+    // the palette has both
+    await page.getByTestId(TESTID.commandPaletteOpen).click();
+    await page.getByTestId(TESTID.commandPaletteInput).fill('show changes');
+    await page.locator(`[data-testid="${TESTID.commandItem}"][data-command-id="show-changes"]`).click();
+    await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId(TESTID.commandPaletteOpen).click();
+    await page.getByTestId(TESTID.commandPaletteInput).fill('hide changes');
+    await page.locator(`[data-testid="${TESTID.commandItem}"][data-command-id="hide-changes"]`).click();
+    await expect(modeTab(page, 'read')).toHaveAttribute('aria-selected', 'true');
+
+    // the tabs say what they show; Source and History have no switch
+    await expect(modeTab(page, 'review')).toHaveAttribute('title', /^Review: Comment on the rendered document, with your threads highlighted/);
+    await modeTab(page, 'source').click();
+    await expect(page.getByTestId(TESTID.showChanges)).toHaveCount(0);
+    expect(ui.errors).toEqual([]);
+  });
+
+  test('accepts the latest version and its addressed / answered threads, leaves Changes, undoes; later versions compare with it', async ({ page, ui, mock }) => {
+    await ui.open('kitchen-sink');
+    const d = mock.doc('kitchen-sink');
+    const resolved = () => d.threads.filter((t) => t.status === 'resolved').map((t) => t.id).sort();
+    const accept = page.getByTestId(TESTID.acceptRevisions);
+    await expect(accept).toHaveAttribute('title', /^Accept the revisions of v2 \(since v1\): they stop showing as new, and the 2 threads claude addressed or answered are resolved/);
+    await accept.click();
+    const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 2 threads (t1, t2). 1 declined thread is still in Verify.' });
+    await expect(toast).toBeVisible();
+    expect(d.doc.acceptedVersion).toBe(2);
+    expect(resolved()).toEqual(['t1', 't2', 't5']);
+    // the change marks are gone: Review (the Default view), nothing new to show or accept
+    await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => insMarks(ui)).toBe(0);
+    await expect(accept).toHaveCount(0);
+    await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveCount(0);
+    // the changes are seen in the Changes list
+    await changesSwitch(page).click();
+    await expect(page.locator('.changes-view .progress')).toHaveText('3/3 reviewed');
+
+    // Undo: the revisions are new again, the threads back in Verify
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'The revisions of v2 are to review again; 2 threads are back in Verify.' })).toBeVisible();
+    await expect.poll(() => d.doc.acceptedVersion).toBeUndefined();
+    expect(resolved()).toEqual(['t5']);
+    await expect(accept).toBeVisible();
+    await expect(page.locator('.changes-view .progress')).toHaveText('0/3 reviewed');
+
+    // the palette accepts too; the doc then opens without its changes
+    await page.getByTestId(TESTID.commandPaletteOpen).click();
+    await page.getByTestId(TESTID.commandPaletteInput).fill('accept all revisions');
+    await page.locator(`[data-testid="${TESTID.commandItem}"][data-command-id="accept-revisions"]`).click();
+    await expect.poll(() => d.doc.acceptedVersion).toBe(2);
+    await page.reload();
+    await ui.ready();
+    await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+    await expect(accept).toHaveCount(0);
+
+    // a later version: its changes count from the accepted version
+    d.revise({ source: d.source(2).replace('| refresh_token | 30 d |', '| refresh_token | 14 d |'), summary: 'Shorter refresh TTL' });
+    await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('3');
+    await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('1');
+    await expect(accept).toHaveAttribute('title', /^Accept the revisions of v3 \(since v2\)/);
+    await changesSwitch(page).click();
+    await expect(page.locator('#sr-base')).toHaveValue('2');
+    await expect(page.locator('#sr-base option:checked')).toHaveText('v2 · accepted');
+    await expect(page.locator('.changes-title')).toContainText('since the revisions you accepted');
+    await expect(page.getByTestId(TESTID.changeItem)).toHaveCount(1);
+    expect(ui.errors).toEqual([]);
+  });
+
+  test('Settings > Default view: Read opens the doc clean, Review in Review; the switch shows what is new', async ({ page, ui }) => {
+    await ui.open('kitchen-sink');
+    await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId(TESTID.settingsOpen).click();
+    const choice = page.locator('[data-setting="openIn"]');
+    await expect(choice.getByRole('radio', { name: 'Changes when revised' })).toBeChecked();
+    await choice.getByRole('radio', { name: 'Read' }).check();
+    await page.keyboard.press('Escape');
+
+    await page.reload();
+    await ui.ready();
+    await expect(modeTab(page, 'read')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(async () => (await ui.inspect()).hidden).toBe(true);
+    await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('3');
+    await expect(page.getByTestId(TESTID.acceptRevisions)).toBeVisible();
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'read')).toHaveAttribute('aria-selected', 'true');
+
+    await page.getByTestId(TESTID.settingsOpen).click();
+    await page.locator('[data-setting="openIn"]').getByRole('radio', { name: 'Review' }).check();
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await ui.ready();
+    await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+    expect(ui.errors).toEqual([]);
   });
 });
