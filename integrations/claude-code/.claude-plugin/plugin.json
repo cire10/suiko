@@ -1,7 +1,7 @@
 {
   "name": "suiko",
   "displayName": "Suiko",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec, /review-code and /suiko-last commands, and hooks that block whole-file rewrites of specs under review and surface submitted reviews. Requires the suiko CLI on PATH (npm install && npm link).",
   "author": {
     "name": "Eric Tang"
