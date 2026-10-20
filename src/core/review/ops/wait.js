@@ -28,7 +28,7 @@ import { NotFoundError } from '../../store/errors.js';
 import { ALL_DOCS } from '../../store/store.js';
 import { isGated, isVirtual } from '../../store/snapshot.js';
 import { createLogger } from '../../util/log.js';
-import { isActionable } from '../threadstate.js';
+import { isActionable, lastIndexes } from '../threadstate.js';
 import { deliverPacket } from './feedback.js';
 import { readHead, readWorkingState, resolveDoc } from './common.js';
 
@@ -38,14 +38,15 @@ const log = createLogger('review:wait');
  * @typedef {import('../context.js').Ctx} Ctx
  * @typedef {import('../../../shared/types.js').Doc} Doc
  * @typedef {import('../packet-data.js').Packet} Packet
- * @typedef {{ id: string, type: string, status: string }} UnansweredThread
+ * @typedef {{ id: string, type: string, status: string, replied: boolean }} UnansweredThread
  * @typedef {{ status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets: Packet[],
  *   text: string, docId?: string, threads?: UnansweredThread[], by?: number, aborted?: boolean }} WaitResult
  */
 
 /**
  * The threads a doc's delivered reviews handed to `agent` that still wait on its reply (actionable: open, or the
- * reviewer spoke last). Empty while any review has not reached the agent yet: the wait delivers it at once, together
+ * reviewer spoke last). `replied`: the agent's reply is the newest comment, so the thread is open only because that
+ * reply set no status. Empty while any review has not reached the agent yet: the wait delivers it at once, together
  * with every thread that needs action.
  * @param {Ctx} ctx
  * @param {Doc} doc
@@ -65,7 +66,10 @@ export async function unansweredThreads(ctx, doc, agent) {
   if (!handed.size) return [];
   return (await ctx.store.listThreads(doc.id))
     .filter((t) => handed.has(t.id) && isActionable(t))
-    .map((t) => ({ id: t.id, type: t.type, status: t.status }));
+    .map((t) => {
+      const { lastAgent, lastHuman } = lastIndexes(t);
+      return { id: t.id, type: t.type, status: t.status, replied: lastAgent > lastHuman };
+    });
 }
 
 /**

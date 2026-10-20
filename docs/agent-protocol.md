@@ -387,7 +387,7 @@ Follow the printed `fix:` lines. Revert hunks that were your mistake (`suiko rev
 suiko reply token-service t2 -m "It sits in front; see the caption at L90." --status answered
 ```
 
-`reply` accepts `--status answered|declined|needs_input|addressed`, `--at L42-46` and `--decision "text"`. Exit 4 if the thread does not exist.
+`reply` accepts `--status answered|declined|needs_input|addressed`, `--at L42-46` and `--decision "text"`. Exit 4 if the thread does not exist. Without `--status` the thread keeps its status: an open thread stays open, and `wait` refuses until it has one.
 
 ## 9. Guards and attribution
 

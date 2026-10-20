@@ -821,11 +821,15 @@ export function formatSourceLines(r) {
 }
 
 /**
+ * A reply without a status leaves an open thread open (and `wait` refusing): the line says so.
  * @param {any} r result of ops.reply
  * @returns {string}
  */
 export function formatReply(r) {
-  return `replied on ${r.thread.id}${r.status ? ` (${r.status})` : ''} · no version recorded\n`;
+  const open = !r.status && r.thread.status === 'open'
+    ? ` · ${r.thread.id} is still open: reply with --status answered, addressed, declined or needs_input to answer it`
+    : '';
+  return `replied on ${r.thread.id}${r.status ? ` (${r.status})` : ''} · no version recorded${open}\n`;
 }
 
 /**

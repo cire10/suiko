@@ -72,15 +72,15 @@ describe('wait', () => {
     // delivered, no replies: refused, both named; nothing is registered
     let r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
     assert.deepEqual([r.status, r.docId, r.threads], ['unanswered', DOC, [
-      { id: 't1', type: 'comment', status: 'open' }, { id: 't2', type: 'question', status: 'open' }]]);
+      { id: 't1', type: 'comment', status: 'open', replied: false }, { id: 't2', type: 'question', status: 'open', replied: false }]]);
     assert.deepEqual(await ctx.store.listWaiters(DOC, { liveOnly: false }), [], 'no waiter registered');
     // without requireAnswers (the plan gate, --allow-unanswered) the wait blocks as before
     assert.equal((await ops.waitForFeedback(ctx, q)).status, 'timeout');
 
-    // a reply without a status leaves the thread open: still refused
+    // a reply without a status leaves the thread open: still refused, marked as replied (the message says so)
     await ops.reply(ctx, DOC, 't2', { body: 'Lower latency.' });
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
-    assert.deepEqual(r.threads?.map((t) => t.id), ['t1', 't2']);
+    assert.deepEqual(r.threads?.map((t) => [t.id, t.replied]), [['t1', false], ['t2', true]]);
     await ops.reply(ctx, DOC, 't2', { body: 'Lower latency; sessions are ephemeral.', status: 'answered' });
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
     assert.deepEqual(r.threads?.map((t) => t.id), ['t1']);
@@ -93,7 +93,7 @@ describe('wait', () => {
     await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'delivered');
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
-    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined' }]);
+    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined', replied: false }]);
     // resolved by the reviewer: nothing left to answer
     await ops.resolveThread(ctx, DOC, 't1', {});
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'timeout');
