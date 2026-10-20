@@ -201,6 +201,31 @@ describe('docs and ids', () => {
   test('compareIds orders numerically', () => {
     assert.deepEqual(['t10', 't2', 't1', 'rv3'].sort(compareIds), ['rv3', 't1', 't2', 't10']);
   });
+
+  // macOS volumes ignore case and Unicode normalization: every spelling of a file is that one file, and one doc
+  const probe = makeRoot({ 'Probe.md': 'x', ['café.md']: 'x' });
+  const insensitive = fs.existsSync(path.join(probe, 'probe.md')) && fs.existsSync(path.join(probe, 'café.md'));
+  test('a case or Unicode-normalization variant of a tracked path is the same doc', { skip: !insensitive && 'case- or normalization-sensitive volume' }, async () => {
+    const nfd = 'docs/café.md';
+    const nfc = 'docs/café.md';
+    const r = makeRoot({ 'docs/Token-Service.md': '# Token\n', [nfd]: '# Café\n' });
+    const s = await Store.open(r, { create: true });
+    const doc = await s.createDoc({ path: 'docs/token-service.md' });
+    assert.equal(doc.path, 'docs/Token-Service.md', 'recorded as the file is named on disk');
+    await assert.rejects(s.createDoc({ path: 'DOCS/TOKEN-SERVICE.MD' }), ConflictError);
+    assert.equal((await s.findDoc('docs/TOKEN-service.md'))?.id, doc.id);
+    const cafe = await s.createDoc({ path: nfc });
+    assert.equal(cafe.path, nfd, 'the on-disk (decomposed) spelling');
+    await assert.rejects(s.createDoc({ path: nfd }), ConflictError);
+    assert.equal((await s.findDoc(nfc))?.id, cafe.id);
+    // a record written before paths were canonical (another spelling) still matches, for lookups and duplicates
+    const legacy = /** @type {import('../../src/shared/types.js').Doc} */ (await s.getDoc(doc.id));
+    legacy.path = 'docs/token-service.md';
+    await s.saveDoc(legacy);
+    assert.equal((await s.findDoc('docs/Token-Service.md'))?.id, doc.id);
+    await assert.rejects(s.createDoc({ path: 'docs/Token-Service.md' }), ConflictError);
+    assert.equal((await s.listDocs()).length, 2);
+  });
 });
 
 describe('versions and blobs', () => {

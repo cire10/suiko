@@ -127,6 +127,15 @@ describe('hook pre-write', () => {
     assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
   });
 
+  const probe = tempDir('case');
+  fs.writeFileSync(path.join(probe, 'a.md'), '');
+  const caseInsensitive = fs.existsSync(path.join(probe, 'A.md'));
+  fs.rmSync(probe, { recursive: true, force: true });
+  test('another spelling of the reviewed doc (case-insensitive volumes) is that doc', { skip: !caseInsensitive && 'case-sensitive volume' }, () => {
+    const r = hook('pre-write', { ...rewrite(), tool_input: { file_path: path.join(ws.root, 'Docs', 'Specs', 'Token-Service.md'), content: 'gone\n' } });
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  });
+
   test('a small change, a new file, another tool or an untracked file pass silently', () => {
     const small = SPEC_MD.replace('3 times', '5 times');
     assert.equal(hook('pre-write', { ...rewrite(), tool_input: { file_path: ws.file, content: small } }).stdout, '');

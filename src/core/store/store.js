@@ -346,8 +346,7 @@ export class Store {
     for (const candidate of candidates) {
       const real = realOrResolved(candidate);
       if (!isWithin(this.root, real)) continue;
-      const rel = toPosix(path.relative(this.root, real));
-      const hit = docs.find((d) => d.path === rel);
+      const hit = this.#fileDocAt(docs, toPosix(path.relative(this.root, real)));
       if (hit) return hit;
     }
     if (!/[\\/]/.test(idOrPath)) {
@@ -355,6 +354,18 @@ export class Store {
       if (hits.length === 1) return hits[0];
     }
     return null;
+  }
+
+  /**
+   * The file doc tracked at `rel` (as relPath spells it), also when its record spells that file differently: a case
+   * or Unicode-normalization variant recorded before paths were canonical.
+   * @param {Doc[]} docs file docs
+   * @param {string} rel
+   * @returns {Doc | undefined}
+   */
+  #fileDocAt(docs, rel) {
+    const real = path.join(this.root, rel);
+    return docs.find((d) => d.path === rel) ?? docs.find((d) => realOrResolved(path.join(this.root, d.path)) === real);
   }
 
   /**
@@ -381,7 +392,7 @@ export class Store {
       throw new UsageError(`unsupported spec type: ${rel} (expected .md, .markdown, .html or .htm)`, { details: { path: rel } });
     }
     return this.withWorkspaceLock(async () => {
-      const existing = (await this.listDocs()).find((d) => d.path === rel && !isVirtual(d));
+      const existing = this.#fileDocAt((await this.listDocs()).filter((d) => !isVirtual(d)), rel);
       if (existing) {
         throw new ConflictError(`${rel} is already tracked as ${existing.id}`, { details: { doc: existing.id, path: rel } });
       }
@@ -1600,12 +1611,14 @@ async function isDirectory(p) {
 }
 
 /**
+ * The real path as the filesystem spells it (native realpath, like the root's: on macOS's case-insensitive volumes
+ * `docs/spec.md`, `docs/Spec.md` and a decomposed `é` all come back as the name on disk), else `p` resolved.
  * @param {string} p
  * @returns {string}
  */
 function realOrResolved(p) {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return path.resolve(p);
   }

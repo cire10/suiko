@@ -113,8 +113,11 @@ export function preWrite(input, o) {
   if (!store) return null;
   const rel = path.relative(realpath(store.root), realpath(file)).split(path.sep).join('/');
   if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  // a snapshot or code doc's path is synthetic: it never stands for a file on disk (file docs only; they have no kind)
-  const doc = findDoc(store.storeDir, (d) => d.path === rel && (d.kind === undefined || d.kind === 'file'));
+  // a snapshot or code doc's path is synthetic: it never stands for a file on disk (file docs only; they have no kind);
+  // a record may spell the file differently (case, Unicode normalization) from the path Claude writes to
+  const isFile = (/** @type {any} */ d) => d.kind === undefined || d.kind === 'file';
+  const doc = findDoc(store.storeDir, (d) => d.path === rel && isFile(d))
+    ?? findDoc(store.storeDir, (d) => typeof d.path === 'string' && isFile(d) && samePath(path.join(store.root, d.path), file));
   if (!doc || doc.state === 'closed') return null;
   const reviewIds = listIds(path.join(store.storeDir, 'docs', doc.id, 'reviews'), 'rv');
   if (!reviewIds.length) return null;
@@ -486,12 +489,13 @@ function readJsonFile(file) {
 }
 
 /**
+ * The real path as the filesystem spells it (native: the on-disk case and Unicode normalization), else `p` resolved.
  * @param {string} p
  * @returns {string}
  */
 function realpath(p) {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return path.resolve(p);
   }
