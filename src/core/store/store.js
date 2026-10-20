@@ -576,15 +576,7 @@ export class Store {
     let file = typeof manifest.file === 'string' && VERSION_FILE_RE.test(manifest.file) ? manifest.file : null;
     if (!file) file = (await readDirNames(dir)).find((f) => VERSION_FILE_RE.test(f) && f.startsWith(`${pad(n)}.`) && !f.endsWith('.json')) ?? null;
     if (!file) throw new NotFoundError(`source of v${n} of ${docId} is missing`, { details: { doc: docId, version: n } });
-    let buf;
-    try {
-      buf = await fsp.readFile(path.join(dir, file));
-    } catch (err) {
-      if (/** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') {
-        throw new NotFoundError(`source of v${n} of ${docId} is missing`, { details: { doc: docId, version: n } });
-      }
-      throw err;
-    }
+    const buf = await readStoreContent(path.join(dir, file), `source of v${n} of ${docId}`, { doc: docId, version: n });
     if (manifest.sha256 && manifest.sha256 !== sha256(buf)) log.warn(`v${n} of ${docId}: source does not match its manifest hash`);
     return { manifest, source: decodeText(buf).text, buf };
   }
@@ -1266,7 +1258,8 @@ export class Store {
   }
 
   /**
-   * Bytes of a doc blob stored with putDocBlob. NotFoundError when it is absent; UsageError for a malformed ref.
+   * Bytes of a doc blob stored with putDocBlob. NotFoundError when it is absent; UsageError for a malformed ref;
+   * RefusedError for a symlink (see readStoreContent).
    * @param {string} docId
    * @param {string} ref 'sha256:<hex>'
    * @returns {Promise<Buffer>}
@@ -1274,13 +1267,7 @@ export class Store {
   async readDocBlob(docId, ref) {
     const m = typeof ref === 'string' ? BLOB_REF_RE.exec(ref) : null;
     if (!m) throw new UsageError(`invalid blob reference: ${JSON.stringify(ref)}`, { details: { doc: docId, ref } });
-    try {
-      return await fsp.readFile(this.#docBlobFile(docId, m[1]));
-    } catch (err) {
-      const code = /** @type {NodeJS.ErrnoException} */ (err).code;
-      if (code === 'ENOENT' || code === 'ENOTDIR') throw new NotFoundError(`blob ${ref} of ${docId} is missing`, { details: { doc: docId, ref } });
-      throw err;
-    }
+    return readStoreContent(this.#docBlobFile(docId, m[1]), `blob ${ref} of ${docId}`, { doc: docId, ref });
   }
 
   /**
@@ -1472,6 +1459,23 @@ async function readNoFollow(abs) {
       await handle.close();
     }
   }
+}
+
+/**
+ * Bytes of a store file that is shown or served as content (a version's source, a code doc's blob), read with
+ * readNoFollow: a committed store comes from whoever pushed it, and a link planted in it
+ * (`versions/0001.html -> ~/.ssh/id_rsa`) would otherwise show the reviewer's own files. NotFoundError when missing
+ * (or not a regular file), RefusedError for a symlink.
+ * @param {string} abs
+ * @param {string} what e.g. 'source of v2 of spec'
+ * @param {Record<string, unknown>} details
+ * @returns {Promise<Buffer>}
+ */
+async function readStoreContent(abs, what, details) {
+  const r = await readNoFollow(abs);
+  if (r === 'symlink') throw new RefusedError(`${what} is a symbolic link; Suiko never follows links inside .specreview`, { details });
+  if (!r) throw new NotFoundError(`${what} is missing`, { details });
+  return r.buf;
 }
 
 /**
