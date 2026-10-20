@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Globals fixture</title>
+<script>
+  // Top-level `var`s named like replaceable window properties (window.parent, top, self, name) replace them for
+  // every later reader, the guest included.
+  var parent = document.documentElement;
+  var top = 0;
+  var self = null;
+  var name = 'tree';
+</script>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Globals</h1>
+<p data-srid="3">A page script reused the names of window properties.</p>
+</body>
+</html>

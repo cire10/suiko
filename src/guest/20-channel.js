@@ -1,8 +1,9 @@
 // Suiko guest, part 20: the message channel to the reviewer UI.
 //
 // Handshake (amendments section 7 / protocol.js MSG):
-//   1. guest -> window.parent.postMessage({sr:1, type:'hello', ...}, origin) once for each allowed UI origin
-//      (postMessage silently drops the copies whose targetOrigin does not match the real parent);
+//   1. guest -> parent.postMessage({sr:1, type:'hello', ...}, origin) once for each allowed UI origin (ENV.parent,
+//      taken before the page's scripts ran; postMessage silently drops the copies whose targetOrigin does not match
+//      the real parent);
 //   2. UI -> iframe.contentWindow.postMessage({sr:1, type:'connect'}, contentOrigin, [port2]);
 //   3. the early capture listener in 05-env.js takes the port; from then on all traffic uses the MessagePort and
 //      window messages are ignored.
@@ -102,7 +103,7 @@ const Channel = (() => {
       if (parentOrigin !== 'null') targets = ENV.allowedOrigins.includes(parentOrigin) ? [parentOrigin] : [];
       for (const origin of targets) {
         try {
-          window.parent.postMessage(msg, origin);
+          ENV.parent.postMessage(msg, origin);
         } catch (err) {
           recordGuestError('hello', err);
         }
