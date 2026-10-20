@@ -179,8 +179,10 @@ function intArg(v, flag, min) {
  */
 export async function execute(rt, input) {
   const browser = input.browser ?? resolveBrowser(undefined, rt.env);
-  // the workspace of a code review is the repository top level (repo-relative paths are workspace paths)
-  const root = rt.workspace ?? (await openRepo(rt.cwd, { allowSubdir: true })).root;
+  // the workspace of a code review is the repository top level (repo-relative paths are workspace paths); a
+  // --workspace that is not one is refused here, before a store is created in it (a stray store would become the
+  // workspace of every spec opened below it)
+  const root = (rt.workspace ? await openRepo(rt.workspace) : await openRepo(rt.cwd, { allowSubdir: true })).root;
   /** @type {any} */
   let engineInput = input.input ?? {};
   /** @type {{ checkedOut: boolean, fetched: boolean, remote: string | null } | null} */
