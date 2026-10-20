@@ -66,6 +66,10 @@ function prefix(network = false) {
     '-c', 'core.fsmonitor=false',
     '-c', `core.hooksPath=${hooksPath()}`,
     '-c', 'core.safecrlf=false',
+    // a temp index written as a split index would add a shared index to the real .git and prune the one the real
+    // index still names, leaving the user's repo unreadable; written whole, it touches no shared index file
+    '-c', 'core.splitIndex=false',
+    '-c', 'splitIndex.sharedIndexExpire=never',
     '-c', 'protocol.allow=never',
     ...(network
       ? ['-c', 'protocol.https.allow=always', '-c', 'protocol.ssh.allow=always', '-c', 'protocol.git.allow=always', '-c', 'protocol.file.allow=always']
