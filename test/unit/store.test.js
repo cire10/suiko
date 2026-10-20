@@ -295,6 +295,26 @@ describe('versions and blobs', () => {
     await assert.rejects(store.commitVersion('nope', { source: 'x' }), NotFoundError);
   });
 
+  test('commitVersion never copies what the content origin refuses: dot-files, key files, symlinks to them', async () => {
+    const root = makeRoot({
+      'spec.md': '# A\n',
+      'img/ok.png': Buffer.from([1, 2, 3]),
+      'docs/.env': 'API_KEY=secret\n',
+      'secrets/server.pem': 'PRIVATE KEY\n',
+      'docs/ID_RSA': 'PRIVATE KEY\n',
+      '.git/config': '[core]\n',
+    });
+    fs.symlinkSync(path.join(root, 'docs', '.env'), path.join(root, 'img', 'alias.png'));
+    const store = await Store.open(root, { create: true });
+    const doc = await store.createDoc({ path: 'spec.md' });
+    const refs = ['img/ok.png', 'docs/.env', 'secrets/server.pem', 'docs/ID_RSA', '.git/config', 'img/alias.png'];
+    const m = await store.commitVersion(doc, { source: '# A\n', assetFiles: Object.fromEntries(refs.map((r) => [r, null])) });
+    assert.deepEqual(Object.keys(m.assets), ['img/ok.png']);
+    const stored = fs.readdirSync(path.join(store.storeDir, 'assets', 'sha256'), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile()).map((e) => fs.readFileSync(path.join(e.parentPath, e.name)));
+    assert.deepEqual(stored, [Buffer.from([1, 2, 3])], 'no secret reached the store');
+  });
+
   test('putBlob is content addressed and idempotent', async () => {
     const store = await Store.open(makeRoot(), { create: true });
     const ref = await store.putBlob(Buffer.from('hello'), '.PNG');

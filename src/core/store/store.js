@@ -27,7 +27,7 @@ import { STORE_DIR, initStoreDir, isForbiddenRoot } from './workspace.js';
 import { defaultConfig, defaultReviewerName, mergeConfig } from './config.js';
 import { recoverDoc } from './recovery.js';
 import { sha256 } from '../util/hash.js';
-import { extOf, formatOfPath, isWithin, normalizeExt, realpathWithin, slugify, toPosix } from '../util/paths.js';
+import { extOf, formatOfPath, isDeniedPath, isWithin, normalizeExt, realpathWithin, slugify, toPosix } from '../util/paths.js';
 import { countLines, decodeText, encodeText, roundTrips, stableRead } from '../util/stable-read.js';
 import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
@@ -601,7 +601,8 @@ export class Store {
    *   always computed; `lines`, `createdAt` and `schema` are defaulted.
    * - `assetFiles`: {workspace-relative POSIX path: absolute path | null}. Each existing file is stored as a blob and
    *   recorded in `manifest.assets[rel] = 'sha256:<hex>'`; files over config.assets.maxBytes are recorded as
-   *   'live'; missing files are skipped. Entries already in `manifest.assets` are kept.
+   *   'live'; missing files, and paths the content origin refuses (util/paths.js isDeniedPath: dot-files, key
+   *   files), are skipped. Entries already in `manifest.assets` are kept.
    * - `beforeCommit(final)`: called with the complete manifest after (1) and (2) and before (3); work done there
    *   (and anything it throws) happens before the commit point.
    * @param {string | Doc} docOrId
@@ -629,7 +630,12 @@ export class Store {
       const assets = { ...(manifest.assets ?? {}) };
       for (const rel of Object.keys(assetFiles).sort()) {
         const abs = assetFiles[rel] ?? realpathWithin(this.root, rel);
-        if (!abs) continue;
+        // what the content origin never serves is never copied into the store, which is committed: dot-files and
+        // dot-dirs (.env, .git/...), key files, and names that lead there through a symlink
+        if (!abs || isDeniedPath(rel) || isDeniedPath(toPosix(path.relative(this.root, abs)))) {
+          if (abs) log.debug(`asset ${rel} is a path the content origin refuses; not snapshotted`);
+          continue;
+        }
         let st;
         try {
           st = await fsp.stat(abs);
