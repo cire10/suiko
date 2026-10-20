@@ -255,6 +255,21 @@ describe('runGuards / lockIntegrity (pure)', () => {
     assert.deepEqual(lockIntegrity({ mapper: m, headSource: head, workingSource: changed, ...range }), { intact: false, hunks: ['h1'] });
   });
 
+  test('lockIntegrity: locked text that only grows (a prefix kept) is changed; moved, it is intact', () => {
+    const doc = '# Limits\n\n## Agreed limits\n\n- Max retries: 3\n- Request timeout: 30 s\n\n## Notes\n\nFree text.\n';
+    /** @param {string} locked @param {string} working */
+    const check = (locked, working) => {
+      const start = doc.indexOf(locked);
+      return lockIntegrity({ mapper: preciseMapper(doc, working), headSource: doc, workingSource: working, start, end: start + locked.length }).intact;
+    };
+    assert.equal(check('Max retries: 3', doc.replace('Max retries: 3', 'Max retries: 30')), false);
+    assert.equal(check('Request timeout: 30 s', doc.replace('timeout: 30 s', 'timeout: 30 s, or 300 s for batch jobs')), false);
+    assert.equal(check('## Notes', doc.replace('## Notes', '## Notes (cache)')), false);
+    assert.equal(check('- Max retries: 3', doc.replace('- Max retries: 3', '- Retries: 1\n- Max retries: 3')), true, 'a line added above');
+    const moved = doc.replace('- Max retries: 3\n- Request timeout: 30 s\n', '- Request timeout: 30 s\n- Max retries: 3\n');
+    assert.equal(check('Max retries: 3', moved), true, 'moved');
+  });
+
   test('lock refusal, then forced', () => {
     const working = head.replace('five', 'FIVE');
     const hunks = lineHunks(head, working);
