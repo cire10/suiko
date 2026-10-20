@@ -28,7 +28,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { NotFoundError } from '../core/store/errors.js';
 import { BIN_PATH, PACKAGE_ROOT } from './daemon-client.js';
-import { BACKUP_SUFFIX, copyAction, readJsonFile, stringifyLike, updateManifest, writeAtomic } from './install/files.js';
+import { BACKUP_SUFFIX, checkMarkers, copyAction, readExisting, readJsonFile, stringifyLike, updateManifest, writeAtomic } from './install/files.js';
 
 export const INTEGRATIONS_DIR = path.join(PACKAGE_ROOT, 'integrations');
 const SKILL_DIR = path.join(INTEGRATIONS_DIR, 'claude-code', 'skills', 'spec-review');
@@ -311,12 +311,7 @@ export function planClaude(o) {
  */
 function jsonFileAction(file, merge) {
   const parsed = readJsonFile(file, undefined);
-  let raw = null;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    raw = null;
-  }
+  const raw = readExisting(file);
   const current = parsed?.value ?? {};
   const merged = merge(structuredClone(current));
   if (raw !== null && parsed && isDeepStrictEqual(merged, current)) return { path: file, action: 'unchanged', content: raw };
@@ -350,10 +345,14 @@ export function planAgentsMd(o) {
   if (!fs.existsSync(AGENTS_SNIPPET)) throw new NotFoundError(`integration files missing: ${AGENTS_SNIPPET}`);
   const snippet = readText(AGENTS_SNIPPET).replace(/\s+$/, '');
   const target = o.file ? path.resolve(o.cwd, o.file) : path.join(projectRoot(o.cwd), 'AGENTS.md');
-  const current = fs.existsSync(target) ? readText(target) : null;
+  const current = readExisting(target);
+  // damaged markers (two begin lines, a begin line without its end) are refused, as `suiko install` does: guessing
+  // where the block ends would delete the user's text
+  if (current !== null) checkMarkers(target, current, { begin: BEGIN_MARKER, end: END_MARKER });
   const content = insertSnippet(current, snippet);
   const action = fileAction(target, content, AGENTS_SNIPPET);
   action.note = current === null ? 'new file with the Suiko protocol' : current.includes(BEGIN_MARKER) ? 'replaces the existing suiko block' : 'appends the Suiko protocol block';
+  if (current !== null && current.trim()) action.backup = true;
   return { files: [action], notes: [] };
 }
 
@@ -583,12 +582,7 @@ export function describePlan(plan, o) {
  * @returns {FileAction}
  */
 function fileAction(target, content, source) {
-  let current = null;
-  try {
-    current = fs.readFileSync(target, 'utf8');
-  } catch {
-    current = null;
-  }
+  const current = readExisting(target);
   return { path: target, action: current === null ? 'create' : current === content ? 'unchanged' : 'update', content, ...(source ? { source } : {}) };
 }
 
