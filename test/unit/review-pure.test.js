@@ -295,4 +295,30 @@ describe('git auto-commit', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test('commits with the empty assets folder `open` creates, and leaves other staged changes staged', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-git-')));
+    try {
+      const git = (/** @type {string[]} */ ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } });
+      git('init', '-q');
+      git('config', 'user.name', 'Test');
+      git('config', 'user.email', 'test@example.invalid');
+      git('config', 'commit.gpgsign', 'false');
+      fs.writeFileSync(path.join(root, 'staged.txt'), 'v1\n');
+      git('add', 'staged.txt');
+      git('commit', '-q', '-m', 'init');
+      fs.mkdirSync(path.join(root, '.specreview', 'docs', 'spec'), { recursive: true });
+      fs.mkdirSync(path.join(root, '.specreview', 'assets'));
+      fs.writeFileSync(path.join(root, '.specreview', 'docs', 'spec', 'doc.json'), '{}\n');
+      fs.writeFileSync(path.join(root, 'spec.md'), '# Spec\n');
+      fs.writeFileSync(path.join(root, 'staged.txt'), 'v2, staged by the user\n');
+      git('add', 'staged.txt');
+      const r = await autoCommit({ root, config: { git: { autoCommit: true } }, docId: 'spec', docPath: 'spec.md', version: 2, summary: 'tweak' });
+      assert.match(String(r.commit), /^[0-9a-f]{40}$/, JSON.stringify(r));
+      assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['.specreview/docs/spec/doc.json', 'spec.md']);
+      assert.equal(git('status', '--porcelain').trim(), 'M  staged.txt');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
