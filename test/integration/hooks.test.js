@@ -6,7 +6,7 @@
 
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -134,6 +134,20 @@ describe('hook pre-write', () => {
   test('another spelling of the reviewed doc (case-insensitive volumes) is that doc', { skip: !caseInsensitive && 'case-sensitive volume' }, () => {
     const r = hook('pre-write', { ...rewrite(), tool_input: { file_path: path.join(ws.root, 'Docs', 'Specs', 'Token-Service.md'), content: 'gone\n' } });
     assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  });
+
+  test('a symlink to the reviewed doc, or a path through a symlinked folder, is that doc', () => {
+    const dir = tempDir('aliases');
+    try {
+      fs.symlinkSync(ws.file, path.join(dir, 'alias.md'));
+      fs.symlinkSync(path.dirname(ws.file), path.join(dir, 'specs'));
+      for (const p of [path.join(dir, 'alias.md'), path.join(dir, 'specs', path.basename(ws.file))]) {
+        const r = hook('pre-write', { ...rewrite(), cwd: dir, tool_input: { file_path: p, content: 'gone\n' } });
+        assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny', p);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('a small change, a new file, another tool or an untracked file pass silently', () => {
@@ -379,6 +393,30 @@ describe('hooks on untrusted committed store files', () => {
       repo.cleanup();
     }
   });
+
+  test('a store file that is a symlink (to /dev/zero) or huge is skipped: both hooks stay fast and silent', async () => {
+    const repo = await makeWorkspace();
+    try {
+      const storeDir = path.join(repo.root, '.specreview');
+      const zeroDir = writeDoc(storeDir, 'zero', { schema: 1 });
+      fs.rmSync(path.join(zeroDir, 'doc.json'));
+      fs.symlinkSync('/dev/zero', path.join(zeroDir, 'doc.json'));
+      fs.mkdirSync(repo.store.reviewsDir('token-service'), { recursive: true });
+      fs.symlinkSync('/dev/zero', path.join(repo.store.reviewsDir('token-service'), 'rv1.json'));
+      const bigDir = writeDoc(storeDir, 'big', { schema: 1 });
+      fs.writeFileSync(path.join(bigDir, 'doc.json'), `{"schema":1,"id":"big","path":"big.md","head":1,"pad":"${'x'.repeat(5 * 1024 * 1024)}"}`);
+      for (const [name, p] of /** @type {const} */ ([['prompt', payloadFor(repo.root)], ['pre-write', { tool_name: 'Write', cwd: repo.root, tool_input: { file_path: repo.file, content: 'x\n' } }]])) {
+        const r = hook(name, p);
+        assert.equal(r.code, 0, name);
+        assert.ok(r.ms < 2000, `${name} took ${Math.round(r.ms)} ms`);
+        // prompt: the unreadable review is no reminder; pre-write: the doc still counts as reviewed (it has rv1)
+        if (name === 'prompt') assert.equal(r.stdout, '');
+        else assert.match(r.stdout, /"permissionDecision":"deny"/);
+      }
+    } finally {
+      repo.cleanup();
+    }
+  });
 });
 
 describe('robustness and speed', () => {
@@ -391,6 +429,20 @@ describe('robustness and speed', () => {
         assert.equal(r.stderr, '', `${name} ${JSON.stringify(input)}`);
       }
     }
+  });
+
+  test('a reader that closes stdout first (EPIPE): exit 0, nothing on stderr', async () => {
+    const child = spawn(process.execPath, [BIN, 'hook', 'pre-write'], {
+      env: { PATH: process.env.PATH, HOME: os.homedir(), SPECREVIEW_BROWSER: 'none', SPECREVIEW_HOME: HOME },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdout.destroy();
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d));
+    child.stdin.end(JSON.stringify(rewrite()));
+    const code = await new Promise((resolve) => child.on('close', resolve));
+    assert.equal(code, 0, stderr);
+    assert.equal(stderr, '');
   });
 
   test('runHook never throws, even with a broken stdout', async () => {
