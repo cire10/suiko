@@ -169,6 +169,14 @@ describe('revert', () => {
     const noop = await ops.revert(ctx, DOC, { lock: 'L1' });
     assert.equal(noop.noop, true);
   });
+
+  test('--lock on agreed text extended at its edge names the hunk instead of calling it intact', async () => {
+    const { ctx } = await reviewed();
+    editFile(ws.file(FILE), 'never stores tokens;', 'never stores tokens or keys;');
+    await assert.rejects(ops.revert(ctx, DOC, { lock: 'L1' }), (err) => err instanceof RefusedError && /suiko revert kitchen-sink --hunk h1/.test(err.message));
+    await ops.revert(ctx, DOC, { hunk: 'h1' });
+    assert.equal((await ctx.store.readVersion(DOC, 1)).source, ws.read(FILE), 'back to v1');
+  });
 });
 
 describe('revise without changes, reply, ask, reanchor', () => {
