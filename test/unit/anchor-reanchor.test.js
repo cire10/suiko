@@ -117,6 +117,25 @@ test('a linked pure deletion: moved text is followed (moved / edited), gone text
   assert.equal(gone.src.text, '', 'an empty range at the deletion point');
 });
 
+test('a linked pure deletion never lands on a similar sibling the version left untouched', () => {
+  const doc = '# Tokens\n\n## Rotation\n\n- Access tokens are rotated every 15 minutes.\n- Refresh tokens are rotated every 24 hours.\n- ID tokens are rotated every 60 minutes.\n\n## Next\n\nAlpha paragraph about caching.\n\nBeta paragraph about retries.\n';
+  const r = renderSourceSync({ format: 'markdown', source: doc, docPath: 'docs/t.md' });
+  /** @param {string} exact @param {string} tag */
+  const anchorOn = (exact, tag) => {
+    const p = selectSrid(r, { tag, text: exact });
+    return createAnchor({ version: 1, source: doc, render: r, format: 'markdown', capture: { kind: 'text', startSrid: p, endSrid: p, exact, prefix: '', suffix: '' } });
+  };
+  const linkDel = (/** @type {any[]} */ h) => ({ hunkIds: h.filter((x) => x.newLines === 0).map((x) => x.id) });
+  for (const [exact, tag, line] of /** @type {const} */ ([['Refresh tokens are rotated every 24 hours.', 'li', '- Refresh tokens are rotated every 24 hours.\n'], ['Alpha paragraph about caching.', 'p', 'Alpha paragraph about caching.\n\n']])) {
+    const a = anchorOn(exact, tag);
+    const to = doc.replace(line, '');
+    const hunks = lineHunks(doc, to);
+    const b = reanchor({ anchor: a, fromSource: doc, toSource: to, hunks, mapper: offsetMapper(doc, to, hunks), toRender: renderSourceSync({ format: 'markdown', source: to, docPath: 'docs/t.md' }), format: 'markdown', version: 2, link: linkDel(hunks) });
+    assert.equal(b.state, 'edited', exact);
+    assert.equal(b.src.text, '', `${exact}: the deletion point, not a sibling`);
+  }
+});
+
 test('a linked edit at the edge of the anchored text is edited even though the old text survives verbatim', () => {
   const v2 = V1.replace('lazy dog.', 'lazy dogs.');
   const unlinked = step(fox, V1, v2);
