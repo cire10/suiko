@@ -209,6 +209,22 @@ test('a lock directory without an owner record is stale only after staleMs', asy
   assert.equal(await withLock(dir, async () => 'mine', { timeoutMs: 2000 }), 'mine');
 });
 
+test('a lock directory a killed holder left without its owner record does not block the next 20 s wait', async () => {
+  // killed while writing owner.json: the temp file it left names the dead pid
+  const named = freshDir();
+  fs.mkdirSync(named, { recursive: true });
+  fs.writeFileSync(path.join(named, `${OWNER_FILE}.tmp-${deadPid()}-ab12`), '{"pid"');
+  const t0 = Date.now();
+  assert.equal(await withLock(named, async () => 'mine', { timeoutMs: 2000, staleMs: 30000 }), 'mine');
+  assert.ok(Date.now() - t0 < 1000);
+  // killed between mkdir and the temp file: a few seconds old is enough (staleMs is longer than the default wait)
+  const bare = freshDir();
+  fs.mkdirSync(bare, { recursive: true });
+  const past = new Date(Date.now() - 6000);
+  fs.utimesSync(bare, past, past);
+  assert.equal(await withLock(bare, async () => 'mine', { timeoutMs: 2000, staleMs: 30000 }), 'mine');
+});
+
 test('a leftover lock carrying our own pid but not held by us is stale', async () => {
   const dir = freshDir();
   fs.mkdirSync(dir, { recursive: true });
