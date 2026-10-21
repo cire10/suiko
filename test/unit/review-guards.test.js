@@ -290,6 +290,23 @@ describe('runGuards / lockIntegrity (pure)', () => {
     assert.equal(fresh.warnings[0].code, 'lock-new');
   });
 
+  test('the fixes run in the order printed: hunks bottom-up, each one reverted once', () => {
+    const h = 'S1 a\nS1 b\nS1 c\nS1 d\n\nS2 a\nS2 b\nS2 c\nS2 d\n\nS3 a\n';
+    const working = h.replace('S1 b\nS1 c\nS1 d\n', '').replace('S2 b\nS2 c\nS2 d\n', '');
+    const attr = attribute({ hunks: lineHunks(h, working), headSource: h, workingSource: working });
+    const r = runGuards({
+      docId: 'd', headVersion: 2, headLines: 11, headSource: h, workingSource: working, hunks: attr.hunks, config: cfg,
+      locks: [{ id: 'L1', label: '§S1', agreedIn: 'rv1', createdAt: '2026-01-01T00:00:00.000Z', intact: false, hunks: ['h1'] }],
+      lastDeliveredAt: '2026-02-01T00:00:00.000Z',
+    });
+    // reverting h1 first would turn h2 into h1: the later hunk comes first, and h1's revert is suggested once
+    assert.deepEqual(r.errors.map((e) => [e.hunk, e.fix?.split('   or   ')[0]]), [
+      ['h2', 'suiko revert d --hunk h2'],
+      ['h1', 'suiko revert d --hunk h1'],
+      ['h1', 'the revert of h1 above'],
+    ]);
+  });
+
   test('enforceLocks off turns lock errors into warnings', () => {
     const working = head.replace('five', 'FIVE');
     const hunks = lineHunks(head, working);

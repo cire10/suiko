@@ -308,6 +308,19 @@ export function runGuards(p) {
   for (const o of p.unusedOther ?? []) warnings.push({ code: 'other', message: `other entry at "${o.at}" ${o.reason}` });
   for (const b of p.badHints ?? []) warnings.push({ code: 'hint', thread: b.thread, message: `${b.thread} "at":"${b.at}" ignored: ${b.reason}` });
 
+  // The fixes get run top to bottom, and reverting a hunk renumbers the hunks after it: list the errors bottom-up,
+  // and suggest each hunk's revert once (a second `--hunk h1` would revert the hunk that became h1).
+  const hunkNo = (/** @type {GuardIssue} */ e) => (e.hunk ? Number(String(e.hunk).replace(/^h/, '')) || 0 : -1);
+  errors.sort((a, b) => hunkNo(b) - hunkNo(a));
+  /** @type {Set<string>} */
+  const reverted = new Set();
+  for (const e of errors) {
+    const revert = e.hunk ? `suiko revert ${doc} --hunk ${e.hunk}` : null;
+    if (!revert || !e.hunk || !e.fix?.startsWith(revert)) continue;
+    if (reverted.has(e.hunk)) e.fix = `the revert of ${e.hunk} above${e.fix.slice(revert.length)}`;
+    else reverted.add(e.hunk);
+  }
+
   const forced = Boolean(flags.force) && errors.length > 0;
   return { refused: errors.length > 0 && !flags.force, forced, errors, warnings, brokenLocks, intactLocks, unexplained, rewriteRatio: ratio };
 }
