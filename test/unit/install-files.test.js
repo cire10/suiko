@@ -157,6 +157,12 @@ test('copies: recognised by content, template (any invocation note) or a manifes
   assert.deepEqual(removeCopyAction(f, template, { template })?.kept, true);
   fs.writeFileSync(f, template);
   assert.equal(copyAction(f, template, { template }).action, 'unchanged');
+  // our copy, and a backup of the file it replaced: that is put back (the newest one when there are several)
+  const restore = removeCopyAction(f, template, { template });
+  assert.deepEqual([restore?.action, restore?.content], ['update', 'mine\n']);
+  fs.writeFileSync(`${f}.specreview-backup-20261020T120000Z`, 'mine, edited again\n');
+  assert.equal(removeCopyAction(f, template, { template })?.content, 'mine, edited again\n');
+  for (const b of fs.readdirSync(path.dirname(f)).filter((n) => n.startsWith(`${path.basename(f)}.specreview-backup`))) fs.rmSync(path.join(path.dirname(f), b));
   assert.equal(removeCopyAction(f, template, { template })?.action, 'delete');
   assert.equal(removeCopyAction(file('gone.md'), template, { template }), null);
 });

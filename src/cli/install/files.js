@@ -260,6 +260,28 @@ export function copyAction(file, content, o = {}) {
 }
 
 /**
+ * The most recent backup copyAction made of a file it replaced (<file>.specreview-backup, or a timestamped one),
+ * else null.
+ * @param {string} file
+ * @returns {{ path: string, text: string } | null}
+ */
+function newestBackup(file) {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}${BACKUP_SUFFIX}`;
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((n) => n === prefix || n.startsWith(`${prefix}-`));
+  } catch {
+    return null;
+  }
+  // timestamped names sort by time; the plain one is the oldest
+  names.sort((a, b) => (a === prefix ? -1 : b === prefix ? 1 : a < b ? -1 : a > b ? 1 : 0));
+  const newest = names.at(-1);
+  const text = newest ? readTextOrNull(path.join(dir, newest)) : null;
+  return newest && text !== null ? { path: path.join(dir, newest), text } : null;
+}
+
+/**
  * <file>.specreview-backup-<UTC timestamp>, unused.
  * @param {string} file
  * @returns {string}
@@ -282,6 +304,11 @@ export function removeCopyAction(file, content, o = {}) {
   const current = readExisting(file);
   if (current === null) return null;
   if (isOurCopy(file, current, content, o)) {
+    // install replaced a file of the user's (backing it up): put that back rather than leave it only as a backup
+    const backup = newestBackup(file);
+    if (backup) {
+      return { path: file, action: 'update', content: backup.text, ...(o.share ? { share: o.share } : {}), note: `restores the file install replaced (from ${path.basename(backup.path)})` };
+    }
     return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: 'installed by Suiko' };
   }
   return { path: file, action: 'unchanged', content: current, kept: true, note: 'kept: changed since Suiko installed it (delete it yourself if you no longer need it)' };

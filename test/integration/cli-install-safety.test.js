@@ -303,6 +303,17 @@ describe('backups and pre-existing files', () => {
     assert.doesNotMatch(again.stdout, / backup: /);
   });
 
+  test('uninstall puts back a file of the user\'s that install replaced, instead of deleting it', async () => {
+    const h = makeHome({ files: { '.claude/commands/review-spec.md': '# my own /review-spec\n' } });
+    const cmd = h.p('.claude/commands/review-spec.md');
+    assert.match((await h.run(['install', '--only', 'claude', '--apply'])).stdout, /backed up to review-spec\.md\.specreview-backup/);
+    assert.notEqual(read(cmd), '# my own /review-spec\n');
+    const un = await h.run(['uninstall', '--only', 'claude', '--apply']);
+    assert.equal(un.code, 0, un.stdout);
+    assert.match(un.stdout, /restores the file install replaced \(from review-spec\.md\.specreview-backup\)/);
+    assert.equal(read(cmd), '# my own /review-spec\n');
+  });
+
   test('uninstall keeps a config file that existed before install, with its empty containers', async () => {
     const h = makeHome({ dirs: ['.claude'], files: { '.claude/settings.json': '{}\n', '.cursor/mcp.json': '{"mcpServers": {}}\n', '.config/opencode/opencode.json': '{\n  "mcp": {},\n  "theme": "x"\n}\n' } });
     assert.equal((await h.run(['install', '--only', 'claude,cursor,opencode', '--apply'])).code, 0);
