@@ -219,6 +219,21 @@ describe('wait', () => {
     const r = await p;
     assert.deepEqual([r.status, r.docId, r.packets.map((x) => x.doc)], ['delivered', DOC, [DOC]]);
   });
+
+  test('wait --all keeps waiting on the docs still in review when one is closed; all closed ends it', async () => {
+    const { ctx, v1 } = await opened();
+    ws.write('docs/other.md', '# Other\n\nSome text.\n');
+    await ops.openDoc(ctx, { path: 'docs/other.md' });
+    await ops.closeSession(ctx, 'other');
+    assert.equal((await ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, timeoutMs: 80 })).status, 'timeout', 'closed before the wait');
+    const p = ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, write: () => {} });
+    await until(async () => (await ctx.store.listWaiters('_all')).length === 1);
+    await submitOne(ctx, v1);
+    const r = await p;
+    assert.deepEqual([r.status, r.docId], ['delivered', DOC]);
+    await ops.closeSession(ctx, DOC);
+    assert.equal((await ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, timeoutMs: 80 })).status, 'closed', 'every doc closed');
+  });
 });
 
 describe('feedback and ack', () => {

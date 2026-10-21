@@ -5,7 +5,8 @@
 //     -> { status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets, text, docId?,
 //          threads?, by?, aborted? }
 // 1. Refuses at once ('dirty') when a working copy differs from head, unless allowDirty; 'closed' when a doc's
-//    session is closed. With requireAnswers (`suiko wait`; never the plan gate), also refuses ('unanswered', with
+//    session is closed (with `--all`, when every doc's is: closed docs are left out of the wait). With
+//    requireAnswers (`suiko wait`; never the plan gate), also refuses ('unanswered', with
 //    the threads) when every review of a doc reached this agent but a thread they handed over still waits on its
 //    reply: the reviewer reads replies in Suiko, so an answer given only in the agent's chat never reaches them.
 // 2. Registers a waiter per doc (or '_all' for every doc), which supersedes older waiters of the same agent;
@@ -98,7 +99,10 @@ export async function waitForFeedback(ctx, opts = {}) {
 
   const initial = await listDocs();
   if (!initial.length) throw new NotFoundError('no tracked docs to wait for (run suiko open <file> first)');
-  for (const doc of initial) {
+  // `wait --all` waits on the docs still in review: a closed one is left out, and only all of them closed end it
+  const open = all ? initial.filter((d) => d.state !== 'closed') : initial;
+  if (!open.length) return { status: 'closed', packets: [], text: '', docId: initial[0].id };
+  for (const doc of open) {
     if (doc.state === 'closed') return { status: 'closed', packets: [], text: '', docId: doc.id };
     if (!allowDirty && doc.head && !(all && isVirtual(doc))) {
       const head = await readHead(ctx, doc);
@@ -107,7 +111,7 @@ export async function waitForFeedback(ctx, opts = {}) {
     }
   }
   if (requireAnswers) {
-    for (const doc of initial) {
+    for (const doc of open) {
       const threads = await unansweredThreads(ctx, doc, ctx.agent);
       if (threads.length) return { status: 'unanswered', packets: [], text: '', docId: doc.id, threads };
     }
@@ -187,8 +191,14 @@ export async function waitForFeedback(ctx, opts = {}) {
       /** @type {Packet[]} */
       const packets = [];
       const texts = [];
+      let inReview = 0;
       for (const doc of docs) {
-        if (await isClosed(ctx, doc, startSeq.get(doc.id) ?? 0)) return { status: 'closed', packets: [], text: '', docId: doc.id };
+        // --all: the doc's state now (a session closed during the wait and reopened by a review delivers again)
+        if (all ? doc.state === 'closed' : await isClosed(ctx, doc, startSeq.get(doc.id) ?? 0)) {
+          if (!all) return { status: 'closed', packets: [], text: '', docId: doc.id };
+          continue;
+        }
+        inReview++;
         const pending = (await ctx.store.listReviews(doc.id)).some((r) => !r.deliveredTo?.[ctx.agent] && (!minVersion || r.version >= minVersion));
         if (!pending) continue;
         const res = await ctx.store.withDocLock(doc.id, async () => {
@@ -201,6 +211,7 @@ export async function waitForFeedback(ctx, opts = {}) {
         texts.push(res.text);
       }
       if (packets.length) return { status: 'delivered', packets, text: texts.join('\n'), docId: packets[0].doc };
+      if (all && docs.length && !inReview) return { status: 'closed', packets: [], text: '', docId: docs[0].id };
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) return { status: 'timeout', packets: [], text: '' };
