@@ -77,6 +77,8 @@ export function resolveAgent(flag, env) {
   if (!AGENT_RE.test(name)) {
     throw new UsageError(`invalid agent name "${name}": use letters, digits, '.', '_' or '-' (at most 64)`);
   }
+  // a name every object already has (constructor, toString...) would read as delivered in every review
+  if (name in Object.prototype) throw new UsageError(`invalid agent name "${name}": it is reserved; pick another name`);
   return name;
 }
 

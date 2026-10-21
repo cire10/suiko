@@ -61,6 +61,11 @@ describe('arg helpers', () => {
     assert.equal(resolveAgent(undefined, { CLAUDECODE: '1' }), 'claude');
     assert.equal(resolveAgent(undefined, {}), 'agent');
     assert.throws(() => resolveAgent('bad name!', {}), /invalid agent name/);
+    // names every object already has would read as "delivered" in each review's deliveredTo
+    for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      assert.throws(() => resolveAgent(name, {}), /invalid agent name/, name);
+      assert.throws(() => resolveAgent(undefined, { SPECREVIEW_AGENT: name }), /invalid agent name/, name);
+    }
   });
   test('global options before the command are hoisted', () => {
     assert.deepEqual(hoistCommand(['--json', 'status']), ['status', '--json']);
