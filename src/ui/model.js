@@ -496,19 +496,21 @@ export function threadDrafts(drafts) {
 
 /**
  * Items the thread panel lists for a filter, in document order (List layout, amendments 1). New-thread drafts are
- * listed with 'open', 'drafts' and 'all'.
+ * listed with 'open', 'drafts' and 'all'. `keep`, the thread whose reply box is open, is listed whatever the filter,
+ * so the text being typed never disappears with its card (the thread was accepted in another tab, say).
  * @param {DocState} ds
  * @param {string} filter
  * @param {number|'live'|null} version
+ * @param {string|null} [keep]
  * @returns {Array<{ kind: 'thread'|'draft', id: string, item: any, anchor: Anchor|null }>}
  */
-export function panelItems(ds, filter, version) {
+export function panelItems(ds, filter, version, keep = null) {
   if (!ds) return [];
   const ctx = { drafts: ds.drafts, version };
   /** @type {Array<{ kind: 'thread'|'draft', id: string, item: any, anchor: Anchor|null }>} */
   const out = [];
   for (const t of ds.threads || []) {
-    if (threadMatches(t, filter, ctx)) out.push({ kind: 'thread', id: t.id, item: t, anchor: anchorAt(t, version) });
+    if (t.id === keep || threadMatches(t, filter, ctx)) out.push({ kind: 'thread', id: t.id, item: t, anchor: anchorAt(t, version) });
   }
   if (filter === 'open' || filter === 'drafts' || filter === 'all') {
     for (const d of threadDrafts(ds.drafts)) out.push({ kind: 'draft', id: d.id, item: d, anchor: d.anchor || null });

@@ -137,6 +137,8 @@ test('panelItems: document order, new-thread drafts with Open / Drafts / All, ou
   assert.deepEqual(panelItems(ds, 'resolved', 1).map((x) => x.id), ['t2']);
   assert.deepEqual(panelItems(ds, 'outdated', 1).map((x) => x.id), ['t3']);
   assert.deepEqual(panelItems(ds, 'drafts', 1).map((x) => x.id), ['d1', 't1']);
+  // the thread whose reply box is open stays listed whatever the filter (resolved in another tab, say)
+  assert.deepEqual(panelItems(ds, 'resolved', 1, 't1').map((x) => x.id), ['t2', 't1']);
 });
 
 test('presence and review progress follow waiters, delivery, the working copy and the answering version', () => {

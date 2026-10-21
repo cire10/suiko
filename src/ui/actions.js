@@ -920,7 +920,7 @@ export function focusItem(id, opts = {}) {
   // Read mode shows no threads: focusing one is reviewing it
   if (get().mode === 'read') setMode('review');
   const s = get();
-  const visible = panelItems(s.ds, s.filter, s.version).some((x) => x.id === id);
+  const visible = panelItems(s.ds, s.filter, s.version, s.reply?.threadId ?? null).some((x) => x.id === id);
   set({
     focusedId: id,
     filter: visible ? s.filter : 'all',
@@ -993,7 +993,7 @@ export function registerKindSelection(fn) {
 /** j / k. @param {1|-1} dir */
 export function navThread(dir) {
   const s = get();
-  const items = panelItems(s.ds, s.filter, s.version);
+  const items = panelItems(s.ds, s.filter, s.version, s.reply?.threadId ?? null);
   if (!items.length) return;
   const i = items.findIndex((x) => x.id === s.focusedId);
   const next = i < 0 ? (dir > 0 ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, i + dir));
@@ -1846,9 +1846,9 @@ export async function acceptAll() {
     toast('The working copy is a read-only preview. Switch to a recorded version to accept threads.', { tone: 'warn' });
     return false;
   }
-  const ids = acceptableThreads(s.ds).map((/** @type {any} */ t) => String(t.id)).filter((id) => !s.busyThreads.includes(id));
+  const { ids, leftOut } = bulkAcceptable(s);
   if (!ids.length) {
-    toast(declinedToVerify(s.ds).length
+    toast(leftOut ? `Nothing else to accept.${leftOut}` : declinedToVerify(s.ds).length
       ? 'Nothing to accept in one go: the threads left in Verify were declined. Accept or reopen each one.'
       : 'Nothing to accept: no addressed or answered threads are waiting in Verify.', { timeout: 4000 });
     return false;
@@ -1868,13 +1868,27 @@ export async function acceptAll() {
   const done = Array.isArray(r?.resolved) ? r.resolved.map(String) : ids;
   const declined = declinedToVerify(get().ds).length;
   toast(`Accepted ${done.length} thread${done.length === 1 ? '' : 's'} (${listIds(done)}).${declined
-    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}`, {
+    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}${leftOut}`, {
     tone: 'ok',
     timeout: 12000,
     actions: done.length ? [{ label: 'Undo', run: () => undoAcceptAll(c, done) }] : [],
   });
   await refreshNow();
   return true;
+}
+
+/**
+ * The threads Accept all (and Accept all revisions) resolve: the Verify queue's addressed and answered ones, but
+ * not one being worked on, nor the one whose reply box holds text (resolving it would take the card, and the text,
+ * out of the list). `leftOut` says so for the toast ('' when nothing was left out).
+ * @param {ReturnType<typeof get>} s
+ * @returns {{ ids: string[], leftOut: string }}
+ */
+function bulkAcceptable(s) {
+  const replying = s.reply && String(s.reply.body ?? '').trim() ? String(s.reply.threadId) : null;
+  const all = acceptableThreads(s.ds).map((/** @type {any} */ t) => String(t.id)).filter((id) => !s.busyThreads.includes(id));
+  const ids = all.filter((id) => id !== replying);
+  return { ids, leftOut: ids.length < all.length ? ` ${replying} was left out: you are replying to it.` : '' };
 }
 
 /**
@@ -1918,7 +1932,7 @@ export async function acceptRevisions() {
     toast(`Switch to v${todo.version} (latest) to accept its revisions.`, { timeout: 4000 });
     return false;
   }
-  const ids = acceptableThreads(s.ds).map((/** @type {any} */ t) => String(t.id)).filter((id) => !s.busyThreads.includes(id));
+  const { ids, leftOut } = bulkAcceptable(s);
   // the changes shown, when they end at the accepted version (seen marks are kept per comparison)
   const seenKey = seenStorageKey(s);
   const before = readSeen(seenKey);
@@ -1941,7 +1955,7 @@ export async function acceptRevisions() {
   const declined = declinedToVerify(get().ds).length;
   const threads = done.length ? ` and ${done.length} thread${done.length === 1 ? '' : 's'} (${listIds(done)})` : '';
   toast(`Accepted the revisions of v${todo.version}${threads}.${declined
-    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}`, {
+    ? ` ${declined} declined thread${declined === 1 ? ' is' : 's are'} still in Verify.` : ''}${leftOut}`, {
     tone: 'ok',
     timeout: 12000,
     actions: [{

@@ -55,7 +55,8 @@ export function ThreadPanel() {
     // iframe is hidden and every target would read as "hidden".
     states: kindCaps(st.ds).frame && showsDoc(st.mode) ? targetStates(st.guest.positions) : '',
   }));
-  const items = useMemo(() => panelItems(s.ds, s.filter, s.version), [s.ds, s.filter, s.version]);
+  const replyingTo = s.reply?.threadId ?? null;
+  const items = useMemo(() => panelItems(s.ds, s.filter, s.version, replyingTo), [s.ds, s.filter, s.version, replyingTo]);
   const counts = useMemo(() => filterCounts(s.ds, s.version), [s.ds, s.version]);
   if (!s.ds) return null;
   const agent = agentName(s.ds);

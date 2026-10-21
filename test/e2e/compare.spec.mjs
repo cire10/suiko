@@ -241,6 +241,20 @@ test.describe('Accept all', () => {
     expect(ui.errors).toEqual([]);
   });
 
+  test('a thread you are replying to is left out, and its reply box keeps its text', async ({ page, ui, mock }) => {
+    await ui.open('kitchen-sink');
+    await focusUi(page);
+    await page.keyboard.press('v');
+    await ui.card('t2').getByRole('button', { name: 'Reply', exact: true }).click();
+    const reply = page.getByTestId(TESTID.replyTextarea);
+    await reply.fill('One more thing about this');
+    await page.locator('.thread-panel .accept-all-bar').getByTestId(TESTID.verifyAcceptAll).click();
+    await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted 1 thread (t1).' })).toContainText('t2 was left out: you are replying to it.');
+    expect(mock.doc('kitchen-sink').threads.find((t) => t.id === 't2')?.status).not.toBe('resolved');
+    await expect(reply).toHaveValue('One more thing about this');
+    expect(ui.errors).toEqual([]);
+  });
+
   test('the Changes round results offer it too, and the palette', async ({ page, ui, mock }) => {
     await ui.open('kitchen-sink');
     const results = page.locator('.round-results');
