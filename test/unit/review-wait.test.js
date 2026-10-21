@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { SSE } from '../../src/shared/protocol.js';
 import * as ops from '../../src/core/review/index.js';
 import { editFile, engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
@@ -111,6 +112,13 @@ describe('wait', () => {
     const ok = await ops.waitForFeedback(ctx, { docIds: [DOC], pollMs: 20, allowDirty: true, write: () => {} });
     assert.equal(ok.status, 'delivered');
     assert.match(ok.text, /^Line numbers = current file on disk \(working copy differs from v1: lines mapped\)\.$/m);
+  });
+
+  test('a missing working copy is refused as dirty and says it is missing', async () => {
+    const { ctx } = await opened();
+    fs.rmSync(ws.file(FILE));
+    const r = await ops.waitForFeedback(ctx, { docIds: [DOC], pollMs: 20, timeoutMs: 80, write: () => {} });
+    assert.deepEqual([r.status, r.missing, r.path], ['dirty', true, FILE]);
   });
 
   test('times out with no review and removes its waiter file', async () => {

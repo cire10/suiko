@@ -241,6 +241,17 @@ async function finish(rt, engine, s) {
         json: { status: 'dirty', doc, head: code.head ?? head ?? null, changedFiles: code.files },
       };
     }
+    if (outcome.missing) {
+      // revise cannot record a file that is not there: restore it, or end the review
+      return {
+        exit: EXIT.REFUSED,
+        stderr: [
+          `suiko: ${doc}: its working copy ${outcome.path ?? ''} is missing (renamed or deleted?). ` +
+            `Restore it, or end the review with \`suiko close ${ref}\` (--allow-dirty waits anyway).`,
+        ],
+        json: { status: 'dirty', missing: true, doc, head: head ?? null },
+      };
+    }
     return {
       exit: EXIT.REFUSED,
       stderr: [

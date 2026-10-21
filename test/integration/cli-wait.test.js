@@ -113,6 +113,10 @@ describe('wait', () => {
     const dirty = await runCli(['wait', 'token-service'], depsWith(async () => ({ status: 'dirty', packets: [], text: '', docId: 'token-service' })).d);
     assert.equal(dirty.code, 3);
     assert.match(dirty.stderr, /^suiko: token-service has unrecorded edits \(working copy differs from v1\)\. Record them first: `suiko revise token-service --replies -`/);
+    // a missing file is no edit to record: revise would fail; restore it or close the review
+    const gone = await runCli(['wait', 'token-service'], depsWith(async () => ({ status: 'dirty', missing: true, path: 'docs/specs/token-service.md', packets: [], text: '', docId: 'token-service' })).d);
+    assert.equal(gone.code, 3);
+    assert.match(gone.stderr, /^suiko: token-service: its working copy docs\/specs\/token-service\.md is missing \(renamed or deleted\?\)\. Restore it, or end the review with `suiko close token-service`/);
   });
 
   test('--allow-dirty, --all and usage errors', async () => {

@@ -41,7 +41,8 @@ const log = createLogger('review:wait');
  * @typedef {import('../packet-data.js').Packet} Packet
  * @typedef {{ id: string, type: string, status: string, replied: boolean }} UnansweredThread
  * @typedef {{ status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets: Packet[],
- *   text: string, docId?: string, threads?: UnansweredThread[], by?: number, aborted?: boolean }} WaitResult
+ *   text: string, docId?: string, threads?: UnansweredThread[], by?: number, aborted?: boolean,
+ *   missing?: boolean, path?: string }} WaitResult missing: 'dirty' because the working copy is gone
  */
 
 /**
@@ -107,7 +108,7 @@ export async function waitForFeedback(ctx, opts = {}) {
     if (!allowDirty && doc.head && !(all && isVirtual(doc))) {
       const head = await readHead(ctx, doc);
       const w = await readWorkingState(ctx, doc, head);
-      if (w.dirty) return { status: 'dirty', packets: [], text: '', docId: doc.id };
+      if (w.dirty) return { status: 'dirty', packets: [], text: '', docId: doc.id, ...(w.missing ? { missing: true, path: doc.path } : {}) };
     }
   }
   if (requireAnswers) {
