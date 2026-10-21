@@ -159,11 +159,14 @@ export async function openContext(rt, opts = {}) {
  * Registered workspaces (see store/home.js) that still exist and whose root is inside the cwd or contains it,
  * nearest first. Other registered workspaces (siblings, other projects) are never related. Paths are compared
  * after realpath (the registry stores real paths; the cwd may come through a symlink such as /tmp on macOS).
- * Nothing is related to the home directory or the filesystem root, which are never workspace roots.
+ * Nothing is related to the home directory or the filesystem root, which are never workspace roots; with
+ * `fromHome`, every registered workspace is a candidate there instead (a doc id named from those directories,
+ * where desktop MCP clients start their servers, is looked up everywhere; one hit or an error naming several).
  * @param {string} cwd
+ * @param {{ fromHome?: boolean }} [opts]
  * @returns {Promise<string[]>}
  */
-export async function relatedWorkspaceRoots(cwd) {
+export async function relatedWorkspaceRoots(cwd, { fromHome = false } = {}) {
   /** @type {Array<{ root: string, exists: boolean }>} */
   let all = [];
   /** @type {(dir: string) => boolean} */
@@ -176,13 +179,29 @@ export async function relatedWorkspaceRoots(cwd) {
     return [];
   }
   const here = realpathOr(cwd);
-  if (forbidden(here) || forbidden(path.resolve(cwd))) return [];
+  if (forbidden(here) || forbidden(path.resolve(cwd))) {
+    return fromHome ? all.filter((w) => w.exists).map((w) => w.root).sort() : [];
+  }
   const depth = (/** @type {string} */ p) => p.split(path.sep).filter(Boolean).length;
   const distance = (/** @type {string} */ p) => Math.abs(depth(p) - depth(here));
   return all
     .filter((w) => w.exists && (isWithin(here, w.root) || isWithin(w.root, here)))
     .map((w) => w.root)
     .sort((a, b) => distance(a) - distance(b) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * Whether `cwd` is the home directory or the filesystem root (never a workspace root).
+ * @param {string} cwd
+ * @returns {Promise<boolean>}
+ */
+async function isHomeOrRoot(cwd) {
+  try {
+    const { isForbiddenRoot } = await import('../core/store/workspace.js');
+    return isForbiddenRoot(realpathOr(cwd)) || isForbiddenRoot(path.resolve(cwd));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -198,18 +217,21 @@ export async function relatedWorkspaceRoots(cwd) {
  */
 export async function docContext(rt, docArg) {
   const file = existingFile(rt.cwd, docArg);
-  /** @type {NotFoundError} */
+  /** @type {SuikoError} */
   let notFound;
+  // the home directory or the filesystem root is never a workspace: opening one is refused, and the id is looked up
+  // in every registered workspace instead
+  const fromHome = !file && !rt.workspace && (await isHomeOrRoot(rt.cwd));
   try {
     const { ctx, engine } = await openContext(rt, file ? { file } : { related: false });
     const doc = await resolveDoc(engine, ctx, file ?? docArg, docArg);
     return { ctx, engine, doc, docId: doc.id };
   } catch (err) {
-    if (!(err instanceof NotFoundError) || file || rt.workspace) throw err;
+    if (!(err instanceof NotFoundError || (fromHome && err instanceof SuikoError)) || file || rt.workspace) throw err;
     notFound = err;
   }
   const engine = await rt.engine();
-  const roots = await relatedWorkspaceRoots(rt.cwd);
+  const roots = await relatedWorkspaceRoots(rt.cwd, { fromHome });
   /** @type {Array<{ ctx: any, doc: any }>} */
   const hits = [];
   /** @type {Set<string>} */
