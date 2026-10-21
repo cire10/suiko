@@ -136,14 +136,17 @@ export async function liveDaemon(timeoutMs = 500) {
 }
 
 /**
- * Status for `doctor`/`stop`: the daemon.json contents and whether it answers.
+ * Status for `doctor`/`stop`: the daemon.json contents and whether it answers. A suiko daemon with another pid on
+ * that port is not this one (its daemon.json is stale and another SPECREVIEW_HOME's daemon took the port): it is
+ * not running, so `stop` never sends it a SIGTERM.
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {Promise<{ info: DaemonInfo | null, health: Health | null, running: boolean }>}
  */
 export async function daemonStatus({ timeoutMs = 500 } = {}) {
   const info = await readDaemonInfo();
   const health = info && validPort(info.uiPort) ? await getHealth(info.uiPort, timeoutMs) : null;
-  return { info, health, running: isSpecreviewHealth(health) };
+  const other = Boolean(health?.pid && info?.pid && health.pid !== info.pid);
+  return { info, health, running: isSpecreviewHealth(health) && !other };
 }
 
 /**
