@@ -185,6 +185,10 @@ describe('revise without changes, reply, ask, reanchor', () => {
     const nothing = await ops.revise(ctx, DOC, {});
     assert.equal(nothing.nothing, true);
     assert.equal(nothing.version, null);
+    // a dry run says what it would post, and posts nothing
+    const dry = await ops.revise(ctx, DOC, { threads: { t1: { status: 'needs_input', reply: 'Which one?' } }, dryRun: true });
+    assert.equal(ops.formatReviseReport(dry), 'suiko: working copy matches v1; would post 1 reply (no new version)\n  t1 needs_input\ndry run: nothing posted.\n');
+    assert.equal((await ctx.store.getThread(DOC, 't1'))?.comments.length, 1);
     const r = await ops.revise(ctx, DOC, {
       threads: {
         t1: { status: 'needs_input', reply: 'Grace window of 30 s or configurable?' },

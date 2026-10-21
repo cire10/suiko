@@ -550,9 +550,9 @@ export function formatReviseReport(r) {
   /** @type {string[]} */
   const out = [];
   if (r.repliesOnly) {
-    out.push(`suiko: ${same}; posted ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
+    out.push(`suiko: ${same}; ${r.dryRun ? 'would post' : 'posted'} ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
     for (const rep of r.replies) out.push(`  ${rep.thread} ${rep.status}`);
-    out.push(`next: suiko wait ${ref} (background)`);
+    out.push(r.dryRun ? 'dry run: nothing posted.' : `next: suiko wait ${ref} (background)`);
     return `${out.join('\n')}\n`;
   }
   if (r.refused) {
