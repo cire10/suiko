@@ -74,6 +74,21 @@ describe('drafts and submit', () => {
     assert.equal(t1?.anchors['2'].state, 'moved');
     assert.equal(t1?.anchors['2'].src.startLine, 71);
   });
+
+  test('a review sent while an older version is on screen leaves the newer one unreviewed; it never moves back', async () => {
+    const { ctx, v1 } = await opened();
+    editFile(ws.file(FILE), '## 1 Goals\n', '## 1 Goals\n\nNew intro.\n');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'v2' });
+    // the reviewer still looks at v1 (expectHead: the version on screen) when v2 arrives
+    await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Load test the issuer'), body: 'which load?' });
+    const rv = await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '', expectHead: 1 });
+    assert.equal(rv.version, 2, 'the threads are carried to the head');
+    assert.equal((await ctx.store.getDoc(DOC))?.lastReviewedVersion, 1, 'v2 still shows as new');
+    // reviewed on v2, then a comment sent while browsing v1 in History: the last review stays v2
+    await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'looked at v2', expectHead: 2 });
+    await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'about v1', expectHead: 1 });
+    assert.equal((await ctx.store.getDoc(DOC))?.lastReviewedVersion, 2);
+  });
 });
 
 describe('locks and threads', () => {

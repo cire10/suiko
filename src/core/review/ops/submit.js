@@ -16,7 +16,8 @@
 // A reviewer reply on a needs_input thread (an ANSWER) or with `reopen` makes the thread `open` again.
 // Approve + resolveAddressed resolves addressed/answered threads; approve + markFinal marks head final.
 // `expectHead` (the version the reviewer was looking at) makes an approval fail with ConflictError (HTTP 409)
-// when another version was recorded since: approving or marking final a version nobody reviewed is refused.
+// when another version was recorded since: approving or marking final a version nobody reviewed is refused. It is
+// also the doc's lastReviewedVersion ("since your last review"), which never moves back; without it, the head.
 
 import { SSE, VERDICTS } from '../../../shared/protocol.js';
 import { ConflictError, NotFoundError, UsageError } from '../../store/errors.js';
@@ -157,7 +158,10 @@ export async function submitReview(ctx, ref, input = {}) {
       .map((l) => l.id);
 
     const markFinal = verdict === 'approved' && Boolean(input.markFinal);
-    doc.lastReviewedVersion = head;
+    // "Since your last review" starts at the version the reviewer was looking at (expectHead): a newer one recorded
+    // meanwhile stays new to them. It never moves back (a comment sent while browsing an older version).
+    const seen = expectHead !== null && expectHead >= 1 && expectHead < head ? expectHead : head;
+    doc.lastReviewedVersion = Math.max(seen, Number(doc.lastReviewedVersion) || 0);
     if (markFinal) {
       doc.state = 'approved';
       doc.final = { version: head, review: reviewId, at, by: by.name };
