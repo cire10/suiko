@@ -65,6 +65,22 @@ export function readTextOrNull(file) {
 }
 
 /**
+ * The text of a file an action may rewrite or delete: null only when it does not exist. One that exists but cannot
+ * be read (permissions, a directory) is refused: taken for absent, it would be replaced by Suiko's content alone.
+ * @param {string} file
+ * @returns {string | null}
+ */
+export function readExisting(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw new InstallRefusal(file, `${file} exists but cannot be read (${code ?? /** @type {Error} */ (err).message}); the file is left as is`, 'make it readable (check its owner and permissions), then re-run');
+  }
+}
+
+/**
  * @param {string} text
  * @returns {string}
  */
@@ -216,7 +232,7 @@ export function stripInvocationNote(text) {
  * @returns {FileAction}
  */
 export function copyAction(file, content, o = {}) {
-  const current = readTextOrNull(file);
+  const current = readExisting(file);
   /** @type {FileAction} */
   const a = {
     path: file,
@@ -244,6 +260,28 @@ export function copyAction(file, content, o = {}) {
 }
 
 /**
+ * The most recent backup copyAction made of a file it replaced (<file>.specreview-backup, or a timestamped one),
+ * else null.
+ * @param {string} file
+ * @returns {{ path: string, text: string } | null}
+ */
+function newestBackup(file) {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}${BACKUP_SUFFIX}`;
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((n) => n === prefix || n.startsWith(`${prefix}-`));
+  } catch {
+    return null;
+  }
+  // timestamped names sort by time; the plain one is the oldest
+  names.sort((a, b) => (a === prefix ? -1 : b === prefix ? 1 : a < b ? -1 : a > b ? 1 : 0));
+  const newest = names.at(-1);
+  const text = newest ? readTextOrNull(path.join(dir, newest)) : null;
+  return newest && text !== null ? { path: path.join(dir, newest), text } : null;
+}
+
+/**
  * <file>.specreview-backup-<UTC timestamp>, unused.
  * @param {string} file
  * @returns {string}
@@ -263,9 +301,14 @@ export function stampedBackupPath(file) {
  * @returns {FileAction | null} null when the file does not exist
  */
 export function removeCopyAction(file, content, o = {}) {
-  const current = readTextOrNull(file);
+  const current = readExisting(file);
   if (current === null) return null;
   if (isOurCopy(file, current, content, o)) {
+    // install replaced a file of the user's (backing it up): put that back rather than leave it only as a backup
+    const backup = newestBackup(file);
+    if (backup) {
+      return { path: file, action: 'update', content: backup.text, ...(o.share ? { share: o.share } : {}), note: `restores the file install replaced (from ${path.basename(backup.path)})` };
+    }
     return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: 'installed by Suiko' };
   }
   return { path: file, action: 'unchanged', content: current, kept: true, note: 'kept: changed since Suiko installed it (delete it yourself if you no longer need it)' };
@@ -368,7 +411,7 @@ export function removeBlock(current, m) {
  * @returns {FileAction}
  */
 export function blockAction(file, block, m, o = {}) {
-  const current = readTextOrNull(file);
+  const current = readExisting(file);
   if (current !== null) checkMarkers(file, current, m);
   const content = upsertBlock(current, block, m);
   const what = o.what ?? 'the Suiko block';
@@ -403,7 +446,7 @@ export function blockAction(file, block, m, o = {}) {
  * @returns {FileAction | null} null when there is no block
  */
 export function removeBlockAction(file, m, o = {}) {
-  const current = readTextOrNull(file);
+  const current = readExisting(file);
   if (current === null) return null;
   checkMarkers(file, current, m);
   const next = removeBlock(current, m);
@@ -520,7 +563,7 @@ export function removeTomlBlockAction(file, text, blk, o) {
  * @returns {{ text: string, value: Record<string, any> } | null}
  */
 export function readJsonFile(file, fix) {
-  const text = readTextOrNull(file);
+  const text = readExisting(file);
   if (text === null || text.trim() === '') return null;
   let value;
   try {
@@ -564,7 +607,7 @@ export function stringifyLike(value, original) {
  * @returns {FileAction | null} null for a removal from a missing file
  */
 export function jsonAction(file, mutate, o = {}) {
-  const raw = readTextOrNull(file);
+  const raw = readExisting(file);
   const exists = raw !== null;
   const parsed = readJsonFile(file, o.fix);
   const current = parsed?.value ?? {};

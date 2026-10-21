@@ -123,6 +123,27 @@ describe('Repo', () => {
     r.rm('untracked one.txt');
   });
 
+  test('a split index: the temp index adds and prunes no shared index, so the real index stays readable', async () => {
+    const s = await makeRepo({ files: { 'a.txt': 'a\n', 'b.txt': 'b\n' } });
+    try {
+      s.git('config', 'core.splitIndex', 'true');
+      s.git('config', 'splitIndex.sharedIndexExpire', 'now');
+      s.git('update-index', '--split-index');
+      const shared = () => fs.readdirSync(path.join(s.root, '.git')).filter((n) => n.startsWith('sharedindex.'));
+      const before = shared();
+      assert.equal(before.length, 1);
+      s.write('a.txt', 'a\nmore\n');
+      s.write('c.txt', 'new\n');
+      const repo = await openRepo(s.root);
+      const tree = await repo.worktreeTree(/** @type {any} */ ({ cacheDir: () => path.join(s.base, 'cache') }), [Buffer.from('.')]);
+      assert.match(tree, /^[0-9a-f]{40}$/);
+      assert.deepEqual(shared(), before);
+      assert.equal(s.git('status', '--porcelain'), 'M a.txt\n?? c.txt', 'the real index still reads (git trims the first space)');
+    } finally {
+      await s.cleanup();
+    }
+  });
+
   test('a same-size edit in the index\'s own second is seen (the temp index keeps the real one\'s timestamps)', async () => {
     const repo = await openRepo(r.root);
     const file = path.join(r.root, 'src/a.js');

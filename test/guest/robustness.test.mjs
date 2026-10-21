@@ -1,7 +1,8 @@
 // @ts-check
 // Browser regression tests for the guest under hostile-but-realistic documents: a CSP that forbids inline styles,
-// links that would navigate the doc frame away, a modal <dialog>, a script that copies stamped elements, and a page
-// that throws continuously. Same two-origin harness and system Chrome as guest.test.mjs.
+// links that would navigate the doc frame away, a modal <dialog>, a script that copies stamped elements, a page
+// that throws continuously, and globals named like window properties. Same two-origin harness and system Chrome as
+// guest.test.mjs.
 // Run: node --test "test/guest/**/*.test.mjs"
 
 import { test, before, after, describe } from 'node:test';
@@ -360,6 +361,22 @@ describe('page errors (UIR-10)', () => {
       assert.match(later.last, /drawFrame/);
       const guestCount = await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.inspect().pageErrors.count);
       assert.ok(guestCount - later.count < 15, `the UI lags at most ~1 s behind (${later.count} of ${guestCount})`);
+    } finally {
+      await d.close();
+    }
+  });
+});
+
+describe('page globals', () => {
+  test('a top-level `var parent` (or top, self, name) in the page neither blocks the handshake nor selections', async () => {
+    const d = await openDoc(browser, harness, 'globals');
+    try {
+      assert.equal(await d.frame.evaluate(() => /** @type {any} */ (window).parent === document.documentElement), true, 'the page replaced window.parent');
+      const from = await mark(d.page);
+      await selectText(d.frame, 3, 'reused the names');
+      const msg = await waitMsg(d.page, 'selection', from, (m) => !!m.capture);
+      assert.equal(msg.capture.exact, 'reused the names');
+      assert.deepEqual(d.pageErrors, []);
     } finally {
       await d.close();
     }

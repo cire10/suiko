@@ -48,7 +48,10 @@ export const shortcut = (combo, opts) => keyLabel(combo, IS_MAC, opts);
 /** The keyboard shortcuts overlay's groups, generated from the command registry. */
 export const KEYMAP = Object.freeze(helpGroups());
 
-/** @typedef {{ key: string, meta?: boolean, ctrl?: boolean, shift?: boolean, alt?: boolean }} KeyInput */
+/**
+ * fromBase: forwarded by the older version's frame of Changes side by side.
+ * @typedef {{ key: string, meta?: boolean, ctrl?: boolean, shift?: boolean, alt?: boolean, fromBase?: boolean }} KeyInput
+ */
 
 /**
  * Runs the action bound to a key. Returns true when the key was handled.
@@ -107,7 +110,7 @@ export function handleKey(k, fromGuest) {
     case 's':
     case 'q':
     case 'a':
-      return selectionAction(key);
+      return selectionAction(key, { fromBase: !!k.fromBase });
     case 'e':
       togglePick();
       return true;
@@ -260,7 +263,7 @@ function onKeyDown(ev) {
 export function installKeys() {
   setKeyForwarder((d) => {
     if (!d || typeof d.key !== 'string') return;
-    handleKey({ key: d.key, meta: !!d.meta, ctrl: !!d.ctrl, shift: !!d.shift, alt: !!d.alt }, true);
+    handleKey({ key: d.key, meta: !!d.meta, ctrl: !!d.ctrl, shift: !!d.shift, alt: !!d.alt, fromBase: !!d.fromBase }, true);
   });
   document.addEventListener('keydown', onKeyDown);
 }

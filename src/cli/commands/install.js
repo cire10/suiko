@@ -13,7 +13,7 @@ import { expectPositionals } from '../args.js';
 import { applyPlan, describePlan, isOnPath, planAgentsMd, planClaude } from '../install.js';
 import { AGENTS, resolveAgentId } from '../install/agents.js';
 import { loadManifest } from '../install/files.js';
-import { buildContext, describeReport, manifestPath, parseAgentList, reportExit, reportJson, runInstaller } from '../install/multi.js';
+import { buildContext, describeReport, manifestPath, parseAgentList, reportExit, reportJson, runInstaller, stableNodePath } from '../install/multi.js';
 
 export const spec = {
   name: 'install',
@@ -122,9 +122,11 @@ export async function execute(rt, input) {
       ? planClaude({
           scope: input.scope, withHooks: input.withHooks, withPlanGate: input.withPlanGate, withMcp: input.withMcp, cwd: rt.cwd, claudeHome,
           cliOnPath: isOnPath('suiko', rt.env.PATH ?? ''), manifest: loadManifest(manifest),
+          // the node `suiko install` writes too (the PATH entry, which survives `brew upgrade`), so the two agree
+          execPath: rt.deps.execPath ?? stableNodePath(rt.env, process.execPath),
         })
       : planAgentsMd({ cwd: rt.cwd, file: input.file });
-  const written = input.apply ? applyPlan(plan, { manifest }) : [];
+  const written = input.apply ? applyPlan(plan, { manifest, backups: true }) : [];
   return {
     exit: EXIT.OK,
     text: describePlan(plan, { applied: input.apply, written }),

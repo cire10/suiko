@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { SSE } from '../../src/shared/protocol.js';
 import * as ops from '../../src/core/review/index.js';
 import { editFile, engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
@@ -72,15 +73,15 @@ describe('wait', () => {
     // delivered, no replies: refused, both named; nothing is registered
     let r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
     assert.deepEqual([r.status, r.docId, r.threads], ['unanswered', DOC, [
-      { id: 't1', type: 'comment', status: 'open' }, { id: 't2', type: 'question', status: 'open' }]]);
+      { id: 't1', type: 'comment', status: 'open', replied: false }, { id: 't2', type: 'question', status: 'open', replied: false }]]);
     assert.deepEqual(await ctx.store.listWaiters(DOC, { liveOnly: false }), [], 'no waiter registered');
     // without requireAnswers (the plan gate, --allow-unanswered) the wait blocks as before
     assert.equal((await ops.waitForFeedback(ctx, q)).status, 'timeout');
 
-    // a reply without a status leaves the thread open: still refused
+    // a reply without a status leaves the thread open: still refused, marked as replied (the message says so)
     await ops.reply(ctx, DOC, 't2', { body: 'Lower latency.' });
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
-    assert.deepEqual(r.threads?.map((t) => t.id), ['t1', 't2']);
+    assert.deepEqual(r.threads?.map((t) => [t.id, t.replied]), [['t1', false], ['t2', true]]);
     await ops.reply(ctx, DOC, 't2', { body: 'Lower latency; sessions are ephemeral.', status: 'answered' });
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
     assert.deepEqual(r.threads?.map((t) => t.id), ['t1']);
@@ -93,7 +94,7 @@ describe('wait', () => {
     await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'delivered');
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
-    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined' }]);
+    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined', replied: false }]);
     // resolved by the reviewer: nothing left to answer
     await ops.resolveThread(ctx, DOC, 't1', {});
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'timeout');
@@ -111,6 +112,13 @@ describe('wait', () => {
     const ok = await ops.waitForFeedback(ctx, { docIds: [DOC], pollMs: 20, allowDirty: true, write: () => {} });
     assert.equal(ok.status, 'delivered');
     assert.match(ok.text, /^Line numbers = current file on disk \(working copy differs from v1: lines mapped\)\.$/m);
+  });
+
+  test('a missing working copy is refused as dirty and says it is missing', async () => {
+    const { ctx } = await opened();
+    fs.rmSync(ws.file(FILE));
+    const r = await ops.waitForFeedback(ctx, { docIds: [DOC], pollMs: 20, timeoutMs: 80, write: () => {} });
+    assert.deepEqual([r.status, r.missing, r.path], ['dirty', true, FILE]);
   });
 
   test('times out with no review and removes its waiter file', async () => {
@@ -218,6 +226,21 @@ describe('wait', () => {
     await submitOne(ctx, v1);
     const r = await p;
     assert.deepEqual([r.status, r.docId, r.packets.map((x) => x.doc)], ['delivered', DOC, [DOC]]);
+  });
+
+  test('wait --all keeps waiting on the docs still in review when one is closed; all closed ends it', async () => {
+    const { ctx, v1 } = await opened();
+    ws.write('docs/other.md', '# Other\n\nSome text.\n');
+    await ops.openDoc(ctx, { path: 'docs/other.md' });
+    await ops.closeSession(ctx, 'other');
+    assert.equal((await ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, timeoutMs: 80 })).status, 'timeout', 'closed before the wait');
+    const p = ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, write: () => {} });
+    await until(async () => (await ctx.store.listWaiters('_all')).length === 1);
+    await submitOne(ctx, v1);
+    const r = await p;
+    assert.deepEqual([r.status, r.docId], ['delivered', DOC]);
+    await ops.closeSession(ctx, DOC);
+    assert.equal((await ops.waitForFeedback(ctx, { docIds: null, pollMs: 20, timeoutMs: 80 })).status, 'closed', 'every doc closed');
   });
 });
 

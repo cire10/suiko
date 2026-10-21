@@ -42,6 +42,8 @@ const UNACKED_AFTER_MS = 5 * 60 * 1000;
 const MAX_CONTEXT_CHARS = 1000;
 const MAX_RELATED = 8;
 const MAX_STDIN_BYTES = 64 * 1024 * 1024;
+/** Store and runtime JSON files the hooks read (doc.json, threads, reviews...) are far smaller. */
+const MAX_JSON_BYTES = 4 * 1024 * 1024;
 const STDIN_TIMEOUT_MS = 3000;
 const DEFAULT_RATIO = 0.4;
 /** Doc ids as the store accepts them (src/core/store/store.js DOC_ID_RE; this module imports node builtins only). */
@@ -109,12 +111,17 @@ export function preWrite(input, o) {
   const file = path.resolve(base, ti.file_path);
   const st = fs.statSync(file, { throwIfNoEntry: false });
   if (!st || !st.isFile()) return null; // creating a new file: not tracked
-  const store = findStore(path.dirname(file), o.env);
+  // the file it really is: a symlink to a spec under review, or a path through a symlinked folder, is that spec
+  const real = realpath(file);
+  const store = findStore(path.dirname(real), o.env);
   if (!store) return null;
-  const rel = path.relative(realpath(store.root), realpath(file)).split(path.sep).join('/');
+  const rel = path.relative(realpath(store.root), real).split(path.sep).join('/');
   if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  // a snapshot or code doc's path is synthetic: it never stands for a file on disk (file docs only; they have no kind)
-  const doc = findDoc(store.storeDir, (d) => d.path === rel && (d.kind === undefined || d.kind === 'file'));
+  // a snapshot or code doc's path is synthetic: it never stands for a file on disk (file docs only; they have no kind);
+  // a record may spell the file differently (case, Unicode normalization) from the path Claude writes to
+  const isFile = (/** @type {any} */ d) => d.kind === undefined || d.kind === 'file';
+  const doc = findDoc(store.storeDir, (d) => d.path === rel && isFile(d))
+    ?? findDoc(store.storeDir, (d) => typeof d.path === 'string' && isFile(d) && samePath(path.join(store.root, d.path), file));
   if (!doc || doc.state === 'closed') return null;
   const reviewIds = listIds(path.join(store.storeDir, 'docs', doc.id, 'reviews'), 'rv');
   if (!reviewIds.length) return null;
@@ -474,24 +481,34 @@ function readDir(dir) {
 }
 
 /**
+ * A small regular JSON file, else null. Store files come with the repository, so a `doc.json` that is a symlink to
+ * /dev/zero (or a huge file) must not make every prompt read without end: links are not followed, other file
+ * types are skipped, and so is anything over MAX_JSON_BYTES.
  * @param {string} file
  * @returns {any}
  */
 function readJsonFile(file) {
+  let fd = -1;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || st.size > MAX_JSON_BYTES) return null;
+    return JSON.parse(fs.readFileSync(fd, 'utf8'));
   } catch {
     return null;
+  } finally {
+    if (fd >= 0) fs.closeSync(fd);
   }
 }
 
 /**
+ * The real path as the filesystem spells it (native: the on-disk case and Unicode normalization), else `p` resolved.
  * @param {string} p
  * @returns {string}
  */
 function realpath(p) {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return path.resolve(p);
   }
@@ -570,6 +587,9 @@ function readStdin(stdin) {
  */
 function writeOut(stream, text) {
   return new Promise((resolve) => {
+    // a reader that went away (EPIPE) is not the hook's failure: without a listener the 'error' event would end the
+    // process with exit 1 and a stack trace
+    stream.on?.('error', () => resolve());
     try {
       stream.write(text, () => resolve());
     } catch {

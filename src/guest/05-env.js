@@ -32,6 +32,9 @@ function parseOrigins(list) {
 const ENV = Object.freeze({
   allowedOrigins: Object.freeze(parseOrigins(SCRIPT_EL && SCRIPT_EL.getAttribute('data-sr-ui'))),
   target: (SCRIPT_EL && SCRIPT_EL.getAttribute('data-sr-target')) || '',
+  // Taken now, before the document's scripts: window.parent is replaceable, and a top-level `var parent = ...` in the
+  // page replaces it for every later reader.
+  parent: window.parent,
   framed: window.parent !== window,
 });
 
@@ -264,7 +267,7 @@ window.addEventListener('message', guard((/** @type {MessageEvent} */ ev) => {
   if (Handshake.port) return; // after the handshake: window messages are never trusted
   const d = ev.data;
   if (!d || typeof d !== 'object' || d.sr !== 1 || d.type !== MSG.CONNECT) return;
-  if (!ENV.framed || ev.source !== window.parent) return;
+  if (!ENV.framed || ev.source !== ENV.parent) return;
   if (!ENV.allowedOrigins.includes(ev.origin)) return;
   const port = ev.ports && ev.ports[0];
   if (!port) return;

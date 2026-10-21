@@ -175,8 +175,15 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     // waiting again before replying: refused, the threads named (answers go on the threads, not in the chat)
     const early = await cli(['wait', DOC, '--timeout', '200ms']);
     assert.equal(early.code, 3, early.stderr);
-    assert.match(early.stderr, /^suiko: kitchen-sink: 2 threads you received have no reply yet: t1 \(comment\), t2 \(suggestion\)\. The reviewer reads your answers on the threads in Suiko, not in this chat\.$/m);
+    assert.match(early.stderr, /^suiko: kitchen-sink: 2 threads you received still wait on your answer: t1 \(comment\), t2 \(suggestion\)\. The reviewer reads your answers on the threads in Suiko, not in this chat\.$/m);
     assert.match(early.stderr, /`suiko reply kitchen-sink <tid> -m <answer> --status answered`/);
+    // a reply without a status keeps the thread open: the reply line and the refusal both say so
+    const noStatus = await cli(['reply', DOC, 't2', '-m', 'Looking into it.']);
+    assert.equal(noStatus.code, 0, noStatus.stderr);
+    assert.equal(noStatus.stdout, 'replied on t2 · no version recorded · t2 is still open: reply with --status answered, addressed, declined or needs_input to answer it\n');
+    const stillOpen = await cli(['wait', DOC, '--timeout', '200ms']);
+    assert.equal(stillOpen.code, 3, stillOpen.stderr);
+    assert.match(stillOpen.stderr, /^suiko: kitchen-sink: 2 threads you received still wait on your answer: t1 \(comment\), t2 \(suggestion, open: your reply set no status\)\./m);
     const again = await cli(['wait', DOC, '--timeout', '200ms', '--allow-unanswered']);
     assert.equal(again.code, 2, 'nothing left to deliver');
   });
@@ -358,7 +365,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
       assert.equal(early.isError, true);
       assert.equal(early.structuredContent.status, 'unanswered');
       assert.ok(early.structuredContent.threads.length >= 1, JSON.stringify(early.structuredContent));
-      assert.match(early.content.map((/** @type {any} */ c) => c.text).join('\n'), /no reply yet: .*The reviewer reads your answers on the threads in Suiko/s);
+      assert.match(early.content.map((/** @type {any} */ c) => c.text).join('\n'), /still waits? on your answer: .*The reviewer reads your answers on the threads in Suiko/s);
       const wait = await call('suiko_wait', { doc: DOC, timeout_sec: 1, allow_unanswered: true });
       assert.deepEqual(wait.structuredContent, { status: 'waiting', hint: 'call again' });
     } finally {

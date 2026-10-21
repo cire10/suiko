@@ -23,7 +23,6 @@
 
 import { rewriteRatio } from '../diff/index.js';
 import { collapseWs, sourceToPlainText } from '../text/index.js';
-import { findOccurrences } from './apply.js';
 import { linesLabel } from './labels.js';
 import { newLineRange, oldLineRange } from './attribution.js';
 
@@ -63,17 +62,83 @@ import { newLineRange, oldLineRange } from './attribution.js';
  * @returns {{ intact: boolean, hunks: string[] }}
  */
 export function lockIntegrity({ mapper, headSource, workingSource, start, end, format = 'markdown' }) {
+  // The locked text must still stand as it did: with the same kind of neighbours (a line end, markup, a word,
+  // punctuation), so `Max retries: 3` does not survive as `Max retries: 30`, nor a locked line or heading as the
+  // start of a longer one (`## Notes` -> `## Notes (cache)`, text added right at its edge, which touches no
+  // character inside the range).
+  const edges = edgesOf(headSource, start, end);
+  const mapped = mapper.mapRange(start, end);
   const touching = mapper.hunksTouching(start, end).map((h) => h.id);
-  if (!touching.length) return { intact: true, hunks: [] };
+  if (!touching.length) {
+    if (sameEdges(edges, edgesOf(workingSource, mapped.start, mapped.end))) return { intact: true, hunks: [] };
+    const atEdge = mapper.hunks.filter((h) => mapper.changedOld(h).some(([cs, ce]) => cs === end || ce === start)).map((h) => h.id);
+    return { intact: atEdge.length === 0, hunks: atEdge };
+  }
   const text = collapseWs(headSource.slice(start, end)).trim();
   if (!text) return { intact: true, hunks: touching };
-  const before = findOccurrences(collapseWs(headSource), text).length;
-  const after = findOccurrences(collapseWs(workingSource), text, before).length;
+  const before = boundedOccurrences(headSource, text, edges);
+  const after = boundedOccurrences(workingSource, text, edges);
   if (after >= before && after > 0) return { intact: true, hunks: touching };
-  const mapped = mapper.mapRange(start, end);
   const oldPlain = plainOf(format, headSource, start, end);
-  const intact = oldPlain !== '' && oldPlain === plainOf(format, workingSource, mapped.start, mapped.end);
+  const intact = oldPlain !== '' && sameEdges(edges, edgesOf(workingSource, mapped.start, mapped.end))
+    && oldPlain === plainOf(format, workingSource, mapped.start, mapped.end);
   return { intact, hunks: touching };
+}
+
+/** @typedef {'eol' | 'tag' | 'word' | 'other'} Edge what borders a text, past spaces and tabs */
+
+/**
+ * The kinds of neighbours of source[start, end) once its own leading and trailing whitespace is left out.
+ * @param {string} source
+ * @param {number} start
+ * @param {number} end
+ * @returns {{ before: Edge, after: Edge }}
+ */
+function edgesOf(source, start, end) {
+  let s = start;
+  let e = end;
+  while (s < e && /\s/.test(source[s])) s++;
+  while (e > s && /\s/.test(source[e - 1])) e--;
+  return { before: edgeAt(source, s, -1), after: edgeAt(source, e, 1) };
+}
+
+/**
+ * The kind of the first character beside `at` in direction `dir`, past spaces and tabs: a line end (or the end of
+ * the text), markup (`<` after it, `>` before it: an HTML tag, a Markdown quote marker), a word, or other punctuation.
+ * @param {string} source
+ * @param {number} at the start of a text (dir -1) or its end (dir 1)
+ * @param {-1 | 1} dir
+ * @returns {Edge}
+ */
+function edgeAt(source, at, dir) {
+  let i = dir < 0 ? at - 1 : at;
+  while (i >= 0 && i < source.length && (source[i] === ' ' || source[i] === '\t')) i += dir;
+  if (i < 0 || i >= source.length || source[i] === '\n' || source[i] === '\r') return 'eol';
+  if (source[i] === (dir < 0 ? '>' : '<')) return 'tag';
+  return /[\p{L}\p{N}_]/u.test(source[i]) ? 'word' : 'other';
+}
+
+/** @param {{ before: Edge, after: Edge }} a @param {{ before: Edge, after: Edge }} b */
+function sameEdges(a, b) {
+  return a.before === b.before && a.after === b.after;
+}
+
+/**
+ * Occurrences of whitespace-collapsed `text` in `source` (any whitespace between its words) with neighbours of the
+ * given kinds.
+ * @param {string} source
+ * @param {string} text
+ * @param {{ before: Edge, after: Edge }} edges
+ * @returns {number}
+ */
+function boundedOccurrences(source, text, edges) {
+  const re = new RegExp(text.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+  let n = 0;
+  for (const m of source.matchAll(re)) {
+    const at = m.index ?? 0;
+    if (sameEdges(edges, { before: edgeAt(source, at, -1), after: edgeAt(source, at + m[0].length, 1) })) n++;
+  }
+  return n;
 }
 
 /**
@@ -242,6 +307,19 @@ export function runGuards(p) {
   // 6. input problems
   for (const o of p.unusedOther ?? []) warnings.push({ code: 'other', message: `other entry at "${o.at}" ${o.reason}` });
   for (const b of p.badHints ?? []) warnings.push({ code: 'hint', thread: b.thread, message: `${b.thread} "at":"${b.at}" ignored: ${b.reason}` });
+
+  // The fixes get run top to bottom, and reverting a hunk renumbers the hunks after it: list the errors bottom-up,
+  // and suggest each hunk's revert once (a second `--hunk h1` would revert the hunk that became h1).
+  const hunkNo = (/** @type {GuardIssue} */ e) => (e.hunk ? Number(String(e.hunk).replace(/^h/, '')) || 0 : -1);
+  errors.sort((a, b) => hunkNo(b) - hunkNo(a));
+  /** @type {Set<string>} */
+  const reverted = new Set();
+  for (const e of errors) {
+    const revert = e.hunk ? `suiko revert ${doc} --hunk ${e.hunk}` : null;
+    if (!revert || !e.hunk || !e.fix?.startsWith(revert)) continue;
+    if (reverted.has(e.hunk)) e.fix = `the revert of ${e.hunk} above${e.fix.slice(revert.length)}`;
+    else reverted.add(e.hunk);
+  }
 
   const forced = Boolean(flags.force) && errors.length > 0;
   return { refused: errors.length > 0 && !flags.force, forced, errors, warnings, brokenLocks, intactLocks, unexplained, rewriteRatio: ratio };

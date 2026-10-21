@@ -219,6 +219,23 @@ describe('Markdown markers', () => {
     fs.writeFileSync(md, '# Mine\n<!-- specreview:end -->\n');
     assert.match((await h.run(['install', '--only', 'codex'])).stdout, /has a "<!-- specreview:end -->" line but no "<!-- specreview:begin" line/);
   });
+
+  test('install agents-md refuses them too, and backs up the file it changes', async () => {
+    const h = makeHome();
+    const md = path.join(h.project, 'AGENTS.md');
+    const broken = '# Team rules\n\n<!-- specreview:begin -->\nold text\n\n## Our build rules\nnpm test before push\n';
+    fs.writeFileSync(md, broken);
+    for (let i = 0; i < 2; i++) {
+      const r = await h.run(['install', 'agents-md', '--apply']);
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /its "<!-- specreview:begin" line has no "<!-- specreview:end -->" line after it/);
+      assert.equal(read(md), broken, 'no second block, no text lost');
+    }
+    fs.writeFileSync(md, '# Team rules\n\nKeep this.\n');
+    assert.equal((await h.run(['install', 'agents-md', '--apply'])).code, 0);
+    assert.match(read(md), /Keep this\.[\s\S]*<!-- specreview:begin/);
+    assert.equal(read(`${md}.specreview-backup`), '# Team rules\n\nKeep this.\n');
+  });
 });
 
 describe('symlinked config files', () => {
@@ -284,6 +301,17 @@ describe('backups and pre-existing files', () => {
     assert.ok(r2.j.written.some((/** @type {string} */ f) => f.endsWith('config.toml')));
     const again = await h.run(['install', '--only', 'claude,codex', '--apply']);
     assert.doesNotMatch(again.stdout, / backup: /);
+  });
+
+  test('uninstall puts back a file of the user\'s that install replaced, instead of deleting it', async () => {
+    const h = makeHome({ files: { '.claude/commands/review-spec.md': '# my own /review-spec\n' } });
+    const cmd = h.p('.claude/commands/review-spec.md');
+    assert.match((await h.run(['install', '--only', 'claude', '--apply'])).stdout, /backed up to review-spec\.md\.specreview-backup/);
+    assert.notEqual(read(cmd), '# my own /review-spec\n');
+    const un = await h.run(['uninstall', '--only', 'claude', '--apply']);
+    assert.equal(un.code, 0, un.stdout);
+    assert.match(un.stdout, /restores the file install replaced \(from review-spec\.md\.specreview-backup\)/);
+    assert.equal(read(cmd), '# my own /review-spec\n');
   });
 
   test('uninstall keeps a config file that existed before install, with its empty containers', async () => {
@@ -352,6 +380,23 @@ describe('write failures', () => {
     assert.ok(manifest.files[h.p('.claude/skills/spec-review/SKILL.md')]);
     const { j } = await h.json(['install']);
     assert.equal(j.agents.find((/** @type {any} */ a) => a.id === 'codex').status, 'up-to-date');
+  });
+
+  test('a file that exists but cannot be read is refused, never replaced (suiko install and install claude)', { skip: process.getuid?.() === 0 && 'root reads any file' }, async () => {
+    const h = makeHome({ files: { '.cursor/mcp.json': '{"mcpServers": {"github": {"command": "npx"}}}\n', '.claude/settings.json': '{"permissions": {"allow": ["Bash(ls)"]}}\n' } });
+    for (const f of ['.cursor/mcp.json', '.claude/settings.json']) fs.chmodSync(h.p(f), 0o000);
+    try {
+      const r = await h.run(['install', '--only', 'cursor', '--apply']);
+      assert.equal(r.code, 1);
+      assert.match(r.stdout, /REFUSED .*mcp\.json: .*exists but cannot be read \(EACCES\); the file is left as is/);
+      const one = await h.run(['install', 'claude', '--user', '--with-hooks', '--apply']);
+      assert.equal(one.code, 1);
+      assert.match(one.stderr, /settings\.json exists but cannot be read/);
+    } finally {
+      for (const f of ['.cursor/mcp.json', '.claude/settings.json']) fs.chmodSync(h.p(f), 0o600);
+    }
+    assert.match(read(h.p('.cursor/mcp.json')), /github/);
+    assert.match(read(h.p('.claude/settings.json')), /Bash\(ls\)/);
   });
 
   test('a dangling symlink is not replaced', async () => {
@@ -454,5 +499,15 @@ describe('agent config details', () => {
     fs.symlinkSync(process.execPath, link);
     await viaEnv.run(['install', '--only', 'cursor', '--apply'], { env: { SPECREVIEW_NODE: link } });
     assert.equal(readJson(viaEnv.p('.cursor/mcp.json')).mcpServers.suiko.command, link);
+  });
+
+  test('install claude writes the same node as suiko install, so neither sees the other\'s hooks as outdated', async () => {
+    const h = makeHome({ dirs: ['.claude'] });
+    const stable = path.join(h.bin, 'node');
+    fs.symlinkSync(process.execPath, stable);
+    assert.equal((await h.run(['install', 'claude', '--user', '--with-hooks', '--apply'])).code, 0);
+    assert.equal(readJson(h.p('.claude/settings.json')).hooks.PreToolUse[0].hooks[0].command, `"${stable}" "${BIN_PATH}" hook pre-write`);
+    const { j } = await h.json(['install', '--only', 'claude']);
+    assert.equal(j.agents.find((/** @type {any} */ a) => a.id === 'claude').status, 'up-to-date');
   });
 });

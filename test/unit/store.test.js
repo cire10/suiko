@@ -201,6 +201,31 @@ describe('docs and ids', () => {
   test('compareIds orders numerically', () => {
     assert.deepEqual(['t10', 't2', 't1', 'rv3'].sort(compareIds), ['rv3', 't1', 't2', 't10']);
   });
+
+  // macOS volumes ignore case and Unicode normalization: every spelling of a file is that one file, and one doc
+  const probe = makeRoot({ 'Probe.md': 'x', ['café.md']: 'x' });
+  const insensitive = fs.existsSync(path.join(probe, 'probe.md')) && fs.existsSync(path.join(probe, 'café.md'));
+  test('a case or Unicode-normalization variant of a tracked path is the same doc', { skip: !insensitive && 'case- or normalization-sensitive volume' }, async () => {
+    const nfd = 'docs/café.md';
+    const nfc = 'docs/café.md';
+    const r = makeRoot({ 'docs/Token-Service.md': '# Token\n', [nfd]: '# Café\n' });
+    const s = await Store.open(r, { create: true });
+    const doc = await s.createDoc({ path: 'docs/token-service.md' });
+    assert.equal(doc.path, 'docs/Token-Service.md', 'recorded as the file is named on disk');
+    await assert.rejects(s.createDoc({ path: 'DOCS/TOKEN-SERVICE.MD' }), ConflictError);
+    assert.equal((await s.findDoc('docs/TOKEN-service.md'))?.id, doc.id);
+    const cafe = await s.createDoc({ path: nfc });
+    assert.equal(cafe.path, nfd, 'the on-disk (decomposed) spelling');
+    await assert.rejects(s.createDoc({ path: nfd }), ConflictError);
+    assert.equal((await s.findDoc(nfc))?.id, cafe.id);
+    // a record written before paths were canonical (another spelling) still matches, for lookups and duplicates
+    const legacy = /** @type {import('../../src/shared/types.js').Doc} */ (await s.getDoc(doc.id));
+    legacy.path = 'docs/token-service.md';
+    await s.saveDoc(legacy);
+    assert.equal((await s.findDoc('docs/Token-Service.md'))?.id, doc.id);
+    await assert.rejects(s.createDoc({ path: 'docs/Token-Service.md' }), ConflictError);
+    assert.equal((await s.listDocs()).length, 2);
+  });
 });
 
 describe('versions and blobs', () => {
@@ -268,6 +293,26 @@ describe('versions and blobs', () => {
     await assert.rejects(store.commitVersion(doc.id, { source: 'x', manifest: { v: 9 } }), ConflictError);
     await assert.rejects(store.readVersion(doc.id, 'bogus'), UsageError);
     await assert.rejects(store.commitVersion('nope', { source: 'x' }), NotFoundError);
+  });
+
+  test('commitVersion never copies what the content origin refuses: dot-files, key files, symlinks to them', async () => {
+    const root = makeRoot({
+      'spec.md': '# A\n',
+      'img/ok.png': Buffer.from([1, 2, 3]),
+      'docs/.env': 'API_KEY=secret\n',
+      'secrets/server.pem': 'PRIVATE KEY\n',
+      'docs/ID_RSA': 'PRIVATE KEY\n',
+      '.git/config': '[core]\n',
+    });
+    fs.symlinkSync(path.join(root, 'docs', '.env'), path.join(root, 'img', 'alias.png'));
+    const store = await Store.open(root, { create: true });
+    const doc = await store.createDoc({ path: 'spec.md' });
+    const refs = ['img/ok.png', 'docs/.env', 'secrets/server.pem', 'docs/ID_RSA', '.git/config', 'img/alias.png'];
+    const m = await store.commitVersion(doc, { source: '# A\n', assetFiles: Object.fromEntries(refs.map((r) => [r, null])) });
+    assert.deepEqual(Object.keys(m.assets), ['img/ok.png']);
+    const stored = fs.readdirSync(path.join(store.storeDir, 'assets', 'sha256'), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile()).map((e) => fs.readFileSync(path.join(e.parentPath, e.name)));
+    assert.deepEqual(stored, [Buffer.from([1, 2, 3])], 'no secret reached the store');
   });
 
   test('putBlob is content addressed and idempotent', async () => {

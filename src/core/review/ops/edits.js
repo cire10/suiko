@@ -14,6 +14,7 @@ import { ConflictError, NotFoundError, RefusedError, UsageError } from '../../st
 import { lineHunks } from '../../diff/index.js';
 import { lineIndex } from '../../text/index.js';
 import { effectivePendingLines } from '../attribution.js';
+import { lockIntegrity } from '../guards.js';
 import { eolOf, lineWindow, locateSuggestion, matchEol, replaceExact, spliceText, suggestionTarget } from '../apply.js';
 import { anchorAt } from '../threadstate.js';
 import { preciseMapper } from '../workmap.js';
@@ -280,8 +281,18 @@ export async function revert(ctx, ref, target) {
           if (!lock) throw new NotFoundError(`lock ${target.lock} not found in ${doc.id}`, { details: { lock: target.lock } });
           const a = anchorAt(lock, head.v);
           if (!a || a.state === 'orphaned') throw new RefusedError(`lock ${lock.id} lost its place in v${head.v}; restore the text by hand (suiko show ${doc.id} --version ${lock.createdIn})`);
-          const m = preciseMapper(head.source, working.text).mapRange(a.src.start, a.src.end);
+          const mapper = preciseMapper(head.source, working.text);
+          const m = mapper.mapRange(a.src.start, a.src.end);
           if (working.text.slice(m.start, m.end) === lock.text) {
+            // the text is all there, but something added right at its edge can still extend it (`3` -> `30`)
+            const integrity = lockIntegrity({ mapper, headSource: head.source, workingSource: working.text, start: a.src.start, end: a.src.end, format: doc.format });
+            if (!integrity.intact && integrity.hunks.length) {
+              throw new RefusedError(
+                `lock ${lock.id}'s text is still there, but ${integrity.hunks.join(', ')} added text right at its edge; ` +
+                  `undo that with suiko revert ${doc.id} --hunk ${integrity.hunks[0]}`,
+                { details: { lock: lock.id, hunks: integrity.hunks } },
+              );
+            }
             const li = lineIndex(working.text);
             return { lock: lock.id, lines: /** @type {[number, number]} */ ([li.lineOf(m.start), li.lineOf(Math.max(m.start, m.end - 1))]), noop: true, reason: `lock ${lock.id} text is already intact` };
           }

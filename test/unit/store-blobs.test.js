@@ -129,6 +129,26 @@ describe('per-doc blobs', () => {
     await assert.rejects(ctx.store.readDocBlob(doc.id, `sha256:${'0'.repeat(63)}/`), UsageError);
   });
 
+  test('a blob or version source planted as a symlink (a committed store) is refused, never followed', async () => {
+    const ctx = await engineCtx(ws.root);
+    const secret = path.join(path.dirname(ws.root), 'secret.txt');
+    fs.writeFileSync(secret, 'PRIVATE KEY\n');
+    const { doc } = await ctx.store.createSnapshotDoc({ kind: 'code', title: 'Review', origin: ORIGIN, code: SPEC });
+    const ref = await ctx.store.putDocBlob(doc.id, 'export const a = 1;\n');
+    const blob = path.join(ws.root, '.specreview', 'docs', doc.id, 'blobs', ref.slice(7, 9), ref.slice(7));
+    fs.rmSync(blob);
+    fs.symlinkSync(secret, blob);
+    await assert.rejects(ctx.store.readDocBlob(doc.id, ref), RefusedError);
+
+    ws.write('docs/spec.md', '# Spec\n');
+    const spec = await ctx.store.createDoc({ path: 'docs/spec.md' });
+    await ctx.store.commitVersion(spec, { source: '# Spec\n' });
+    const v1 = path.join(ctx.store.versionsDir(spec.id), '0001.md');
+    fs.rmSync(v1);
+    fs.symlinkSync(secret, v1);
+    await assert.rejects(ctx.store.readVersion(spec.id, 1), (err) => err instanceof RefusedError && !String(err.message).includes('PRIVATE'));
+  });
+
   test('recovery removes stale temp files in blobs/ and stale code-index dirs, and keeps .gitignore', async () => {
     const ctx = await engineCtx(ws.root);
     const { doc } = await ctx.store.createSnapshotDoc({ kind: 'code', title: 'Review', origin: ORIGIN, code: SPEC });

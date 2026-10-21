@@ -38,7 +38,7 @@ export const spec = {
     'Run it in the background (Claude Code: Bash with run_in_background) and end the turn; you are re-invoked when it exits.',
     '--timeout 0 (default) waits indefinitely; 30m, 90s, 2h... give up with exit 2.',
     'Exits 3 at once when the working copy has unrecorded edits (run `suiko revise` first) unless --allow-dirty.',
-    'Exits 3 at once when a thread you received has no reply yet (reply on it: `suiko revise` or `suiko reply`) unless --allow-unanswered.',
+    'Exits 3 at once when a thread you received still waits on your answer (reply on it with a status: `suiko revise` or `suiko reply --status`) unless --allow-unanswered.',
     'Exit codes: 0 delivered · 2 timeout · 3 dirty or unanswered · 5 session closed · 6 superseded by a newer wait (ignore it).',
     '--json prints each delivered packet as one JSON line.',
   ],
@@ -241,6 +241,17 @@ async function finish(rt, engine, s) {
         json: { status: 'dirty', doc, head: code.head ?? head ?? null, changedFiles: code.files },
       };
     }
+    if (outcome.missing) {
+      // revise cannot record a file that is not there: restore it, or end the review
+      return {
+        exit: EXIT.REFUSED,
+        stderr: [
+          `suiko: ${doc}: its working copy ${outcome.path ?? ''} is missing (renamed or deleted?). ` +
+            `Restore it, or end the review with \`suiko close ${ref}\` (--allow-dirty waits anyway).`,
+        ],
+        json: { status: 'dirty', missing: true, doc, head: head ?? null },
+      };
+    }
     return {
       exit: EXIT.REFUSED,
       stderr: [
@@ -253,17 +264,21 @@ async function finish(rt, engine, s) {
   if (status === 'unanswered') {
     const doc = outcome.docId ?? outcome.doc ?? (s.input.all ? label : s.noun);
     const ref = s.input.all ? doc : label;
-    /** @type {Array<{ id: string, type: string, status: string }>} */
+    /** @type {Array<{ id: string, type: string, status: string, replied?: boolean }>} */
     const threads = Array.isArray(outcome.threads) ? outcome.threads : [];
-    const list = threads.map((t) => `${t.id} (${t.type}${t.status && t.status !== 'open' ? `, ${t.status.replace('_', ' ')}` : ''})`).join(', ');
+    // an open thread the agent replied to without a status is not "without a reply": say what is missing
+    const state = (/** @type {typeof threads[number]} */ t) =>
+      t.replied ? ', open: your reply set no status' : t.status && t.status !== 'open' ? `, ${t.status.replace('_', ' ')}` : '';
+    const list = threads.map((t) => `${t.id} (${t.type}${state(t)})`).join(', ');
     const one = threads.length === 1;
     return {
       exit: EXIT.REFUSED,
       stderr: [
-        `suiko: ${doc}: ${one ? 'a thread you received has' : `${threads.length} threads you received have`} no reply yet: ${list || '?'}. ` +
+        `suiko: ${doc}: ${one ? 'a thread you received still waits' : `${threads.length} threads you received still wait`} on your answer: ${list || '?'}. ` +
           'The reviewer reads your answers on the threads in Suiko, not in this chat.',
         `  Reply on ${one ? 'it' : 'each'}: \`suiko revise ${ref} --replies -\` (one entry per thread, with your edits if any), or ` +
-          `\`suiko reply ${ref} <tid> -m <answer> --status answered\` (or declined, needs_input). Then wait again (--allow-unanswered skips this check).`,
+          `\`suiko reply ${ref} <tid> -m <answer> --status answered\` (or declined, needs_input; a reply without --status leaves the thread open). ` +
+          'Then wait again (--allow-unanswered skips this check).',
       ],
       json: { status: 'unanswered', doc, threads },
     };

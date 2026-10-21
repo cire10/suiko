@@ -52,6 +52,8 @@ import { assetPathOf, oneLine } from './util.js';
  * @property {'region' | 'snip' | 'image'} cropKind what the attachments are (attachmentKindOf)
  * @property {{ v: number, lines: [number, number], section: string[], text: string } | null} lastKnown orphans only:
  *   where the anchor was last found (for "(orphaned: was "..." in §5 v1 L260)")
+ * @property {boolean} [gone] its text is no longer there (deleted in the working copy, or a deletion point): `lines`
+ *   say where it was, and there is no src to quote
  */
 
 const MAX_LINES = 8;
@@ -107,7 +109,14 @@ export function describeAnchor(anchor, opts) {
   const [ws, we] = toWorking(anchor, source, working, opts?.workingMapper ?? null);
   const li = lineIndex(working);
   const a = li.lineOf(ws);
-  const b = we > ws ? li.lineOf(we - 1) : a;
+  if (we <= ws) {
+    // nothing left to quote: the line at that point is the text after it, never an exact old_string for this thread
+    base.lines = [a, a];
+    base.srcEditable = false;
+    base.gone = true;
+    return base;
+  }
+  const b = li.lineOf(we - 1);
   base.lines = [a, b];
 
   let picked = longLineIn(working, li, a, b) ? windowAround(working, ws, we, maxChars) : linesAround(working, li, a, b, maxChars);

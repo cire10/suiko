@@ -15,8 +15,9 @@
 //      (only the inside was rewritten, e.g. an applied suggestion); else it goes to the best fuzzy match of
 //      src.text inside those hunks' new ranges (quote similarity >= 0.7, so a heavy rewrite is not narrowed to a
 //      fragment), else to their whole new lines -> 'edited'. When the linked hunks only deleted lines (an empty
-//      new range), steps 3-4 run first so moved text is followed ('moved', or 'edited' when reworded) before the
-//      anchor falls back to the empty deletion point. A link alone never moves an anchor whose text was untouched
+//      new range), steps 3-4 run first so moved text is followed ('moved', or 'edited' when reworded, which must
+//      lie mostly in text the version added: a similar sibling it kept is not the text) before the anchor falls
+//      back to the empty deletion point. A link alone never moves an anchor whose text was untouched
 //      (a hunk merely adjacent to the range, or changing other words of its lines, does not intersect it).
 //      Element / region / cell anchors relocate only to a same-tag element in that range (preferring the same
 //      src/alt); if there is none they keep the old position mapped through the mapper ('edited').
@@ -264,10 +265,14 @@ function locate(A, ctx, opt) {
       }
       if (R1 <= R0 && text.trim()) {
         // The linked hunk only deleted lines: the text may have moved (steps 3-4) before it falls back to the
-        // empty deletion point. A verbatim copy elsewhere is 'moved'; a reworded one is 'edited' (it is linked).
+        // empty deletion point. A verbatim copy elsewhere is 'moved'; a reworded one is 'edited' (it is linked),
+        // but only in text this version added: a similar line it left untouched (the next bullet of a list) was
+        // already there, and the thread asked for this one to go.
         const elsewhere = findElsewhere(A, ctx, opt);
         if (elsewhere?.how === 'exact') return elsewhere;
-        if (elsewhere) return { start: elsewhere.start, end: elsewhere.end, how: 'linked', R: [elsewhere.start, elsewhere.end] };
+        if (elsewhere && mostlyNew(ctx, elsewhere.start, elsewhere.end)) {
+          return { start: elsewhere.start, end: elsewhere.end, how: 'linked', R: [elsewhere.start, elsewhere.end] };
+        }
       }
       return { ...wholeLines(ctx, R0, R1), how: 'linked', R };
     }
@@ -308,6 +313,17 @@ function findElsewhere(A, ctx, opt) {
 function occursTwice(hay, needle) {
   const i = hay.indexOf(needle);
   return i >= 0 && hay.indexOf(needle, i + 1) >= 0;
+}
+
+/**
+ * Whether at least half of to[start, end) lies in the new ranges of the hunks: text this version wrote, rather than
+ * text it kept.
+ * @param {ReCtx} ctx @param {number} start @param {number} end
+ */
+function mostlyNew(ctx, start, end) {
+  let fresh = 0;
+  for (const h of ctx.hunks) fresh += Math.max(0, Math.min(end, h.newEndOff) - Math.max(start, h.newStartOff));
+  return end > start && fresh * 2 >= end - start;
 }
 
 /** At most this many old occurrences of an anchored text are followed into the new version. */

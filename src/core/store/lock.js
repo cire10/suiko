@@ -7,7 +7,8 @@
 // - Acquire: `mkdir(lockDir)` (atomic), then write `owner.json` {pid, at, host, token}. While held, `at` is
 //   refreshed every `refreshMs`.
 // - Stale: the owner pid is dead on this host (`process.kill(pid, 0)` -> ESRCH), or `at` is older than `staleMs`,
-//   or (no readable owner.json) the directory is older than `staleMs`. A stale lock is broken by renaming the
+//   or (no readable owner.json) an owner.json temp file names a dead pid, or the directory is older than
+//   OWNERLESS_STALE_MS (5 s; `staleMs` when shorter). A stale lock is broken by renaming the
 //   directory aside (only one contender can win the rename) and deleting it, then acquisition is retried.
 // - Contention: retry with exponential backoff between 20 and 200 ms until `timeoutMs`, then LockTimeoutError.
 // - Release: remove the directory, but only if owner.json still carries our token (never delete a lock that was
@@ -25,7 +26,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { LockTimeoutError } from './errors.js';
-import { writeFileAtomic } from './atomic.js';
+import { parseTmpName, writeFileAtomic } from './atomic.js';
 import { randomHex } from '../util/hash.js';
 import { pidAlive } from '../util/proc.js';
 import { sleep } from '../util/time.js';
@@ -47,6 +48,8 @@ export const OWNER_FILE = 'owner.json';
 const DEFAULTS = { timeoutMs: 20000, staleMs: 30000, refreshMs: 5000 };
 const MIN_DELAY = 20;
 const MAX_DELAY = 200;
+/** A lock directory without an owner record this old is stale (its holder died before writing one). */
+const OWNERLESS_STALE_MS = 5000;
 
 /** @type {Map<string, { token: string, stop: () => Promise<void> }>} dir -> lock held by this process */
 const held = new Map();
@@ -234,12 +237,37 @@ async function inspect(dir, staleMs) {
   }
   try {
     const st = await fs.stat(dir);
-    if (Date.now() - st.mtimeMs > staleMs) return { stale: true, reason: 'no owner record', raw, owner: null };
+    // No owner record: the holder died between mkdir and owner.json (a few milliseconds). The temp file it may have
+    // left names its pid; without one, a few seconds of age are enough (staleMs alone outlasts the default wait).
+    const tmpPid = await ownerTmpPid(dir);
+    if (tmpPid !== null && tmpPid !== process.pid && !pidAlive(tmpPid)) {
+      return { stale: true, reason: `pid ${tmpPid} died writing its owner record`, raw, owner: null };
+    }
+    if (Date.now() - st.mtimeMs > Math.min(staleMs, OWNERLESS_STALE_MS)) return { stale: true, reason: 'no owner record', raw, owner: null };
     return { stale: false, raw, owner: null };
   } catch (err) {
     if (/** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') return { stale: false, gone: true, raw, owner: null };
     throw err;
   }
+}
+
+/**
+ * The pid in the name of an owner.json temp file left in a lock directory (writeFileAtomic's `.tmp-<pid>-<rand>`),
+ * else null.
+ * @param {string} dir
+ * @returns {Promise<number | null>}
+ */
+async function ownerTmpPid(dir) {
+  try {
+    for (const name of await fs.readdir(dir)) {
+      if (!name.startsWith(`${OWNER_FILE}.tmp-`)) continue;
+      const t = parseTmpName(name);
+      if (t) return t.pid;
+    }
+  } catch {
+    // gone: the caller's stat decides
+  }
+  return null;
 }
 
 /**

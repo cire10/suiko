@@ -77,8 +77,13 @@ export async function autoCommit({ root, config, docId, docPath, version, summar
     log.warn(`git add failed: ${add.stderr.trim()}`);
     return { commit: null, error: add.stderr.trim() || 'git add failed' };
   }
+  // So would a folder that exists but holds nothing git tracks (the empty .specreview/assets that `open` creates).
+  /** @type {string[]} */
+  const known = [];
+  for (const p of paths) if ((await git(['ls-files', '-z', '--', p], root)).stdout) known.push(p);
+  if (!known.length) return { commit: null, skipped: 'nothing to commit' };
   const msg = commitMessage(docId, version, summary, threads);
-  const commit = await git(['commit', '-q', '-m', msg, '--', ...paths], root);
+  const commit = await git(['commit', '-q', '-m', msg, '--', ...known], root);
   if (commit.code !== 0) {
     const error = (commit.stderr || commit.stdout).trim() || 'git commit failed';
     log.warn(`git commit failed: ${error}`);

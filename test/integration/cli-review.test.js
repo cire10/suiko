@@ -175,6 +175,15 @@ describe('suiko review: exit codes', () => {
     assert.match(many.stderr, /--path|--max-files/);
     assert.equal((await cli(['review', '--staged', '--uncommitted'])).code, 1, 'conflicting flags');
   });
+
+  test('a --workspace below the repository root is refused before a store is made there', async () => {
+    r.write('src/a.js', lines(21));
+    const res = await cli(['review', '--uncommitted', '--workspace', 'src']);
+    assert.equal(res.code, 1);
+    assert.match(res.stderr, /code reviews live in the workspace at the repository root/);
+    assert.equal(fs.existsSync(path.join(r.root, 'src', '.specreview')), false, 'no stray store to take over specs below it');
+    assert.equal(fs.existsSync(path.join(r.root, '.specreview')), false);
+  });
 });
 
 describe('code reviews through the other commands', () => {

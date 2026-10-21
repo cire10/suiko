@@ -115,6 +115,15 @@ describe('lookup from a directory above the workspace root', () => {
     root = fs.realpathSync(DOCS);
   });
 
+  test('from the filesystem root (where desktop MCP clients start their servers) an id is found in the registered workspaces', async () => {
+    const r = await cli('/', ['status', 'my-spec']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^my-spec /m);
+    const unknown = await cli('/', ['status', 'nope-doc']);
+    assert.equal(unknown.code, 4);
+    assert.match(unknown.stderr, /doc not found: nope-doc \(tracked: .*my-spec/);
+  });
+
   test('open from the parent dir prints the path relative to the cwd in the next: hint', async () => {
     const r = await cli(PROJ, ['open', 'docs/my-spec.md', '--browser', 'none']);
     assert.equal(r.code, 0, r.stderr);

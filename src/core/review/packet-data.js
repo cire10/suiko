@@ -345,6 +345,9 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
   /** @type {string | null} */
   let note = null;
   if (anchor?.state === 'changed') note = '(outdated: text changed)';
+  // its text is gone (deleted in the working copy, or a deletion point): where it was, with nothing to quote
+  const gone = Boolean(d?.gone) && anchor?.state !== 'orphaned';
+  if (gone) note = '(outdated: text deleted)';
   if (anchor?.state === 'orphaned' && code) {
     const file = anchor.file?.path ?? d?.file ?? null;
     note = `(orphaned: reanchor with suiko reanchor ${snap.doc.id} ${t.id}${file ? ` --file ${file}` : ''} --lines A-B)`;
@@ -375,7 +378,7 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
     srcUnique: d?.srcUnique ?? code,
     srcWindow: d?.srcWindow ?? false,
     srcEditable: d?.srcEditable ?? true,
-    anchorState: anchor?.state ?? 'exact',
+    anchorState: gone ? 'changed' : anchor?.state ?? 'exact',
     note,
     comments: conv.shown.map((c) => ({
       by: c.by?.name ?? '',

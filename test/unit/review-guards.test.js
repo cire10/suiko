@@ -255,6 +255,21 @@ describe('runGuards / lockIntegrity (pure)', () => {
     assert.deepEqual(lockIntegrity({ mapper: m, headSource: head, workingSource: changed, ...range }), { intact: false, hunks: ['h1'] });
   });
 
+  test('lockIntegrity: locked text that only grows (a prefix kept) is changed; moved, it is intact', () => {
+    const doc = '# Limits\n\n## Agreed limits\n\n- Max retries: 3\n- Request timeout: 30 s\n\n## Notes\n\nFree text.\n';
+    /** @param {string} locked @param {string} working */
+    const check = (locked, working) => {
+      const start = doc.indexOf(locked);
+      return lockIntegrity({ mapper: preciseMapper(doc, working), headSource: doc, workingSource: working, start, end: start + locked.length }).intact;
+    };
+    assert.equal(check('Max retries: 3', doc.replace('Max retries: 3', 'Max retries: 30')), false);
+    assert.equal(check('Request timeout: 30 s', doc.replace('timeout: 30 s', 'timeout: 30 s, or 300 s for batch jobs')), false);
+    assert.equal(check('## Notes', doc.replace('## Notes', '## Notes (cache)')), false);
+    assert.equal(check('- Max retries: 3', doc.replace('- Max retries: 3', '- Retries: 1\n- Max retries: 3')), true, 'a line added above');
+    const moved = doc.replace('- Max retries: 3\n- Request timeout: 30 s\n', '- Request timeout: 30 s\n- Max retries: 3\n');
+    assert.equal(check('Max retries: 3', moved), true, 'moved');
+  });
+
   test('lock refusal, then forced', () => {
     const working = head.replace('five', 'FIVE');
     const hunks = lineHunks(head, working);
@@ -273,6 +288,23 @@ describe('runGuards / lockIntegrity (pure)', () => {
     const fresh = runGuards({ ...base, lastDeliveredAt: '2025-12-01T00:00:00.000Z' });
     assert.equal(fresh.refused, false);
     assert.equal(fresh.warnings[0].code, 'lock-new');
+  });
+
+  test('the fixes run in the order printed: hunks bottom-up, each one reverted once', () => {
+    const h = 'S1 a\nS1 b\nS1 c\nS1 d\n\nS2 a\nS2 b\nS2 c\nS2 d\n\nS3 a\n';
+    const working = h.replace('S1 b\nS1 c\nS1 d\n', '').replace('S2 b\nS2 c\nS2 d\n', '');
+    const attr = attribute({ hunks: lineHunks(h, working), headSource: h, workingSource: working });
+    const r = runGuards({
+      docId: 'd', headVersion: 2, headLines: 11, headSource: h, workingSource: working, hunks: attr.hunks, config: cfg,
+      locks: [{ id: 'L1', label: '§S1', agreedIn: 'rv1', createdAt: '2026-01-01T00:00:00.000Z', intact: false, hunks: ['h1'] }],
+      lastDeliveredAt: '2026-02-01T00:00:00.000Z',
+    });
+    // reverting h1 first would turn h2 into h1: the later hunk comes first, and h1's revert is suggested once
+    assert.deepEqual(r.errors.map((e) => [e.hunk, e.fix?.split('   or   ')[0]]), [
+      ['h2', 'suiko revert d --hunk h2'],
+      ['h1', 'suiko revert d --hunk h1'],
+      ['h1', 'the revert of h1 above'],
+    ]);
   });
 
   test('enforceLocks off turns lock errors into warnings', () => {

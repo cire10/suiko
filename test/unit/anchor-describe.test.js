@@ -87,6 +87,17 @@ test('lines and src come from the working copy', () => {
   assert.equal(d.on, 'rotated on every use', '`on` is still the reviewer\'s quote');
 });
 
+test('text gone from the working copy: no src (the line after it is not it), only where it was', () => {
+  const start = MD.indexOf('Refresh tokens are rotated on every use');
+  const deleted = MD.slice(0, start) + MD.slice(MD.indexOf('\n\n', start) + 2);
+  const d = describeAnchor(rotated, { source: MD, workingSource: deleted, workingMapper: offsetMapper(MD, deleted, lineHunks(MD, deleted)) });
+  assert.equal(d.src, null);
+  assert.equal(d.gone, true);
+  assert.equal(d.srcEditable, false);
+  assert.deepEqual(d.lines, [51, 51]);
+  assert.equal(d.on, 'rotated on every use', 'the reviewer\'s quote says what was there');
+});
+
 test('a line longer than 300 chars is printed as the shortest unique window around the anchor', () => {
   const long = `<p>${'word '.repeat(120)}needle phrase here ${'more '.repeat(100)}</p>`;
   const src = `<!doctype html><html><body>\n<h1>T</h1>\n${long}\n</body></html>\n`;

@@ -263,6 +263,50 @@ test('a second daemon is refused while the first one (another process) is health
   }
 });
 
+test('a stale daemon.json whose port another home\'s daemon now uses: not running, and stop leaves that daemon alone', async () => {
+  const other = path.join(TMP, 'home-other');
+  const stale = path.join(TMP, 'home-stale');
+  fs.mkdirSync(other, { recursive: true });
+  fs.mkdirSync(stale, { recursive: true });
+  const script = `
+    const { startDaemon } = await import(${JSON.stringify(path.join(ROOT, 'src', 'daemon', 'main.js'))});
+    const d = await startDaemon({ uiPort: 0, contentPort: 0, ops: {}, logFile: false, idleMs: 0 });
+    process.stdout.write('ready ' + d.uiPort + ' ' + d.contentPort + '\\n');
+    process.stdin.on('data', async () => { await d.close(); process.exit(0); });
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, SPECREVIEW_HOME: other }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const prevHome = process.env.SPECREVIEW_HOME;
+  try {
+    const [uiPort, contentPort] = await new Promise((resolve, reject) => {
+      let out = '';
+      child.stdout.on('data', (c) => {
+        out += c;
+        const m = /ready (\d+) (\d+)/.exec(out);
+        if (m) resolve([Number(m[1]), Number(m[2])]);
+      });
+      child.on('exit', (code) => reject(new Error(`child exited ${code}`)));
+    });
+    // this home's daemon died (pid gone) and another home's daemon took its port
+    fs.writeFileSync(path.join(stale, 'daemon.json'), JSON.stringify({ pid: 2147480, uiPort, contentPort, token: '0'.repeat(32), secret: '0'.repeat(64), version: '0.0.0' }), { mode: 0o600 });
+    process.env.SPECREVIEW_HOME = stale;
+    const { daemonStatus, stopDaemon } = await import('../../src/cli/daemon-client.js');
+    assert.equal((await daemonStatus()).running, false);
+    const r = await stopDaemon({ timeoutMs: 500 });
+    assert.deepEqual([r.wasRunning, r.stopped], [false, false]);
+    assert.equal(await isListening(uiPort), true, 'the other daemon still runs');
+  } finally {
+    process.env.SPECREVIEW_HOME = prevHome;
+    child.stdin.write('stop\n');
+    await new Promise((r) => {
+      child.on('exit', r);
+      setTimeout(() => {
+        child.kill('SIGKILL');
+        r(undefined);
+      }, 5000);
+    });
+  }
+});
+
 test('without foreground mode, log lines go to daemon.log', async () => {
   const d = await startDaemon({ uiPort: 0, contentPort: 0, ops: {}, idleMs: 0 });
   await d.close();
