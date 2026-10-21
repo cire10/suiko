@@ -792,7 +792,8 @@ baseGuest.setHandlers({
         syncScroll('base', d);
         return;
       case MSG.KEY:
-        keyForwarder?.(d, true);
+        // marked: a comment key here must not act on the selection the newer frame may still hold
+        keyForwarder?.({ ...d, fromBase: true }, true);
         return;
       default:
       // read-only: no selection, captures or targets; page errors are the newer version's to report
@@ -2551,12 +2552,21 @@ export function acceptDecline() {
   return true;
 }
 
-/** c / s / q / a: comment, suggest, ask or mark agreed on the selection (doc text, or Source lines for c). @param {'c'|'s'|'q'|'a'} key */
-export function selectionAction(key) {
+/**
+ * c / s / q / a: comment, suggest, ask or mark agreed on the selection (doc text, or Source lines for c).
+ * @param {'c'|'s'|'q'|'a'} key
+ * @param {{ fromBase?: boolean }} [opts] fromBase: pressed in the older version of Changes side by side
+ */
+export function selectionAction(key, opts = {}) {
   const s = get();
   const action = /** @type {Record<string, string>} */ ({ c: 'comment', s: 'suggest', q: 'question', a: 'agree' })[key];
   const caps = kindCaps(s.ds);
   if (key === 'a' && !caps.locks) return false;
+  if (opts.fromBase) {
+    // the older version is read-only, and what the newer frame still has selected is not what is being pointed at
+    toast('The older version is read-only: select text in the newer version to comment on it.', { timeout: 3500 });
+    return true;
+  }
   if (!caps.frame) {
     // a kind view without the doc frame (a code review): its own selection (the selected lines)
     if (s.mode === 'history') return false;

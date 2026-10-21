@@ -190,6 +190,39 @@ test.describe('comparing versions', () => {
     await expect(page.getByTestId(TESTID.compareBaseFrame)).toHaveCount(0);
     expect(ui.errors).toEqual([]);
   });
+
+  test('side by side: c pressed in the older version never comments on the newer frame\'s selection', async ({ page, ui }) => {
+    await ui.open('kitchen-sink');
+    await page.getByTestId(TESTID.compareLayout).locator('[data-layout="split"]').click();
+    const base = await ui.baseFrame();
+    await ui.selectText('rotated on every use');
+    // drag-select a phrase in the older version, as a reviewer would, then press c there
+    const box = await base.evaluate(() => {
+      // text the scroll sync keeps in view next to the newer frame's selection
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const r = document.createRange();
+      while (walker.nextNode()) {
+        const n = /** @type {Text} */ (walker.currentNode);
+        const i = n.data.indexOf('previous token');
+        if (i < 0) continue;
+        r.setStart(n, i);
+        r.setEnd(n, i + 'previous token'.length);
+        break;
+      }
+      const b = r.getBoundingClientRect();
+      return { x: b.x, y: b.y, w: b.width, h: b.height };
+    });
+    const frame = await page.getByTestId(TESTID.compareBaseFrame).boundingBox();
+    const y = (frame?.y ?? 0) + box.y + box.h / 2;
+    await page.mouse.move((frame?.x ?? 0) + box.x + 2, y);
+    await page.mouse.down();
+    await page.mouse.move((frame?.x ?? 0) + box.x + box.w - 2, y, { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.press('c');
+    await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'The older version is read-only' })).toBeVisible();
+    await expect(page.getByTestId(TESTID.composer)).toHaveCount(0);
+    expect(ui.errors).toEqual([]);
+  });
 });
 
 test.describe('narrow viewport', () => {
