@@ -96,6 +96,8 @@ import { useLayoutEffect, useReducer, useRef } from 'preact-htm';
  *   palette, over what railMode (and `rail`) say; null: follow them
  * @property {boolean} drawer thread drawer open (narrow) / thread panel visible (wide)
  * @property {boolean} sidebar wide layout: right panel shown
+ * @property {number|null} panelWidth wide layout: the right panel's width the reviewer dragged it to (px, remembered);
+ *   null: the layout's width
  * @property {boolean} nav narrow: outline drawer open
  * @property {Prefs} prefs
  * @property {Dialog|null} dialog
@@ -170,6 +172,7 @@ export function initialState() {
     railOpen: null,
     drawer: false,
     sidebar: prefs.panelOpen,
+    panelWidth: readPanelWidth(),
     nav: false,
     prefs,
     dialog: null,
@@ -217,6 +220,16 @@ export function readPref(name, allowed, fallback) {
     return v && allowed.includes(v) ? v : fallback;
   } catch {
     return fallback;
+  }
+}
+
+/** The remembered width of the right panel (setPanelWidth), or null. @returns {number|null} */
+function readPanelWidth() {
+  try {
+    const n = Number(localStorage.getItem('suiko.panelWidth'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
   }
 }
 

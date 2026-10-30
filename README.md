@@ -242,6 +242,7 @@ Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ct
 | | `e` | Pick an image, diagram node, table cell or code block (shift-drag marks a region of an image) |
 | | `Cmd+Enter` | In the comment box: **Add to review** (a draft, sent when you submit) |
 | | `Cmd+Shift+Enter` | In the comment box: **Send now** (this comment goes to the agent immediately) |
+| | `Cmd+B` / `Cmd+Shift+8` / `Cmd+Shift+7` | In the comment box: bold / bulleted list / numbered list (also the buttons above it) |
 | | `Esc` | Cancel the comment, the snip or pick mode |
 | **Review** | `f` or `Cmd+Shift+Enter` | Submit the whole review (outside the comment box) |
 | | `v` | Verify queue: the threads the agent addressed, answered or declined |

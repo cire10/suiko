@@ -14,10 +14,11 @@ import { TESTID } from 'protocol';
 import { closeDialog, focusItem, reviewChanges, submitReview, toast, updateSubmitForm } from '../actions.js';
 import {
   addressedThreads, agentName, agentPrompt, blockingOpen, clip, defaultVerdict, isComposerDirty, isReplyDirty,
-  locksAddedThisRound, numericVersion, staleApproveText, targetLabel,
+  locksAddedThisRound, numericVersion, plainBody, staleApproveText, targetLabel,
 } from '../model.js';
 import { useStore } from '../state.js';
 import { copyText } from '../util.js';
+import { MarkdownTextarea } from './MarkdownTextarea.js';
 import { Chip, Modal, Spinner } from './common.js';
 
 const VERDICTS = /** @type {const} */ ([
@@ -70,9 +71,9 @@ export function SubmitDialog() {
     initialFocus="textarea">
     <form class="submit-form" onSubmit=${(/** @type {Event} */ e) => { e.preventDefault(); submit(); }}>
       <label for="sr-summary" class="field-label">Summary</label>
-      <textarea id="sr-summary" rows="3" value=${body} placeholder="Overall feedback (Markdown, optional)"
+      <${MarkdownTextarea} id="sr-summary" rows=${4} value=${body} placeholder="Overall feedback (Markdown, optional)"
         onInput=${(/** @type {any} */ e) => updateSubmitForm({ body: e.currentTarget.value })}
-        onKeyDown=${(/** @type {KeyboardEvent} */ e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); } }}></textarea>
+        onKeyDown=${(/** @type {KeyboardEvent} */ e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); } }} />
 
       <fieldset class="verdicts" data-testid=${TESTID.submitVerdict} role="radiogroup" aria-label="Verdict">
         <legend class="field-label">Verdict</legend>
@@ -105,12 +106,12 @@ export function SubmitDialog() {
           ${threadDrafts.map((/** @type {any} */ d) => html`<li key=${d.id}>
             <button type="button" class="link-btn" onClick=${() => { closeDialog(); focusItem(d.id); }}>
               ${d.severity === 'blocking' ? html`<${Chip} tone="danger">Blocking<//> ` : null}${clip(targetLabel(d.anchor), 60)}</button>
-            <span class="small muted">${clip(d.body || d.suggestion?.new || '', 80)}</span>
+            <span class="small muted">${clip(plainBody(d.body) || d.suggestion?.new || '', 80)}</span>
           </li>`)}
           ${replyDrafts.map((/** @type {any} */ d) => html`<li key=${d.id}>
             <button type="button" class="link-btn" onClick=${() => { closeDialog(); focusItem(d.thread); }}>
               ${d.kind === 'resolve' ? 'Resolve' : d.reopen ? 'Reopen' : 'Reply to'} ${d.thread}</button>
-            <span class="small muted">${clip(d.body || d.decision || '', 80)}</span>
+            <span class="small muted">${clip(plainBody(d.body) || d.decision || '', 80)}</span>
           </li>`)}
         </ul>` : null}
         ${locks.length ? html`<p class="small">Locks added this round: ${locks.map((/** @type {any} */ l) => l.id).join(', ')}</p>` : null}

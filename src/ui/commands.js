@@ -75,6 +75,9 @@ export const KEYS = Object.freeze({
   sendNow: 'mod+shift+enter',
   submit: 'f',
   cancel: 'esc',
+  bold: 'mod+b',
+  bulletList: 'mod+shift+8',
+  numberedList: 'mod+shift+7',
   palette: 'mod+k',
   settings: 'mod+,',
   help: 'mod+/',
@@ -424,6 +427,14 @@ export const COMMANDS = Object.freeze([
     run: () => {
       submitComposer({ sendNow: true });
     },
+  },
+  {
+    id: 'format',
+    title: 'Bold, bulleted list, numbered list',
+    category: 'Comment',
+    keys: [KEYS.bold, KEYS.bulletList, KEYS.numberedList],
+    help: { label: 'Bold / bulleted list / numbered list (while writing)' },
+    palette: false,
   },
 
   // ------------------------------------------------------------------------------------------- Review

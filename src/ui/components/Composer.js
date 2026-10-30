@@ -8,7 +8,8 @@
 //   iframe: the textarea, or the suggestion input once it is ready (unless the user already typed elsewhere).
 // - Type chips (Comment / Question / Suggestion) and severity chips (Blocking / Normal / Nit, keys 1-3 outside the
 //   textarea).
-// - A Markdown textarea: paste or drop an image to attach it (re-encoded to PNG/JPEG, at most 5 MB).
+// - A Markdown text box with formatting tools (MarkdownTextarea): paste or drop an image to attach it (re-encoded to
+//   PNG/JPEG, at most 5 MB).
 // - Screenshots: the crop of a doc snip (b) or a picked region, and attached images (pasted, a screen snip with
 //   Shift+B), show as thumbnails (TESTID.composerAttachment); a click shows one full size.
 // - Add to review (Cmd/Ctrl+Enter) creates a draft. Send now (Cmd/Ctrl+Shift+Enter) submits a one-item review with
@@ -32,6 +33,7 @@ import { SafeHtml } from '../markdown.js';
 import { anchorChipParts, attachmentName, attachmentUrl, canSendNow, linesLabel } from '../model.js';
 import { store, useStore } from '../state.js';
 import { imageFileToDataUrl, isEditable } from '../util.js';
+import { MarkdownTextarea } from './MarkdownTextarea.js';
 import { Spinner, WordDiff } from './common.js';
 
 const TYPES = /** @type {const} */ ([
@@ -162,10 +164,10 @@ export function Composer() {
       </div>
       ${c.type === 'suggestion' ? html`<${SuggestionEditor} c=${c} />` : null}
       <label class="sr-only" for="sr-composer-body">Comment</label>
-      <textarea ref=${taRef} id="sr-composer-body" data-testid=${TESTID.composerTextarea} rows=${c.type === 'suggestion' ? 2 : 4}
+      <${MarkdownTextarea} inputRef=${taRef} id="sr-composer-body" testid=${TESTID.composerTextarea} rows=${c.type === 'suggestion' ? 3 : 6}
         value=${c.body} placeholder=${c.type === 'suggestion' ? 'Why? (optional, Markdown)' : c.type === 'question' ? 'Ask a question (Markdown)'
           : c.crop || c.attachments.length ? 'What about this screenshot? (Markdown, optional)' : 'Leave a comment (Markdown). Paste an image to attach it.'}
-        onInput=${(/** @type {any} */ e) => updateComposer({ body: e.currentTarget.value })} onPaste=${onPaste} onDrop=${onDrop}></textarea>
+        onInput=${(/** @type {any} */ e) => updateComposer({ body: e.currentTarget.value })} onPaste=${onPaste} onDrop=${onDrop} />
       ${c.attachments.length ? html`<ul class="attach-list">${c.attachments.map((a) => {
         const src = a.preview || attachmentUrl(bases, a.path);
         const name = attachmentName(a.path);

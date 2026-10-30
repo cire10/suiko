@@ -27,6 +27,7 @@ import {
 } from '../model.js';
 import { store } from '../state.js';
 import { contentUrl, scrollIntoViewSoft } from '../util.js';
+import { MarkdownTextarea } from './MarkdownTextarea.js';
 import { Chip, WordDiff } from './common.js';
 
 const TYPE_LABEL = /** @type {Record<string, string>} */ ({ question: 'Question', suggestion: 'Suggestion', 'agent-question': 'Agent question' });
@@ -218,9 +219,9 @@ function ReplyBox({ reply }) {
   };
   return html`<div class="reply-box">
     <label class="sr-only" for=${`reply-${reply.threadId}`}>${reply.reopen ? 'Reopen with a reply' : 'Reply'}</label>
-    <textarea ref=${ref} id=${`reply-${reply.threadId}`} data-testid=${TESTID.replyTextarea} rows="3" value=${reply.body}
+    <${MarkdownTextarea} inputRef=${ref} id=${`reply-${reply.threadId}`} testid=${TESTID.replyTextarea} rows=${4} value=${reply.body}
       placeholder=${reply.reopen ? 'What still needs to change? (Markdown)' : 'Reply (Markdown)'}
-      onInput=${(/** @type {any} */ e) => setReplyBody(e.currentTarget.value)} onKeyDown=${onKeyDown}></textarea>
+      onInput=${(/** @type {any} */ e) => setReplyBody(e.currentTarget.value)} onKeyDown=${onKeyDown} />
     <div class="row">
       <label class="check small"><input type="checkbox" checked=${reply.reopen}
         onChange=${(/** @type {any} */ e) => store.set({ reply: { ...reply, reopen: e.currentTarget.checked } })} /> Reopen the thread</label>

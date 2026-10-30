@@ -22,6 +22,14 @@ export function clip(s, n) {
   return t.length > n ? `${t.slice(0, Math.max(1, n - 1))}…` : t;
 }
 
+/**
+ * A Markdown body's text for a one-line preview: no bold markers, no list markers.
+ * @param {unknown} s
+ */
+export function plainBody(s) {
+  return String(s ?? '').replace(/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+/gm, '').replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1');
+}
+
 /** 'L42' or 'L42-43' from [start, end] or {startLine, endLine}. @param {any} lines */
 export function linesLabel(lines) {
   if (!lines) return '';
@@ -1032,6 +1040,20 @@ export function attachmentUrl(ds, path) {
 /** The file name of an attachment path, for labels and alt texts. @param {unknown} path */
 export function attachmentName(path) {
   return String(path ?? '').split('/').pop() || '';
+}
+
+// ------------------------------------------------------------------------------------------------ layout
+
+const PANEL_MIN_WIDTH = 280;
+/** What the doc keeps when the side panel is dragged wider; --doc-min (tokens.css) is the same for a smaller window. */
+const DOC_MIN_WIDTH = 360;
+
+/**
+ * The widths the side panel can be dragged to.
+ * @param {number} room what the doc and the panel share (px)
+ */
+export function panelWidthRange(room) {
+  return { min: PANEL_MIN_WIDTH, max: Math.max(PANEL_MIN_WIDTH, room - DOC_MIN_WIDTH) };
 }
 
 // ------------------------------------------------------------------------------------------------ shortcuts

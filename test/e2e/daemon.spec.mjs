@@ -4,6 +4,7 @@
 // agent side is driven through the same engine ops the CLI uses (feedback = delivery, revise).
 
 import { test as base, expect } from '@playwright/test';
+import { formatPacket } from '../../src/core/review/packet.js';
 import { TESTID } from '../../src/shared/protocol.js';
 import { Ui } from './fixtures.mjs';
 import { makePng } from './mock-data.mjs';
@@ -340,6 +341,38 @@ test('a source-mode suggestion when the selection spans Markdown markup, with a 
   expect(d.suggestion).toMatchObject({ mode: 'source', startLine: 9 });
   expect(d.suggestion.old).toContain('**token service** that issues and rotates');
   expect(d.suggestion.new).toContain('**token service** that mints and rotates');
+  expect(ui.errors).toEqual([]);
+});
+
+test('a comment formatted with the toolbar reaches the agent as written, line by line', async (/** @type {any} */ { page, ui, real }) => {
+  /** @type {Real} */
+  const r = real;
+  await ui.open('kitchen-sink');
+  await page.getByRole('button', { name: 'General comment' }).click();
+  const composer = page.getByTestId(TESTID.composer);
+  await expect(page.getByTestId(TESTID.composerTextarea)).toBeFocused();
+  await page.keyboard.type('Before shipping:');
+  await page.keyboard.press('Enter');
+  await composer.getByRole('button', { name: 'Numbered list' }).click();
+  await page.keyboard.type('Rotate tokens');
+  await page.keyboard.press('Enter');
+  await composer.getByRole('button', { name: 'Bold' }).click();
+  await page.keyboard.type('Blocking:');
+  await composer.getByRole('button', { name: 'Bold' }).click();
+  await page.keyboard.type(' name the owner');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await composer.getByRole('button', { name: 'Bulleted list' }).click();
+  await page.keyboard.type('the gateway');
+  await page.getByTestId(TESTID.composerAdd).click();
+  await expect(composer).toBeHidden();
+  await page.getByTestId(TESTID.submitReviewOpen).click();
+  await page.getByTestId(TESTID.submitConfirm).click();
+  await expect(page.getByTestId(TESTID.submitReviewDialog)).toBeHidden();
+
+  expect(formatPacket(await r.agentFeedback('kitchen-sink'))).toContain([
+    'Before shipping:', '    1. Rotate tokens', '    2. **Blocking:** name the owner', '    ', '    - the gateway',
+  ].join('\n'));
   expect(ui.errors).toEqual([]);
 });
 

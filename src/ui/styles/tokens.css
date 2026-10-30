@@ -65,6 +65,7 @@
   --fs-xs: 12px;
   --rail-left: 240px;
   --rail-right: 384px;
+  --doc-min: 360px;
 }
 
 @media (prefers-color-scheme: dark) {

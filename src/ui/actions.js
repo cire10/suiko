@@ -2384,6 +2384,20 @@ export function toggleSidebar() {
 }
 
 /**
+ * The side panel's width (components/PanelResizer.js): a CSS variable on the root element, which beats the layouts'
+ * own values of it. null goes back to those.
+ * @param {number|null} width px
+ * @param {{ save?: boolean }} [opts] save: false while dragging; the width is remembered in this browser when it ends
+ */
+export function setPanelWidth(width, { save = true } = {}) {
+  const root = document.documentElement.style;
+  if (width == null) root.removeProperty('--rail-right');
+  else root.setProperty('--rail-right', `${width}px`);
+  set({ panelWidth: width });
+  if (save) writePref('panelWidth', width == null ? '' : String(width));
+}
+
+/**
  * Whether the outline / history rail is shown beside the doc (900 px and up; below, it is a drawer): the page's own
  * choice (railOpen), else the Outline rail setting: auto shows it at 1200 px and up and, between 900 and 1199 px,
  * when the reviewer opened it there (remembered); always / never.
