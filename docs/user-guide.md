@@ -42,7 +42,7 @@ Wide layout (900 px and up):
 - **Top bar:** doc name, version picker, mode tabs (**Read**, **Review**, **Changes**, **Source**, **History**), the tool buttons (pick, the scissors for an area snip, and screen snip), the presence chip (for example "claude is listening"), the draft count and **Submit review**. In Changes and Source modes the version picker becomes a range, `[v1 · last review] → [v3 (latest)]`, and Changes adds **Inline** / **Side by side**.
 - **Left rail:** the outline (headings) with badges: open-thread count, `~` changed, `+` added, `[L]` locked. The **⋯** button next to a heading offers **Comment on section**, **Mark agreed** and **Unlock** (shown as "Unlock (L1)" with the lock id). Below it, a compact version history.
 - **Centre:** the document, live and interactive, with highlights, pins and change marks drawn over it.
-- **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card.
+- **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card. Resolved threads are not drawn over the document: select a card in **Resolved** or **All** to see where one was.
 - **Status bar:** version, working-copy state, page errors, failed external resources, orphaned threads, and the final badge.
 
 Narrow layout (below 900 px, typical for the pane next to a chat): the outline and history move behind the `=` menu, the threads open in a drawer (press `\` or click "Threads (3)"), and the mode tabs become a dropdown. Clicking a highlight opens the drawer on its thread.
@@ -266,7 +266,7 @@ The change list groups changes by section, with a "seen" checkbox per change and
 
 - the latest version's changes stop showing as new: the switch loses its count, the document no longer opens on them, and the next version is compared with this one (`v3 · accepted` in the range);
 - every addressed or answered thread waiting in Verify is resolved, as with **Accept all**; declined threads stay for you to decide;
-- the change marks go away (you are back in Read or Review), and the changes are ticked as seen.
+- the change marks and the highlights of the threads it resolved go away (you are back in Read or Review), and the changes are ticked as seen. Review then shows only what still applies: open and declined threads, and locked text.
 
 It takes effect at once and sends nothing to the agent; the toast has **Undo**.
 
@@ -283,7 +283,7 @@ The **Verify** filter (`v`) lists threads the agent marked addressed, answered o
 | `y` | Accept a decline |
 | `r` | Reply to the focused thread without reopening it: a follow-up question or comment the agent answers on the thread |
 
-Accepting takes effect immediately, Accept all included. Reopens, replies and new comments wait in your pending review until you submit. Only you can resolve a thread; the agent never closes its own work.
+Accepting takes effect immediately, Accept all included: the thread's highlight and pin leave the document, and its card moves to **Resolved**. Reopens, replies and new comments wait in your pending review until you submit. Only you can resolve a thread; the agent never closes its own work.
 
 ## Thread cards
 

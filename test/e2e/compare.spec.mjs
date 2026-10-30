@@ -349,6 +349,68 @@ test.describe('Show changes and Accept all revisions', () => {
     expect(ui.errors).toEqual([]);
   });
 
+  test('accepted threads leave the doc: a resolved thread is drawn only while its card is selected', async ({ page, ui }) => {
+    await ui.open('kitchen-sink');
+    await changesSwitch(page).click();
+    await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
+    /** What the guest draws for threads: text highlights, the selected thread, t2's outline, t5's pin. */
+    const drawn = async () => {
+      const ins = await ui.inspect();
+      return {
+        open: ins.highlights['sr-open'] || 0,
+        resolved: ins.highlights['sr-resolved'] || 0,
+        active: ins.highlights['sr-active'] || 0,
+        activeId: ins.activeId,
+        t2: !!ins.layers.marks?.some((/** @type {any} */ m) => m.key === 'outline:t2'),
+        t5: !!ins.layers.pins?.some((/** @type {any} */ p) => p.key === 'pin:t5'),
+      };
+    };
+    /** Clicks a card itself, not a control in it. @param {string} id */
+    const select = (id) => ui.card(id).click({ position: { x: 6, y: 6 } });
+    /** @param {string} filter */
+    const showFilter = (filter) => page.locator(`.filter[data-filter="${filter}"]`).click();
+
+    // t5 was resolved before this round: not drawn. t1 and t6 are text threads still open, t2 a picked image.
+    const start = { open: 2, resolved: 0, active: 0, activeId: null, t2: true, t5: false };
+    await expect.poll(drawn).toEqual(start);
+
+    // accepted while selected: its card leaves Open, and nothing of it stays
+    await select('t1');
+    await expect.poll(drawn).toEqual({ ...start, active: 1, activeId: 't1' });
+    await ui.card('t1').getByTestId(TESTID.verifyAccept).click();
+    await expect(ui.card('t1')).toHaveCount(0);
+    await expect.poll(drawn).toEqual({ ...start, open: 1 });
+
+    // the same with Accept all revisions; its Undo draws the thread again
+    await select('t2');
+    await expect.poll(async () => (await drawn()).activeId).toBe('t2');
+    await page.getByTestId(TESTID.acceptRevisions).click();
+    const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 1 thread (t2).' });
+    await expect(toast).toBeVisible();
+    await expect.poll(drawn).toEqual({ ...start, open: 1, t2: false });
+    await expect(page.locator('.thread-panel [aria-current="true"]')).toHaveCount(0);
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(drawn).toEqual({ ...start, open: 1 });
+
+    // a resolved thread is still there to look at: selecting its card scrolls to it and draws it
+    await showFilter('resolved');
+    await select('t5');
+    await expect.poll(drawn).toEqual({ ...start, open: 1, resolved: 1, active: 1, activeId: 't5', t5: true });
+    // until its card leaves the panel
+    await showFilter('open');
+    await expect.poll(drawn).toEqual({ ...start, open: 1 });
+
+    // a card still listed after accepting stays selected (All lists resolved threads)
+    await showFilter('all');
+    await select('t3');
+    await expect.poll(async () => (await drawn()).activeId).toBe('t3');
+    await ui.card('t3').getByRole('button', { name: 'Resolve' }).click();
+    await expect(ui.card('t3').getByRole('button', { name: 'Reopen' })).toBeVisible();
+    await expect(ui.card('t3')).toHaveAttribute('aria-current', 'true');
+    expect((await drawn()).activeId).toBe('t3');
+    expect(ui.errors).toEqual([]);
+  });
+
   test('accepts the latest version and its addressed / answered threads, leaves Changes, undoes; later versions compare with it', async ({ page, ui, mock }) => {
     await ui.open('kitchen-sink');
     const d = mock.doc('kitchen-sink');
