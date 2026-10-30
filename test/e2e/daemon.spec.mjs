@@ -181,34 +181,46 @@ test('Accept all revisions against the real engine: the version is accepted, the
   /** @type {Real} */
   const r = real;
   const id = r.docId('kitchen-sink');
-  // a round driven through the engine: rv1 asks a question (t1), v2 answers it and changes a line
+  // a round driven through the engine: rv1 asks a question (t1) and comments on a line (t2), v2 answers them and
+  // changes a line
   await r.ops.saveDraft(r.ctx, id, { kind: 'thread', type: 'question', capture: { kind: 'doc' }, body: 'Why rotate on every use?' });
+  await r.ops.saveDraft(r.ctx, id, { kind: 'thread', type: 'comment', capture: { kind: 'text', startSrid: null, endSrid: null, exact: 'Prototype the issuer.', prefix: '', suffix: '' }, body: 'Which language?' });
   await r.ops.submitReview(r.ctx, id, { verdict: 'comment', body: '' });
   await r.agentFeedback('kitchen-sink');
   r.write('docs/kitchen-sink.md', r.read('docs/kitchen-sink.md').replace('rotated on every use, and', 'rotated on every use with a grace window, and'));
   const res = await r.revise('kitchen-sink', {
     summary: 'Grace window',
-    threads: { t1: { status: 'answered', reply: 'It limits replay.' } },
+    threads: { t1: { status: 'answered', reply: 'It limits replay.' }, t2: { status: 'answered', reply: 'TypeScript.' } },
     other: [{ at: 'L51', why: 'Added a grace window' }],
   });
   expect(res.refused).toBe(false);
   expect(res.version).toBe(2);
+  /** Thread marks the guest draws: text highlights of any state and pins (t1 is about the whole doc: it has neither). */
+  const threadMarks = async () => {
+    const ins = await ui.inspect();
+    return { open: ins.highlights['sr-open'] || 0, resolved: ins.highlights['sr-resolved'] || 0, pins: (ins.layers.pins || []).map((/** @type {any} */ p) => p.key) };
+  };
 
   await ui.open('kitchen-sink');
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('1');
+  await expect.poll(threadMarks).toEqual({ open: 1, resolved: 0, pins: ['pin:t2'] });
   await page.getByTestId(TESTID.acceptRevisions).click();
-  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 1 thread (t1).' })).toBeVisible();
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 2 threads (t1, t2).' })).toBeVisible();
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
   const st = await r.state('kitchen-sink');
   expect([st.doc.acceptedVersion, st.doc.lastReviewedVersion]).toEqual([2, 1]);
-  expect(st.threads.find((/** @type {any} */ t) => t.id === 't1').status).toBe('resolved');
-  // opened again: nothing new since the accepted version
+  expect(st.threads.filter((/** @type {any} */ t) => t.status === 'resolved').map((/** @type {any} */ t) => t.id)).toEqual(['t1', 't2']);
+  // the accepted threads are gone from the doc, with the switch off and nothing left to decide
+  await expect.poll(threadMarks).toEqual({ open: 0, resolved: 0, pins: [] });
+  // opened again: nothing new since the accepted version, and still nothing over the doc
   await page.reload();
   await ui.ready();
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.acceptRevisions)).toHaveCount(0);
   await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveCount(0);
+  await expect.poll(async () => (await ui.inspect()).targets.map((/** @type {any} */ t) => t.id)).toEqual(['t1', 't2']);
+  expect(await threadMarks()).toEqual({ open: 0, resolved: 0, pins: [] });
   expect(ui.errors).toEqual([]);
 });
 

@@ -575,7 +575,7 @@ describe('targets', () => {
         return out;
       });
       assert.deepEqual(hl['sr-open'].sort(), ['Refresh tokens are rotated on every use and expire', 'Tokens are rotated on every use', 'rotated on every use', 'secret rotation interval'].sort());
-      assert.deepEqual(hl['sr-resolved'], ['concurrent refreshes']);
+      assert.deepEqual(hl['sr-resolved'], [], 'a resolved thread is not drawn while it is not active');
       assert.deepEqual(hl['sr-outdated'], ['Phase two ships']);
       assert.deepEqual(hl['sr-lock'], ['Phase one ships to internal users.']);
       assert.deepEqual(hl['sr-draft'], ['Rate limits']);
@@ -589,7 +589,7 @@ describe('targets', () => {
       const blockBox = ins.layers.marks.find((/** @type {any} */ m) => m.key === 'outline:t6');
       assert.match(blockBox.cls, /\bblock\b/);
       const pins = ins.layers.pins.map((/** @type {any} */ p) => p.text);
-      assert.deepEqual(pins.slice().sort(), ['1', '11', '2', '3', '4', '5', '6'].sort(), 'pins for visible non-lock targets');
+      assert.deepEqual(pins.slice().sort(), ['1', '11', '3', '4', '5', '6'].sort(), 'pins for visible non-lock, non-resolved targets');
       // Pins never overlap.
       const tops = ins.layers.pins.map((/** @type {any} */ p) => p.rect.y).sort((/** @type {number} */ a, /** @type {number} */ b) => a - b);
       for (let i = 1; i < tops.length; i++) assert.ok(tops[i] - tops[i - 1] >= 21.5);
@@ -641,11 +641,11 @@ describe('targets', () => {
     try {
       await send(d.page, 'setTargets', { targets: TARGETS });
       await settle(d.frame);
-      const r = await rectOf(d.frame, '[data-srid="7"]', 'concurrent');
+      const r = await rectOf(d.frame, '[data-srid="11"]', 'Phase two');
       let from = await mark(d.page);
       await d.page.mouse.click(r.cx, r.cy);
       let act = await waitMsg(d.page, 'activate', from);
-      assert.equal(act.id, 't2');
+      assert.equal(act.id, 't5');
 
       const ins = await inspect(d.frame);
       const pin = ins.layers.pins.find((/** @type {any} */ p) => p.key === 'pin:t3');
@@ -654,6 +654,73 @@ describe('targets', () => {
       act = await waitMsg(d.page, 'activate', from);
       assert.equal(act.id, 't3');
       assert.equal((await inspect(d.frame)).activeId, 't3');
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('a resolved thread is drawn only while active: otherwise no highlight, pin or outline, and clicks go through it', async () => {
+    const d = await openDoc(browser, harness, 'prose');
+    /** @param {string} id @param {string} kind @param {string|null} quote @param {string} [state] */
+    const target = (id, kind, quote, state = 'resolved') => ({ id, num: Number(id.slice(1)), kind, state, srid: quote ? 7 : 8, endSrid: null, quote, prefix: '', suffix: '', region: null, svg: null, cell: null, label: 'Rollout plan' });
+    const targets = [target('t1', 'text', 'concurrent refreshes'), target('t2', 'element', null), target('t3', 'section', null)];
+    /** What is drawn for the targets: highlighted text, pins and overlay marks. */
+    const drawn = async () => {
+      const ins = await inspect(d.frame);
+      /** @param {string} name */
+      const text = (name) => d.frame.evaluate((n) => [.../** @type {any} */ (CSS).highlights.get(n)].map((/** @type {Range} */ r) => r.toString()), name);
+      return {
+        resolved: await text('sr-resolved'),
+        active: await text('sr-active'),
+        pins: ins.layers.pins.map((/** @type {any} */ p) => p.key),
+        marks: ins.layers.marks.map((/** @type {any} */ m) => m.key),
+      };
+    };
+    try {
+      let from = await mark(d.page);
+      await send(d.page, 'setTargets', { targets });
+      // its position stays: the card can still scroll to it, and says when the text is hidden or gone
+      const pos = await waitMsg(d.page, 'positions', from, (m) => Object.keys(m.targets).length === 3);
+      assert.deepEqual(Object.values(pos.targets).map((/** @type {any} */ p) => p.state), ['ok', 'ok', 'ok']);
+      assert.ok(pos.targets.t1.top > 0 && pos.targets.t1.height > 0);
+      await settle(d.frame);
+      assert.deepEqual(await drawn(), { resolved: [], active: [], pins: [], marks: [] });
+
+      // a click on its text is a click on plain text
+      const r = await rectOf(d.frame, '[data-srid="7"]', 'concurrent');
+      from = await mark(d.page);
+      await d.page.mouse.click(r.cx, r.cy);
+      await settle(d.frame);
+      assert.deepEqual(await msgsOf(d.page, 'activate', from), []);
+      assert.equal((await inspect(d.frame)).activeId, null);
+
+      // selected: drawn like any active thread, and clickable
+      await send(d.page, 'focus', { id: 't1' });
+      await settle(d.frame);
+      assert.deepEqual(await drawn(), { resolved: ['concurrent refreshes'], active: ['concurrent refreshes'], pins: ['pin:t1'], marks: [] });
+      from = await mark(d.page);
+      await d.page.mouse.click(r.cx, r.cy);
+      assert.equal((await waitMsg(d.page, 'activate', from)).id, 't1');
+
+      // the next one selected: the first is gone again, whatever its kind
+      await send(d.page, 'focus', { id: 't2' });
+      await settle(d.frame);
+      assert.deepEqual(await drawn(), { resolved: [], active: [], pins: ['pin:t2'], marks: ['outline:t2'] });
+      await send(d.page, 'focus', { id: 't3' });
+      await settle(d.frame);
+      assert.deepEqual(await drawn(), { resolved: [], active: [], pins: ['pin:t3'], marks: ['bracket:t3'] });
+
+      // deselected: nothing left
+      await send(d.page, 'focus', { id: null });
+      await settle(d.frame);
+      assert.deepEqual(await drawn(), { resolved: [], active: [], pins: [], marks: [] });
+
+      // reopened (the Undo of Accept all): drawn again, without being selected
+      await send(d.page, 'setTargets', { targets: [target('t1', 'text', 'concurrent refreshes', 'open')] });
+      await settle(d.frame);
+      assert.deepEqual((await drawn()).pins, ['pin:t1']);
+      assert.deepEqual(await d.frame.evaluate(() => [.../** @type {any} */ (CSS).highlights.get('sr-open')].map((/** @type {Range} */ x) => x.toString())), ['concurrent refreshes']);
+      assert.deepEqual(d.pageErrors, []);
     } finally {
       await d.close();
     }

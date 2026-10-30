@@ -995,7 +995,7 @@ Special cases:
 The composer preview returns `{label, lines, section, src (at most 3 lines)}`, for example "Agent will see: L42-43 §3.2 'rotated on every use'". **[Widen to block]** re-resolves the anchor as the deepest block element.
 
 ### 7.3 Painting (guest; observe-only)
-- **Text highlights** use the CSS Custom Highlight API. Highlights: `sr-open`, `sr-resolved`, `sr-active`, `sr-draft`, `sr-ins`, `sr-lock`. Their `::highlight()` styles live in one constructed stylesheet appended to `document.adoptedStyleSheets`, which is re-checked on each update. No DOM node is added for this.
+- **Text highlights** use the CSS Custom Highlight API. Highlights: `sr-open`, `sr-resolved`, `sr-active`, `sr-draft`, `sr-ins`, `sr-lock`. Their `::highlight()` styles live in one constructed stylesheet appended to `document.adoptedStyleSheets`, which is re-checked on each update. No DOM node is added for this. A resolved thread keeps its position but is drawn and clickable only while it is the active one (its card selected).
   - **Fallback** when `CSS.highlights` is missing: draw `Range.getClientRects()` boxes in the overlay.
   - **Hit-testing:** `caretPositionFromPoint` (or `caretRangeFromPoint`) plus `Range.isPointInRange`.
 - **The overlay** is one `<sr-overlay data-sr-ignore>` appended to `<html>`.

@@ -14,6 +14,8 @@
 // Painting: text ranges go to CSS highlights by state (open/addressed/needs_input -> sr-open, resolved ->
 // sr-resolved, outdated/orphaned -> sr-outdated, draft -> sr-draft, lock -> sr-lock; the active one also sr-active);
 // numbered pins in the right margin (stacked 22 px apart); outlines/regions/brackets in the overlay.
+// A resolved thread is done with: nothing of it is drawn and clicks go through it unless it is the active one (its
+// card selected), but it keeps its position, so the card can still scroll to it.
 // Positions (posted by Main): {[id]: {top, height, state: 'ok'|'block'|'hidden'|'missing'}} where top/height are in
 // DOCUMENT coordinates (viewport top + scrollY) of this iframe; hidden targets report the nearest visible
 // ancestor's box; missing targets report top null.
@@ -26,8 +28,8 @@ const Targets = (() => {
     orphaned: 'sr-outdated', draft: 'sr-draft', lock: 'sr-lock',
   });
   const STATE_COLOR = /** @type {Record<string, string>} */ ({
-    open: '#d29922', needs_input: '#e16f24', addressed: '#1f6feb', resolved: '#2da44e', outdated: '#8c959f',
-    orphaned: '#8c959f', draft: '#0969da', lock: '#8250df',
+    open: '#d29922', needs_input: '#e16f24', addressed: '#1f6feb', outdated: '#8c959f', orphaned: '#8c959f',
+    draft: '#0969da', lock: '#8250df',
   });
   const ACTIVE_COLOR = '#fb8500';
   const PIN_GAP = 22;
@@ -156,6 +158,11 @@ const Targets = (() => {
     paint();
   }
 
+  /** Whether a target shows over the doc: a resolved thread only while it is the active one. @param {Resolved} r */
+  function isDrawn(r) {
+    return r.t.state !== 'resolved' || r.t.id === activeId;
+  }
+
   /** Pushes text ranges into the CSS highlights. */
   function paint() {
     /** @type {Map<string, Range[]>} */
@@ -163,7 +170,7 @@ const Targets = (() => {
     for (const n of Highlights.NAMES) if (!Highlights.CHANGE_NAMES.includes(n)) by.set(n, []);
     if (!hidden) {
       for (const r of resolved.values()) {
-        if (!r.range) continue;
+        if (!r.range || !isDrawn(r)) continue;
         /** @type {Range[]} */ (by.get(STATE_HL[r.t.state] || 'sr-open')).push(r.range);
         if (r.t.id === activeId) /** @type {Range[]} */ (by.get('sr-active')).push(r.range);
       }
@@ -246,7 +253,7 @@ const Targets = (() => {
         height: geo.rect && geo.visible ? Math.round(geo.rect.height) : 0,
         state,
       };
-      if (hidden || !geo.visible || !geo.rect) continue;
+      if (hidden || !isDrawn(r) || !geo.visible || !geo.rect) continue;
       const active = id === activeId;
       const color = active ? ACTIVE_COLOR : STATE_COLOR[r.t.state] || STATE_COLOR.open;
       const isLock = r.t.state === 'lock';
@@ -339,7 +346,7 @@ const Targets = (() => {
     let best = null;
     let bestSize = Infinity;
     for (const r of resolved.values()) {
-      if (r.status !== 'ok' && r.status !== 'block') continue;
+      if ((r.status !== 'ok' && r.status !== 'block') || !isDrawn(r)) continue;
       let size = Infinity;
       if (r.range) {
         if (!caret) continue;

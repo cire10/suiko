@@ -287,6 +287,7 @@ export async function refreshNow() {
   }
   set(patch);
   updateTitle();
+  deselectHiddenResolved();
   await Promise.all([loadTargets(), loadChanges()]);
   flushAutoChanges();
 }
@@ -471,6 +472,7 @@ export function openVerify(v) {
   const s = get();
   if (s.version !== v && s.ds && !switchVersion(v)) return;
   set({ filter: 'verify', unseenVersion: null, sidePane: 'threads', drawer: get().narrow ? true : get().drawer, sidebar: true });
+  deselectHiddenResolved();
   if (get().mode !== 'review') setMode('review');
   updateTitle();
 }
@@ -961,6 +963,19 @@ export function clearFocus() {
   set({ focusedId: null });
   if (!kindCaps(get().ds).frame) kindFocus?.(null);
   else guest.send(MSG.FOCUS, { id: null });
+}
+
+/**
+ * The doc draws a resolved thread only while it is selected, so that selection ends with its card: once accepting it
+ * or choosing another filter takes it out of the panel, nothing of it stays over the doc.
+ */
+function deselectHiddenResolved() {
+  const s = get();
+  if (!kindCaps(s.ds).frame) return;
+  const t = (s.ds?.threads || []).find((/** @type {any} */ x) => x.id === s.focusedId);
+  if (t?.status !== 'resolved') return;
+  const listed = panelItems(s.ds, s.filter, s.version, s.reply?.threadId ?? null).some((x) => x.id === t.id);
+  if (!listed) clearFocus();
 }
 
 /**
@@ -2409,6 +2424,7 @@ export function toggleNav() {
 /** @param {string} filter */
 export function setFilter(filter) {
   set({ filter: /** @type {any} */ (filter) });
+  deselectHiddenResolved();
 }
 
 /** @param {'unified'|'split'} layout */
