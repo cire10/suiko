@@ -9,7 +9,7 @@ import {
   acceptableThreads, declinedToVerify, showsDoc, agentPrompt, anchorAt, anchorChipParts, anchorQuote, appCombo, applyErrorText, attachmentName, attachmentUrl, backupHasInput,
   canSendNow, coalesceWordParts, docKindOf, hasMode, kindCaps, modesFor, defaultBase, defaultVerdict, diffLines, draftVersion, fuzzyMatch, groupHunks,
   highlightParts, hunkLines, hunkPreview, hunkSourceText, isComposerDirty, isReplyDirty, isSingleKeyCombo,
-  isVerifiable, keyLabel, linesLabel, matchRow, panelItems, presenceInfo, reviewProgress, roundResults, roundSummary,
+  isVerifiable, keyLabel, linesLabel, matchRow, panelItems, panelWidthRange, plainBody, presenceInfo, reviewProgress, roundResults, roundSummary,
   singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches, threadRowTitle, timeline,
   trimDiffContext, baseTag, openingMode, plainMode, reviewedThrough, revisionsToAccept,
 } from '../../src/ui/model.js';
@@ -558,4 +558,17 @@ test('code anchors: card targets name the file, side and lines; panel order is b
     drafts: { items: [] },
   };
   assert.deepEqual(panelItems(ds, 'all', 1).map((x) => x.id), ['t4', 't3', 't5', 't2', 't1']);
+});
+
+test('panelWidthRange: the doc keeps 360 px; a window with no room for more still allows the panel its minimum', () => {
+  assert.deepEqual(panelWidthRange(1400), { min: 280, max: 1040 });
+  assert.deepEqual(panelWidthRange(640), { min: 280, max: 280 });
+  assert.deepEqual(panelWidthRange(100), { min: 280, max: 280 });
+});
+
+test('plainBody: bold and list markers come off, other text stays', () => {
+  assert.equal(plainBody('**Fix** this:\n- first\n  * second\n1. third\n2) fourth'), 'Fix this:\nfirst\nsecond\nthird\nfourth');
+  assert.equal(plainBody('2 * 3 - 1 and -5'), '2 * 3 - 1 and -5');
+  assert.equal(plainBody('** not bold ** 1.5'), '** not bold ** 1.5');
+  assert.equal(plainBody(undefined), '');
 });

@@ -2,8 +2,10 @@
    Wide (>= 1200 px): a grid with both rails (the Outline rail setting "Never", or the menu button, can close the left
    one: class rail-closed). Medium (900-1199 px, class is-medium): the outline rail is collapsed behind the menu
    button unless it is open (class rail-open: opened there, or the "Always" setting) and the side panel is narrower,
-   so the doc keeps most of the width. Narrow (< 900 px): the doc is full width; the outline and the side panel are
-   drawers toggled by `=` / `\` (classes nav-open / drawer-open), over a scrim. No horizontal page scroll. */
+   so the doc keeps most of the width. From 900 px up the reviewer can drag the side panel wider or narrower (a width
+   set on the root element overrides --rail-right); a smaller window shrinks the panel before the doc goes below
+   --doc-min. Narrow (< 900 px): the doc is full width; the outline and the side panel are drawers toggled by `=` / `\`
+   (classes nav-open / drawer-open), over a scrim. No horizontal page scroll. */
 
 .doc-view {
   display: flex;
@@ -278,7 +280,7 @@
   min-height: 0;
   position: relative;
   display: grid;
-  grid-template-columns: var(--rail-left) minmax(0, 1fr) var(--rail-right);
+  grid-template-columns: var(--rail-left) minmax(var(--doc-min), 1fr) minmax(0, var(--rail-right));
 }
 
 .sidebar-hidden .main {
@@ -290,7 +292,7 @@
 }
 
 .rail-closed .main {
-  grid-template-columns: minmax(0, 1fr) var(--rail-right);
+  grid-template-columns: minmax(var(--doc-min), 1fr) minmax(0, var(--rail-right));
 }
 
 .rail-closed.sidebar-hidden .main {
@@ -305,14 +307,24 @@
 .rail-right {
   min-height: 0;
   min-width: 0;
+  background: var(--panel);
+}
+
+.rail-left,
+.rail-scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--panel);
   scrollbar-width: thin;
 }
 
+/* The side panel scrolls inside its box, so the resize handle on its edge stays put. */
 .rail-right {
+  position: relative;
   background: var(--bg-subtle);
+}
+
+.rail-scroll {
+  height: 100%;
 }
 
 .rail-left {
@@ -321,6 +333,64 @@
 
 .rail-right {
   border-left: 1px solid var(--border);
+}
+
+/* The side panel's resize handle: it straddles the panel's border, a grip at rest and the whole edge while in use. */
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 9px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.panel-resizer:focus-visible {
+  outline: none;
+}
+
+.panel-resizer::before,
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  width: 3px;
+  border-radius: 2px;
+}
+
+.panel-resizer::before {
+  top: 0;
+  bottom: 0;
+}
+
+.panel-resizer::after {
+  top: calc(50% - 16px);
+  height: 32px;
+  background: var(--border-strong);
+}
+
+.panel-resizer:hover::before,
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::before,
+.panel-resizer:focus-visible::after,
+.is-resizing-panel .panel-resizer::before,
+.is-resizing-panel .panel-resizer::after {
+  background: var(--accent);
+}
+
+/* While dragging: the doc iframes must not take the pointer, and nothing gets selected. */
+.is-resizing-panel {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.is-resizing-panel iframe {
+  pointer-events: none;
 }
 
 
@@ -461,7 +531,7 @@
 }
 
 .is-medium .main {
-  grid-template-columns: minmax(0, 1fr) var(--rail-right);
+  grid-template-columns: minmax(var(--doc-min), 1fr) minmax(0, var(--rail-right));
 }
 
 .is-medium .rail-left {
@@ -473,7 +543,7 @@
 }
 
 .is-medium.rail-open .main {
-  grid-template-columns: var(--rail-left) minmax(0, 1fr) var(--rail-right);
+  grid-template-columns: var(--rail-left) minmax(var(--doc-min), 1fr) minmax(0, var(--rail-right));
 }
 
 .is-medium.rail-open.sidebar-hidden .main {

@@ -27,6 +27,9 @@ const ICONS = /** @type {Record<string, string>} */ ({
   scissors: 'M9 6a3 3 0 11-6 0 3 3 0 016 0zM9 18a3 3 0 11-6 0 3 3 0 016 0zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12',
   screen: 'M3 4h18v12H3zM8 20h8M12 16v4M7 8V7h2M17 8V7h-2M7 12v1h2M17 12v1h-2',
   search: 'M10.5 4a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM20 20l-4.6-4.6',
+  bold: 'M7 5h6.5a3.5 3.5 0 010 7H7zM7 12h7.5a3.5 3.5 0 010 7H7z',
+  listBullet: 'M9 6h12M9 12h12M9 18h12M4 5.5a.5.5 0 100 1 .5.5 0 000-1zM4 11.5a.5.5 0 100 1 .5.5 0 000-1zM4 17.5a.5.5 0 100 1 .5.5 0 000-1z',
+  listNumber: 'M10 6h11M10 12h11M10 18h11M3.5 5L5 4v5M3.5 15c.4-1.4 3.2-1.3 3.2.3 0 1.6-3.2 2-3.2 3.7h3.2',
   gear: 'M19.26 10.56L21.93 10.82L21.93 13.18L19.26 13.44L18.15 16.11L19.85 18.19L18.19 19.85L16.11 18.15L13.44 19.26'
     + 'L13.18 21.93L10.82 21.93L10.56 19.26L7.89 18.15L5.81 19.85L4.15 18.19L5.85 16.11L4.74 13.44L2.07 13.18L2.07 10.82'
     + 'L4.74 10.56L5.85 7.89L4.15 5.81L5.81 4.15L7.89 5.85L10.56 4.74L10.82 2.07L13.18 2.07L13.44 4.74L16.11 5.85'
@@ -34,12 +37,12 @@ const ICONS = /** @type {Record<string, string>} */ ({
 });
 
 /**
- * @param {{ name: string, size?: number, label?: string }} props
+ * @param {{ name: string, size?: number, label?: string, weight?: number }} props weight: the stroke width
  */
-export function Icon({ name, size = 16, label }) {
+export function Icon({ name, size = 16, label, weight = 2 }) {
   const d = ICONS[name] || ICONS.comment;
   return html`<svg class="icon" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? undefined : 'true'}
+    stroke-width=${weight} stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? undefined : 'true'}
     role=${label ? 'img' : undefined} aria-label=${label}><path d=${d} /></svg>`;
 }
 

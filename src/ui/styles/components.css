@@ -920,6 +920,42 @@
   align-items: center;
 }
 
+/* A Markdown text box (comment, reply, summary): the formatting toolbar and the textarea read as one field. */
+.md-input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.md-input:focus-within {
+  border-color: var(--focus);
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.md-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg-subtle);
+}
+
+.md-input textarea {
+  display: block;
+  max-height: 60vh;
+  border: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+}
+
+.md-input textarea:focus-visible {
+  outline: none;
+}
+
 .attach-list {
   list-style: none;
   margin: 0;

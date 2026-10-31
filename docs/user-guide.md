@@ -42,7 +42,7 @@ Wide layout (900 px and up):
 - **Top bar:** doc name, version picker, mode tabs (**Read**, **Review**, **Changes**, **Source**, **History**), the tool buttons (pick, the scissors for an area snip, and screen snip), the presence chip (for example "claude is listening"), the draft count and **Submit review**. In Changes and Source modes the version picker becomes a range, `[v1 · last review] → [v3 (latest)]`, and Changes adds **Inline** / **Side by side**.
 - **Left rail:** the outline (headings) with badges: open-thread count, `~` changed, `+` added, `[L]` locked. The **⋯** button next to a heading offers **Comment on section**, **Mark agreed** and **Unlock** (shown as "Unlock (L1)" with the lock id). Below it, a compact version history.
 - **Centre:** the document, live and interactive, with highlights, pins and change marks drawn over it.
-- **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card. Resolved threads are not drawn over the document: select a card in **Resolved** or **All** to see where one was.
+- **Right:** the thread panel, a list of cards in document order. Filters: **Open**, **Needs me** (the agent asked you something), **Verify**, **Drafts**, **Resolved**, **Outdated**, **All**. Clicking a card scrolls the document to it; clicking a highlight focuses its card. Resolved threads are not drawn over the document: select a card in **Resolved** or **All** to see where one was. Need more room? Drag the panel's left edge to make it wider or narrower (the arrow keys move it too when it has focus, and a double-click goes back to the default width). The width is remembered in this browser.
 - **Status bar:** version, working-copy state, page errors, failed external resources, orphaned threads, and the final badge.
 
 Narrow layout (below 900 px, typical for the pane next to a chat): the outline and history move behind the `=` menu, the threads open in a drawer (press `\` or click "Threads (3)"), and the mode tabs become a dropdown. Clicking a highlight opens the drawer on its thread.
@@ -193,7 +193,8 @@ The composer opens in the thread panel (or the drawer) when you start a comment.
 
 - **Agent will see:** a preview of exactly what the agent receives, for example `L42-43 §3.2 'rotated on every use'`. If it looks too narrow, click **Widen to block**.
 - **Type:** Comment, Question or Suggestion. **Severity:** Blocking, Normal or Nit (keys `1`-`3` while the composer has focus).
-- **Body:** Markdown. Paste an image to attach it. A thumbnail shows the attached picture: the area you snipped, your screenshot, or the region you drew; click it to see it full size. A comment with a picture needs no text.
+- **Body:** Markdown. The buttons above the box make text **bold**, or lines a bulleted or numbered list (`Cmd+B`, `Cmd+Shift+8`, `Cmd+Shift+7`); press one again to undo it. `Enter` continues a list, `Enter` on an empty item ends it, and `Shift+Enter` is a plain line break. You see the Markdown while you write and the formatted text on the card; the agent reads it as you wrote it. The box grows with your text. The reply box and the Submit dialog's summary work the same way.
+- **Images:** paste one to attach it. A thumbnail shows the attached picture: the area you snipped, your screenshot, or the region you drew; click it to see it full size. A comment with a picture needs no text.
 - **Add to review** (`Cmd+Enter`) saves the comment as a draft in your pending review.
 - **Send now** (`Cmd+Shift+Enter`) submits just this comment, immediately, as a one-item review with verdict Comment. A waiting agent wakes up and handles it at once; your other drafts stay pending. To be asked first, turn on **Ask before Send now** in [Settings](#settings).
 - **Cancel** (`Esc`).
@@ -338,6 +339,7 @@ Press `Cmd+/` (or `?`) in the UI for this list. Buttons show their key when you 
 | | `Cmd+Enter` | In the composer: **Add to review** (saves a draft) |
 | | `Cmd+Shift+Enter` | In the composer: **Send now** (submits just this comment) |
 | | `1` / `2` / `3` | In the composer: severity Blocking / Normal / Nit |
+| | `Cmd+B` / `Cmd+Shift+8` / `Cmd+Shift+7` | While writing: bold / bulleted list / numbered list |
 | | `Esc` | Close or cancel |
 | **Review** | `f` or `Cmd+Shift+Enter` | Submit review dialog (outside the composer) |
 | | `v` | Verify queue |

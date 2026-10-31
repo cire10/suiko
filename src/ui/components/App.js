@@ -5,6 +5,7 @@
 // (components/kinds/index.js: a code review shows a file tree and diffs instead of a rendered doc).
 // Between 900 and 1199 px (e.g. a desktop app's browser pane) the outline rail is collapsed behind the menu button
 // unless the user opened it (remembered), and the side panel is narrower, so the doc keeps most of the width.
+// From 900 px up the reviewer can drag the side panel to another width (PanelResizer; remembered).
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
 // Read mode shows the doc alone: no thread panel (the side panel appears only for a comment being written).
 // The doc iframe stays mounted in every mode, so switching between Review / Changes and Source / History never
@@ -32,6 +33,7 @@ import { HistoryView } from './HistoryView.js';
 import { Home } from './Home.js';
 import { Lightbox } from './Lightbox.js';
 import { Outline } from './Outline.js';
+import { PanelResizer } from './PanelResizer.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { SourceView } from './SourceView.js';
 import { StatusBar } from './StatusBar.js';
@@ -131,7 +133,8 @@ function DocView() {
         ${s.split ? html`<${ComparePane} />` : null}
       </main>
       <aside class="rail-right" aria-label="Review panel" id="sr-side">
-        <${SidePanel} narrow=${s.narrow} mode=${s.mode} />
+        ${s.narrow ? null : html`<${PanelResizer} />`}
+        <div class="rail-scroll"><${SidePanel} narrow=${s.narrow} mode=${s.mode} /></div>
       </aside>
       ${s.narrow && ((s.drawer && (!reading || s.composing)) || s.nav)
         ? html`<div class="scrim" onClick=${() => store.set({ drawer: false, nav: false })} aria-hidden="true"></div>` : null}

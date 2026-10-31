@@ -1,11 +1,11 @@
 // @ts-check
 // Suiko reviewer UI entry point (no build step: Preact + htm via the import map in index.html).
-// Boot order: move the ?k= token into sessionStorage, apply the saved theme, track the narrow (< 900 px) and medium
-// (900-1199 px) layouts, install the keyboard map, render the app, then load the route (/ = all docs,
-// /d/:ws/:doc = one doc).
+// Boot order: move the ?k= token into sessionStorage, apply the saved theme and side panel width, track the narrow
+// (< 900 px) and medium (900-1199 px) layouts, install the keyboard map, render the app, then load the route (/ = all
+// docs, /d/:ws/:doc = one doc).
 
 import { html, render } from 'preact-htm';
-import { applyRoute, applyTheme, markSeen } from './actions.js';
+import { applyRoute, applyTheme, markSeen, setPanelWidth } from './actions.js';
 import { captureToken } from './api.js';
 import { App } from './components/App.js';
 import { installKeys } from './keys.js';
@@ -13,6 +13,7 @@ import { store } from './state.js';
 
 captureToken();
 applyTheme(store.get().theme);
+setPanelWidth(store.get().panelWidth, { save: false });
 
 const narrowQuery = matchMedia('(max-width: 899.98px)');
 const mediumQuery = matchMedia('(min-width: 900px) and (max-width: 1199.98px)');
