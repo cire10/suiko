@@ -925,7 +925,7 @@ const GENERATED = `${Array.from({ length: GENERATED_LINES }, (_, i) => `export c
  * The 'code' scenario: code review 'cr-feat' (feat vs main) after one round of review.
  *   v1 (agent, open): src/a.js M (two hunks, 16 unchanged lines between), src/new-name.js R (from src/old-name.js),
  *      src/util/strings.js A, docs/old-notes.md D, assets/logo.png A binary, data/fixtures.json M too large,
- *      vendor/generated.js A (3200 lines); skipped: .env.local (excluded), plus the binary and the too-large
+ *      vendor/generated.js A (3200 lines); skipped: .env.local (excluded: an environment file), plus the binary and the too-large
  *      file (the engine lists those under skipped too).
  *   rv1 (changes requested, delivered to claude) created:
  *      t1 blocking comment on src/a.js new side, the two discount lines   -> addressed in v2 (linked hunk)
@@ -944,7 +944,7 @@ export function buildCodeScenario(opts = {}) {
     clock: opts.clock,
     // as the engine does, the binary and too-large files of the round are also listed as skipped
     skipped: [
-      { path: '.env.local', reason: 'excluded' },
+      { path: '.env.local', reason: 'excluded', detail: 'an environment file' },
       { path: 'assets/logo.png', reason: 'binary' },
       { path: 'data/fixtures.json', reason: 'too-large' },
     ],

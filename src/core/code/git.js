@@ -28,6 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GIT_MIN_VERSION } from '../../shared/protocol.js';
 import { NotFoundError, RefusedError, UsageError } from '../store/errors.js';
+import { secretFileKind } from '../util/secret-files.js';
 
 /** Environment variables removed from every git call (design 4.3, plus the pathspec and object switches). */
 const SCRUB = [
@@ -698,14 +699,23 @@ export function displayName(raw) {
 }
 
 /**
- * Whether a path looks like a secret (the key-file patterns of util/paths.js isDeniedPath, without its dot-dir
- * rule): `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*` / `id_dsa*` / `id_ecdsa*` / `id_ed25519*`.
+ * What an untracked file looks like when it is a credential or key file, else null (util/secret-files.js, the
+ * patterns of util/paths.js isDeniedPath without its dot-dir rule, by name and by path): `.env*`, keys and
+ * keystores, SSH and GnuPG files, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.aws/credentials`,
+ * `.docker/config.json`, `credentials.json`, service account keys, `.htpasswd`, `.pgpass`... A review leaves such
+ * files out and says why ('npm credentials').
  * @param {string} p repo-relative path (any text; only ASCII patterns are checked)
+ * @returns {string | null}
+ */
+export function secretKind(p) {
+  return secretFileKind(p);
+}
+
+/**
+ * Whether a path looks like a credential or key file (secretKind).
+ * @param {string} p repo-relative path
  * @returns {boolean}
  */
 export function looksSecret(p) {
-  const base = p.split('/').pop()?.toLowerCase() ?? '';
-  if (/^\.env/.test(base)) return true;
-  if (/\.(pem|key|p12|pfx)$/.test(base)) return true;
-  return /^id_(rsa|dsa|ecdsa|ed25519)/.test(base);
+  return secretFileKind(p) !== null;
 }

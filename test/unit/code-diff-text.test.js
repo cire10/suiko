@@ -54,7 +54,11 @@ describe('file kinds', () => {
     fs.chmodSync(path.join(r.root, 'bin/run.sh'), 0o755);
     const s = await snap({ mode: 'uncommitted' });
     assert.deepEqual(summary(s.code), ['M bin/run.sh', 'A fresh.js', 'D gone.txt', 'A img/logo.png (binary)', 'M src/a.js', 'R src/old name.js -> src/new name.js']);
-    assert.deepEqual(s.code.skipped, [{ path: '.env', reason: 'excluded' }, { path: 'img/logo.png', reason: 'binary' }, { path: 'keys/deploy.pem', reason: 'excluded' }]);
+    assert.deepEqual(s.code.skipped, [
+      { path: '.env', reason: 'excluded', detail: 'an environment file' },
+      { path: 'img/logo.png', reason: 'binary' },
+      { path: 'keys/deploy.pem', reason: 'excluded', detail: 'a private key or certificate' },
+    ]);
     const byPath = Object.fromEntries(s.code.files.map((f) => [f.path, /** @type {any} */ (f)]));
     assert.deepEqual(byPath['bin/run.sh'].mode, { old: '100644', new: '100755' });
     assert.deepEqual([byPath['src/a.js'].added, byPath['src/a.js'].removed], [1, 1]);

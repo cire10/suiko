@@ -109,9 +109,11 @@ import { SUMMARY_LEAD, codeLineBasis, codeNextStep, codePacketLabel } from '../c
  * @property {'file' | 'snapshot' | 'code'} [kind] a snapshot doc has no working file (store/snapshot.js); a code doc
  *   reviews repo files
  * @property {string | null} [origin] a snapshot's origin type ('plan', 'message', 'stdin', 'url'...; 'diff' for code)
- * @property {{ label: string, baseSha: string | null, newSha: string | null, worktree: boolean, root: string | null }} [code]
+ * @property {{ label: string, baseSha: string | null, newSha: string | null, worktree: boolean, root: string | null,
+ *   notReviewed?: Array<{ path: string, reason: string, detail?: string }> }} [code]
  *   code docs: the header label, the old- and new-side commits (newSha null for a working-tree side), whether line
- *   numbers are of the working tree, the repo root
+ *   numbers are of the working tree, the repo root, and the files of the head round left out of the review (an
+ *   untracked credential file, an unsupported name: the reviewer never saw them, so a verdict does not cover them)
  * @property {string[]} [basis] code docs: the basis lines under the header (code/packet.js codeLineBasis)
  * @property {{ url: string, finalUrl: string, fetchedAt: string | null, private: boolean, format: string } | null} [page]
  *   a web-page snapshot: the page it was fetched from (the line basis names it)
@@ -270,6 +272,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
         newSha: m?.newSha ?? null,
         worktree: m ? m.newSide !== 'commit' : true,
         root: /** @type {any} */ (snap).code?.root ?? m?.root ?? root,
+        notReviewed: notReviewedOf(m),
       },
       basis: codeLineBasis(snap, items),
       title: doc.title,
@@ -659,6 +662,19 @@ function nextStep(doc, { approved, finalNow }, actionable, summary = false) {
  */
 export const SUMMARY_REPLIES = '(JSON: {"summary": "<what changed>", "other": [{"at": "L<a>-<b>", "why": "the reviewer summary asked for it"}]}, '
   + 'one "other" entry per change; a cut that leaves no lines: "at": "del:hN", from --dry-run)';
+
+/**
+ * The files of a code round that are not in the review (skipped and not listed as files of the round: untracked
+ * credential files, unsupported names), with their reason.
+ * @param {any} m the round's CodeManifest (null: none)
+ * @returns {Array<{ path: string, reason: string, detail?: string }>}
+ */
+function notReviewedOf(m) {
+  const listed = new Set((m?.files ?? []).map((/** @type {any} */ f) => f.path));
+  return (m?.skipped ?? [])
+    .filter((/** @type {any} */ s) => s && typeof s.path === 'string' && !listed.has(s.path))
+    .map((/** @type {any} */ s) => ({ path: s.path, reason: String(s.reason), ...(typeof s.detail === 'string' && s.detail ? { detail: s.detail } : {}) }));
+}
 
 /**
  * The NEXT line of a snapshot doc: it is revised by recording new text (`revise --source`), or, for a plan, by

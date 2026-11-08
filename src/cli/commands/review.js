@@ -252,7 +252,7 @@ export async function execute(rt, input) {
     worktree: code.newSide === 'worktree',
     root: ws.root,
     files: code.files.map((f) => ({ path: f.path, ...(f.oldPath ? { oldPath: f.oldPath } : {}), status: f.status, added: f.added ?? 0, removed: f.removed ?? 0 })),
-    skipped: code.skipped.map((x) => ({ path: x.path, reason: x.reason })),
+    skipped: code.skipped.map((x) => ({ path: x.path, reason: x.reason, ...(x.detail ? { detail: x.detail } : {}) })),
     stats: st,
     url,
     wsId,

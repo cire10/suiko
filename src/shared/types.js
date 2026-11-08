@@ -192,7 +192,8 @@ export {};
  * @property {'commit' | 'worktree' | 'index'} newSide
  * @property {{ from: string, to: string } | null} baseMoved
  * @property {CodeFile[]} files sorted by path
- * @property {Array<{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name' }>} skipped
+ * @property {Array<{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name', detail?: string }>} skipped
+ *   detail: what an excluded (untracked credential or key) file looks like, 'npm credentials' (absent before 0.4.2)
  * @property {Record<string, { size: number, mtimeMs: number }>} stat worktree new-side stat cache
  */
 

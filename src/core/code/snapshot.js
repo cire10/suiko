@@ -19,7 +19,7 @@ import { NotFoundError, RefusedError, UsageError } from '../store/errors.js';
 import { lineHunks } from '../diff/index.js';
 import { sha256 } from '../util/hash.js';
 import { countLines, decodeText } from '../util/stable-read.js';
-import { STORE_EXCLUDE, displayName, literal, looksSecret, openRepo, supportedName } from './git.js';
+import { STORE_EXCLUDE, displayName, literal, openRepo, secretKind, supportedName } from './git.js';
 import { isFixedEndpoint, isShaLike } from './spec.js';
 import { OID_RE, prCheckedOut, prRef } from './pr.js';
 import { canonicalText } from './diff-text.js';
@@ -31,7 +31,8 @@ import { fileMaxBytes, mapLimit, maxFilesOf } from './util.js';
  * @typedef {import('../../shared/types.js').CodeFile} CodeFile
  * @typedef {import('../../shared/types.js').CodeManifest} CodeManifest
  * @typedef {import('./git.js').Repo} Repo
- * @typedef {{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name', old?: string, new?: string }} Skip
+ * @typedef {{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name', detail?: string, old?: string, new?: string }} Skip
+ *   detail: an excluded file's kind (git.js secretKind: 'npm credentials'); absent in rounds recorded by 0.4.1
  * @typedef {{ text: string, buf: Buffer, code: CodeManifest, texts: Map<string, string>, bufs: Map<string, Buffer> }} CodeSnapshot
  *   bufs: a dry round's blob bytes by ref (empty otherwise), to store them later (Store#putDocBlob gives the same ref)
  */
@@ -195,9 +196,11 @@ export async function takeCodeSnapshot(ctx, spec, { prev = null, docId = null, c
       for (const raw of await repo.untracked(specArgs)) {
         if (raw[raw.length - 1] === 0x2f) continue; // a nested repository (git add records it as a submodule)
         const name = supportedName(raw);
-        if (looksSecret(raw.toString('latin1'))) {
+        const secret = secretKind(raw.toString('latin1'));
+        if (secret) {
           excludedRaw.push(raw);
-          skipped.push({ path: name ?? displayName(raw), reason: 'excluded' });
+          // `detail` says why (what the file looks like): every report names the file and the reason
+          skipped.push({ path: name ?? displayName(raw), reason: 'excluded', detail: secret });
           continue;
         }
         let st;

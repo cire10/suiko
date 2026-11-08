@@ -685,7 +685,7 @@ A **snapshot doc** reviews text that is not a file in the workspace: a Claude Co
 
 The default branch is `code.defaultBase` in the config, else `origin/HEAD`, else main, master, trunk or develop. `--path <pathspec>` limits any mode, `--context N` sets the context lines, and `--max-files N` raises the file limit.
 
-These are left out and listed as skipped: the `.specreview/` store; untracked files that look like secrets (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa` and other keys) or are very large; and binary or too-large files, which have no `src>`. Your index, branches and commits are never changed: rounds use a temporary index, and `apply` writes working files only.
+These are left out and listed as skipped: the `.specreview/` store; untracked files that look like credentials or keys, by name or by path (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa` and other SSH keys, anything under `.ssh/` or `.gnupg/`, keystores such as `*.keystore` and `*.jks`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.aws/credentials`, `.docker/config.json`, `.kube/config`, `credentials.json`, `*service-account*.json`, `client_secret*.json`, `.htpasswd`, `.pgpass`, `*.tfstate` and a few more) or are very large; and binary or too-large files, which have no `src>`. Every report names each file it left out and why (`.npmrc (excluded: looks like npm credentials)`); their contents are never read into the review. Your index, branches and commits are never changed: rounds use a temporary index, and `apply` writes working files only.
 
 ### 19.1 The code packet
 
@@ -726,7 +726,8 @@ NEXT: edit the files -> suiko revise cr-feat-token-refresh --replies - (records 
   - a commit that is not checked out: `Line numbers = files of vN (commit 1a2b3c4), which is not checked out: check it out before editing.`;
   - a PR that is not checked out: `PR #123 is not checked out here: run \`gh pr checkout 123\` before editing; line numbers are the PR head 4c5d6e7.`;
   - after a rebase or merge, old-side lines are lines of the new merge-base.
-- **JSON:** `kind: "code"`, `code: {label, baseSha, newSha, worktree, root}`, and per thread `file`, `fileFromCwd`, `side`, `lines`, `src`, `was` and `fileState` (`ok`, `missing`, `not-checked-out`, `binary` or `too-large`).
+- **Not in the review:** when the round left files out (untracked credential files, unsupported names), a line under the header names each one and why: `Not in the review (the reviewer never saw them; the verdict does not cover them): .npmrc (excluded: looks like npm credentials)`. An approval does not cover those files.
+- **JSON:** `kind: "code"`, `code: {label, baseSha, newSha, worktree, root, notReviewed}` (`notReviewed`: `[{path, reason, detail?}]`), and per thread `file`, `fileFromCwd`, `side`, `lines`, `src`, `was` and `fileState` (`ok`, `missing`, `not-checked-out`, `binary` or `too-large`).
 
 ### 19.2 Revising a code review
 

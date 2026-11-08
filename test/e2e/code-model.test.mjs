@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import {
   baseName, buildTree, coveredLines, diffGaps, fileStatus, formatBytes, gapRows, gapSize, hunkFile, hunkSpan, isStub,
   itemsByEndLine, itemsByFile, markerKey, matchesFilter, nextSelection, openCounts, outsideReview, selectionCapture, selectionLabel,
-  splitPairs, stubText, treeOrder, wordSegments,
+  skipText, splitPairs, stubText, treeOrder, wordSegments,
 } from '../../src/ui/components/kinds/code-model.js';
 
 test('fileStatus: file statuses and interdiff changes map to a letter, a label and a tone', () => {
@@ -40,6 +40,14 @@ test('outsideReview: skipped entries of files that are in the round (binary, too
   const skipped = [{ path: '.env', reason: 'excluded' }, { path: 'a.png', reason: 'binary' }];
   assert.deepEqual(outsideReview(files, skipped), [{ path: '.env', reason: 'excluded' }]);
   assert.deepEqual(outsideReview(files, undefined), []);
+});
+
+test('skipText: why a file is not in the review, as the CLI says it', () => {
+  assert.equal(skipText({ path: '.npmrc', reason: 'excluded', detail: 'npm credentials' }), 'excluded: looks like npm credentials');
+  assert.equal(skipText({ path: '.env', reason: 'excluded' }), 'excluded: looks like a secret', 'a round recorded by 0.4.1');
+  assert.equal(skipText({ path: '-rf', reason: 'unsupported-name' }), 'unsupported file name');
+  assert.equal(skipText({ path: 'a.png', reason: 'binary' }), 'binary');
+  assert.equal(skipText({ path: 'big.json', reason: 'too-large' }), 'too large');
 });
 
 test('matchesFilter: every term is a case-insensitive substring of the path or the old path', () => {

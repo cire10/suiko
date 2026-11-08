@@ -1685,7 +1685,7 @@ After submit, a status chip moves through "Submitted, then Delivered to claude 1
    - Content URLs carry a random per-daemon `secret` path segment, so other websites cannot probe or script-include workspace files.
 3. **Path safety:**
    - `realpathWithin(workspaceRoot)`, which blocks symlink escapes.
-   - Any path segment that starts with `.` is denied (`.env`, `.git`, `.specreview`, `.ssh`), as are `*.pem`, `*.key`, `*.p12` and `id_rsa*`.
+   - Any path segment that starts with `.` is denied (`.env`, `.git`, `.specreview`, `.ssh`), as are credential and key files by name (`*.pem`, `*.key`, `*.p12`, `id_rsa*`, keystores, `credentials.json`, service account keys, `kubeconfig`, `*.tfstate`: `src/core/util/secret-files.js`). Code reviews leave untracked files matching the same rules out, and say why.
    - Files are capped at 200 MB.
 4. **UI hardening:**
    - CSP:

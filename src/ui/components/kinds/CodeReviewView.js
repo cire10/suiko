@@ -27,7 +27,7 @@ import { isEditable } from '../../util.js';
 import { Chip, Icon } from '../common.js';
 import {
   ROW_CAP, buildTree, diffGaps, fileStatus, hunkFile, isStub, itemsByFile, matchesFilter, nextSelection,
-  outsideReview, selectionCapture, selectionLabel, stubText, treeOrder,
+  outsideReview, selectionCapture, selectionLabel, skipText, stubText, treeOrder,
 } from './code-model.js';
 import {
   codeStore, expandGap, listKeyOf, loadDiff, loadList, loadSource, revealFile, setActivePath, setFilter, setSelection,
@@ -290,7 +290,7 @@ export function CodeReviewView({ ds }) {
     </div>
     ${!changes && skipped.length ? html`<div class="code-skipped small muted">
       <strong>Not in the review:</strong>
-      ${skipped.map((/** @type {any} */ k, /** @type {number} */ i) => html`${i ? ', ' : ' '}<span class="mono">${k.path}</span> (${k.reason})`)}
+      ${skipped.map((/** @type {any} */ k, /** @type {number} */ i) => html`${i ? ', ' : ' '}<span class="mono">${k.path}</span> (${skipText(k)})`)}
     </div>` : null}
   </div>`;
 }

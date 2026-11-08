@@ -43,6 +43,20 @@ export function outsideReview(files, skipped) {
   return (skipped || []).filter((k) => !listed.has(k.path));
 }
 
+/**
+ * Why a file is not in the review, in words (the CLI's labels, core/code/diff-text.js skipLabel): an excluded file
+ * names what it looks like ('excluded: looks like npm credentials'; rounds recorded by 0.4.1 say 'a secret').
+ * @param {{ reason?: string, detail?: string } | null | undefined} k a skipped entry
+ * @returns {string}
+ */
+export function skipText(k) {
+  const why = String(k?.reason ?? '');
+  if (why === 'excluded') return `excluded: looks like ${k?.detail || 'a secret'}`;
+  if (why === 'unsupported-name') return 'unsupported file name';
+  if (why === 'too-large') return 'too large';
+  return why;
+}
+
 /** A file without a text diff: binary, too large, or a stub the diff route reported. @param {any} f */
 export function isStub(f) {
   return !!(f && (f.binary || f.tooLarge || f.stub));
