@@ -1,7 +1,13 @@
 // @ts-check
 // Revision guards (BUILD_AMENDMENTS 4.4): locks (intact / moved / re-wrapped / violated / created after the last
 // packet / --break-lock), unexplained deletions (words, whole lines, `other`, config), rewrite ratio (insertion-heavy
-// edits are not rewrites, --allow-rewrite), --force, warnings, dry runs; plus runGuards / lockIntegrity directly.
+// edits are not rewrites, --allow-rewrite, the "at" fix), what they measure (an HTML report's visible text: a rebuilt
+// data blob, script and image are no rewrite, a prose rewrite no thread asked for is, one a GENERAL thread asked for
+// is not; prose rendered from the page's own JSON blob is measured, its data and a big inlined library are not; a
+// one-line minified report; Markdown as before, inline data: images aside; short docs with long lines), --force,
+// warnings, dry runs; plus runGuards / lockIntegrity directly. Fix lines never lead with `suiko revert` (it would
+// only patch the output of a built document). What a link explains: review-guards-links.test.js; the `reverted`
+// check: review-guards-reverted.test.js.
 
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +16,7 @@ import * as ops from '../../src/core/review/index.js';
 import { runGuards, lockIntegrity } from '../../src/core/review/guards.js';
 import { attribute } from '../../src/core/review/attribution.js';
 import { preciseMapper } from '../../src/core/review/workmap.js';
-import { lineHunks } from '../../src/core/diff/index.js';
+import { lineHunks, rewriteRatio } from '../../src/core/diff/index.js';
 import { defaultConfig } from '../../src/core/store/config.js';
 import { editFile, engineCtx, findSrid, makeWorkspace, textCapture } from '../helpers/engine.js';
 
@@ -52,12 +58,16 @@ describe('locks', () => {
     assert.equal(r.refused, true);
     assert.deepEqual(r.guards.errors.map((e) => e.code), ['lock']);
     assert.match(r.guards.errors[0].message, /^h1 L38 changes L1 §2 Architecture ".*" \(agreed in rv1\)$/);
-    assert.equal(r.guards.errors[0].fix, 'suiko revert kitchen-sink --hunk h1   or   --break-lock L1="<reason>"');
+    assert.equal(
+      r.guards.errors[0].fix,
+      'undo it where you made it (in the sources, then rebuild, for a document built from them; `suiko revert kitchen-sink --hunk h1` ' +
+        'restores a file edited directly), or, if the user agreed to change it, --break-lock L1="<reason>"',
+    );
     assert.equal((await ctx.store.getDoc(DOC))?.head, 1, 'no version recorded');
     assert.equal(ws.read(FILE), before, 'working copy untouched');
     const text = ops.formatReviseReport(r);
     assert.match(text, /^suiko: REFUSED - nothing recorded \(exit 3\)\n {2}ERR lock: h1 L38 changes L1/);
-    assert.match(text, /^ {6}fix: suiko revert kitchen-sink --hunk h1 {3}or {3}--break-lock L1="<reason>"$/m);
+    assert.match(text, /^ {6}fix: undo it where you made it \(.*`suiko revert kitchen-sink --hunk h1` restores a file edited directly\), or, if the user agreed to change it, --break-lock L1="<reason>"$/m);
     assert.match(text, /working copy left untouched\. Preview with --dry-run\.\n$/);
   });
 
@@ -121,7 +131,13 @@ describe('unexplained deletions', () => {
     const err = r.guards.errors.find((e) => e.code === 'deletion');
     assert.ok(err, JSON.stringify(r.guards.errors));
     assert.match(err.message, /^h1 removes .* \(v1 L9-11, §Token Service Implementation Spec\) linked to no thread$/);
-    assert.equal(err.fix, 'suiko revert kitchen-sink --hunk h1   or   add "other":[{"at":"h1","why":"..."}]');
+    // the fix never leads with `suiko revert`: for a document built from sources it would only patch the output
+    assert.equal(
+      err.fix,
+      'undo it where you made it (in the sources, then rebuild, for a document built from them; `suiko revert kitchen-sink --hunk h1` ' +
+        'restores a file edited directly), or, if a thread asked for it, add its lines ("L9") to that thread\'s "at", or explain it: ' +
+        '"other":[{"at":"h1","why":"..."}]',
+    );
 
     const ok = await ops.revise(ctx, DOC, { threads: T1, other: [{ at: 'h1', why: 'Shortened the intro on request' }] });
     assert.equal(ok.refused, false);
@@ -161,7 +177,13 @@ describe('rewrite ratio', () => {
     assert.equal(r.refused, true);
     const err = r.guards.errors.find((e) => e.code === 'rewrite');
     assert.ok(err);
-    assert.match(err.message, /^rewrites \d+% of v1 \(limit 50%\)$/);
+    assert.match(err.message, /^rewrites \d+% of the text of v1 where no thread asked for a change \(limit 50%\): h1, h2, .* and \d+ more$/);
+    assert.equal(
+      err.fix,
+      'undo what no thread asked for where you made it (in the sources, then rebuild, for a document built from them; ' +
+        '`suiko revert kitchen-sink --hunk hN` restores a file edited directly), or, if a thread asked for it, add the lines of its hunks ' +
+        'to that thread\'s "at" (lines of the new file), or --allow-rewrite (only if the user asked for a rewrite)',
+    );
     const ok = await ops.revise(ctx, DOC, { threads: T1, other: [{ at: 'L7-66', why: 'rewrite' }], allowRewrite: true });
     assert.equal(ok.refused, false, JSON.stringify(ok.guards.errors));
     assert.ok(ok.stats.rewriteRatio > 0.5);
@@ -174,6 +196,184 @@ describe('rewrite ratio', () => {
     const r = await ops.revise(ctx, DOC, { threads: T1, other: [{ at: 'L66', why: 'requirements list' }] });
     assert.equal(r.refused, false, JSON.stringify(r.guards.errors));
     assert.equal(r.stats.rewriteRatio, 0);
+  });
+});
+
+describe('what the guards measure: the text the reviewer reads', () => {
+  const cfg = defaultConfig().guards;
+  const REPORT = 'docs/report.html';
+  const WORDS = ['margin', 'leverage', 'cohort', 'drawdown', 'spread', 'volume', 'session', 'signal', 'regime', 'basis', 'funding', 'liquidity'];
+  /** A paragraph of distinct prose (about 40 words). @param {number} i @param {string} [tag] */
+  const para = (i, tag = 'v1') =>
+    `Finding ${i} (${tag}): the ${WORDS[i % 12]} of segment ${i} moved with the ${WORDS[(i + 3) % 12]} of the market, ` +
+    `and the ${WORDS[(i + 5) % 12]} stayed inside its usual band for most sessions, while the ${WORDS[(i + 7) % 12]} ` +
+    `widened only on the days when the ${WORDS[(i + 9) % 12]} of large accounts fell by more than ${i + 2} percent.`;
+  /**
+   * A report built the way an agent builds one without tools: a template, one inline JSON data blob on a single line,
+   * a chart script, an inline image, and prose.
+   * @param {{ days: number, paras?: string[], answer?: string, seed?: number }} o
+   */
+  const report = ({ days, paras = Array.from({ length: 12 }, (_, i) => para(i)), answer = 'The price chart covers one year of sessions.', seed = 1 }) => {
+    const data = { prices: Array.from({ length: days }, (_, i) => Math.round(100 * Math.sin(i * seed) * 1000) / 1000), volume: Array.from({ length: days }, (_, i) => (i * seed * 7919) % 1000) };
+    return [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>Deleveraging study</title>',
+      '<style>body { font: 16px/1.5 system-ui; } .chart { height: 320px; }</style>',
+      '</head><body>',
+      '<h1>Deleveraging study</h1>',
+      '<h2>1. Short answers</h2>',
+      `<p>${answer}</p>`,
+      `<img alt="logo" src="data:image/png;base64,${'iVBORw0KGgo'.repeat(40 + seed)}">`,
+      '<h2>2. Findings</h2>',
+      ...paras.map((p) => `<p>${p}</p>`),
+      '<div class="chart" id="price"></div>',
+      `<script type="application/json" id="data">${JSON.stringify(data)}</script>`,
+      '<script>const D = JSON.parse(document.getElementById("data").textContent); /* draws #price */</script>',
+      '</body></html>',
+      '',
+    ].join('\n');
+  };
+
+  /** open the report, one thread on the short answer, submitted and delivered */
+  async function reviewedReport() {
+    const ctx = await engineCtx(ws.root);
+    ws.write(REPORT, report({ days: 365 }));
+    const { doc } = await ops.openDoc(ctx, { path: REPORT });
+    const v1 = await ctx.render(doc, 1);
+    await ops.saveDraft(ctx, doc.id, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'covers one year of sessions'), body: 'Extend it to two years.' });
+    await ops.submitReview(ctx, doc.id, { verdict: 'changes_requested', body: '' });
+    await ops.feedback(ctx, doc.id, {});
+    return { ctx, doc };
+  }
+
+  test('a rebuilt report (new data blob, chart script, image and the sentence the thread asked about) is recorded', async () => {
+    const { ctx, doc } = await reviewedReport();
+    const before = ws.read(REPORT);
+    ws.write(REPORT, report({ days: 730, seed: 2, answer: 'The price chart covers two years of sessions, with volume below it.' }));
+    const raw = rewriteRatio(before, ws.read(REPORT), lineHunks(before, ws.read(REPORT)));
+    assert.ok(raw > 0.5, `the raw source measure called this a ${Math.round(raw * 100)}% rewrite`);
+    const r = await ops.revise(ctx, doc.id, { threads: { t1: { status: 'addressed', reply: 'Rebuilt with two years of data.' } } });
+    assert.equal(r.refused, false, JSON.stringify(r.guards.errors));
+    assert.ok(r.stats.rewriteRatio < 0.05, `rewrite ${r.stats.rewriteRatio}`);
+    // the data and image lines are linked to no thread: a note, not a refusal (no visible text removed)
+    assert.ok(r.guards.warnings.length && r.guards.warnings.every((w) => w.code === 'unlinked'), JSON.stringify(r.guards.warnings));
+    assert.match(r.guards.warnings[0].message, /is linked to no thread \(if a thread asked for it, add "L\d+(?:-\d+)?" to that thread's "at"; else explain it: "other"/);
+    assert.match(ops.formatReviseReport(r), /^guards: ok .*rewrite \d%/m);
+  });
+
+  test('the same rebuild linked with "at" to the thread that asked for it has no warning', async () => {
+    const { ctx, doc } = await reviewedReport();
+    const next = report({ days: 730, seed: 2, answer: 'The price chart covers two years of sessions, with volume below it.' });
+    ws.write(REPORT, next);
+    const lines = next.split('\n');
+    const at = (/** @type {string} */ s) => `L${lines.findIndex((l) => l.includes(s)) + 1}`;
+    const r = await ops.revise(ctx, doc.id, { threads: { t1: { status: 'addressed', reply: 'Two years.', at: `${at('two years')},${at('base64')},${at('"prices"')}` } } });
+    assert.equal(r.refused, false, JSON.stringify(r.guards.errors));
+    assert.deepEqual(r.guards.warnings, []);
+  });
+
+  test('rewriting more than half of the prose where no thread asked for it is still refused', async () => {
+    const { ctx, doc } = await reviewedReport();
+    const paras = Array.from({ length: 12 }, (_, i) => (i < 8 ? `Rewritten ${i}: an entirely different account of what happened, told in new words and with new claims that nobody asked for at all, padded to the length of a real paragraph so it weighs as much as the one it replaces in the report.` : para(i)));
+    const next = report({ days: 365, paras });
+    ws.write(REPORT, next);
+    const lines = next.split('\n');
+    const first = lines.findIndex((l) => l.includes('Rewritten 0')) + 1;
+    const r = await ops.revise(ctx, doc.id, { threads: { t1: { status: 'answered', reply: 'Not yet.' } }, other: [{ at: `L${first}-${first + 7}`, why: 'clearer' }] });
+    assert.equal(r.refused, true);
+    assert.deepEqual(r.guards.errors.map((e) => e.code), ['rewrite']);
+    assert.match(r.guards.errors[0].message, /^rewrites \d+% of the visible text of v1 where no thread asked for a change \(limit 50%\): h1$/);
+    // without the `other` entries each rewritten paragraph is an unexplained deletion as well
+    const r2 = await ops.revise(ctx, doc.id, { threads: { t1: { status: 'answered', reply: 'Not yet.' } }, dryRun: true });
+    assert.ok(r2.guards.errors.some((e) => e.code === 'deletion'), JSON.stringify(r2.guards.errors));
+    // a GENERAL thread that asks for the rewrite, linked with "at", explains it
+    await ops.saveDraft(ctx, doc.id, { kind: 'thread', type: 'comment', capture: { kind: 'doc' }, body: 'Rewrite the findings in plainer words.' });
+    await ops.submitReview(ctx, doc.id, { verdict: 'changes_requested', body: '' });
+    await ops.feedback(ctx, doc.id, {});
+    const r3 = await ops.revise(ctx, doc.id, { threads: { t1: { status: 'answered', reply: 'Not yet.' }, t2: { status: 'addressed', reply: 'Rewrote them.', at: `L${first}-${first + 7}` } } });
+    assert.equal(r3.refused, false, JSON.stringify(r3.guards.errors));
+    assert.ok(r3.stats.rewriteRatio > 0.5, 'the version still reports how much it rewrote');
+  });
+
+  test('a one-line (minified) report is guarded by its visible words, not its line count', async () => {
+    const ctx = await engineCtx(ws.root);
+    const flat = (/** @type {Parameters<typeof report>[0]} */ o) => report(o).replace(/\n/g, '');
+    ws.write(REPORT, flat({ days: 365 }));
+    const { doc } = await ops.openDoc(ctx, { path: REPORT });
+    ws.write(REPORT, flat({ days: 730, seed: 3 }));
+    const ok = await ops.revise(ctx, doc.id, { threads: {}, dryRun: true });
+    assert.equal(ok.refused, false, JSON.stringify(ok.guards.errors));
+    const paras = Array.from({ length: 12 }, (_, i) => (i < 9 ? `Rewritten ${i}: an entirely different account of what happened, told in new words and with new claims that nobody asked for at all, padded to the length of a real paragraph.` : para(i)));
+    ws.write(REPORT, flat({ days: 365, paras }));
+    const bad = await ops.revise(ctx, doc.id, { threads: {}, other: [{ at: 'h1', why: 'clearer' }], dryRun: true });
+    assert.deepEqual(bad.guards.errors.map((e) => e.code), ['rewrite']);
+  });
+
+  test('prose a page renders from its own JSON blob is measured: rewriting it is refused; new data or a new library is not a rewrite', async () => {
+    const ctx = await engineCtx(ws.root);
+    const lib = (/** @type {string} */ tag) =>
+      `<script>${Array.from({ length: 3000 }, (_, i) => `function f${i}(x){ if (!x) throw new Error("the value ${tag} of parameter number ${i} must be a finite number"); return x * ${i}; }`).join('\n')}</script>`;
+    const page = (/** @type {string[]} */ ps, /** @type {number} */ seed = 1, /** @type {string} */ tag = 'a') => [
+      '<!doctype html><html><head><title>Report</title></head><body>',
+      '<h1>Quarterly report</h1>',
+      '<main id="m"></main>',
+      `<script type="application/json" id="text">${JSON.stringify(ps)}</script>`,
+      `<script type="application/json" id="data">${JSON.stringify(Array.from({ length: 300 }, (_, i) => ({ d: `2024-02-${String((i % 28) + 1).padStart(2, '0')}`, v: (i * seed) % 97, label: `S${i % 7}` })))}</script>`,
+      '<script>document.getElementById("m").innerHTML = JSON.parse(document.getElementById("text").textContent).map((p) => "<p>" + p + "</p>").join("");</script>',
+      lib(tag),
+      '</body></html>',
+      '',
+    ].join('\n');
+    const paras = Array.from({ length: 30 }, (_, i) => para(i));
+    ws.write(REPORT, page(paras));
+    const { doc } = await ops.openDoc(ctx, { path: REPORT });
+    const v1 = await ctx.render(doc, 1);
+    await ops.saveDraft(ctx, doc.id, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Quarterly report'), body: 'Add the year.' });
+    await ops.submitReview(ctx, doc.id, { verdict: 'changes_requested', body: '' });
+    await ops.feedback(ctx, doc.id, {});
+    const reply = { t1: { status: 'answered', reply: 'Not yet.' } };
+    ws.write(REPORT, page(paras.map((_, i) => `Rewritten ${i}: entirely new claims nobody asked for, replacing the finding that was here before.`)));
+    const r = await ops.revise(ctx, doc.id, { threads: reply, dryRun: true });
+    assert.equal(r.refused, true);
+    assert.deepEqual(r.guards.errors.map((e) => e.code).sort(), ['deletion', 'rewrite']);
+    assert.ok(r.stats.rewriteRatio > 0.9, String(r.stats.rewriteRatio));
+    // new numbers, dates and labels in the data blob, and a changed 300 KB library: nothing a reader reads
+    ws.write(REPORT, page(paras, 7, 'b'));
+    const data = await ops.revise(ctx, doc.id, { threads: reply, dryRun: true });
+    assert.equal(data.refused, false, JSON.stringify(data.guards.errors));
+    assert.equal(data.stats.rewriteRatio, 0);
+    assert.deepEqual(data.guards.warnings.map((w) => w.code), ['unlinked', 'unlinked']);
+  });
+
+  test('Markdown is measured as before: the same ratio as the raw source, data: URIs aside', async () => {
+    const md = ['# Notes', '', ...Array.from({ length: 30 }, (_, i) => `- Line ${i} keeps its words in place.`), ''].join('\n');
+    const working = md.replace(/Line (1\d) keeps its words/g, 'Row $1 changes its words');
+    const hunks = attribute({ hunks: lineHunks(md, working), headSource: md, workingSource: working }).hunks;
+    const base = { docId: 'd', headVersion: 1, headLines: 32, headSource: md, workingSource: working, hunks, config: cfg };
+    const g = runGuards(base);
+    assert.equal(g.rewriteRatio, rewriteRatio(md, working, hunks), 'prose Markdown: the raw measure');
+    assert.equal(runGuards({ ...base, format: 'markdown' }).rewriteRatio, g.rewriteRatio);
+    // an inline base64 image is not text: regenerating it rewrites nothing
+    const img = (/** @type {string} */ c) => `![chart](data:image/png;base64,${c.repeat(400)})`;
+    const withImg = `${md}\n${img('AAAA')}\n`;
+    const newImg = `${md}\n${img('BBBB')}\n`;
+    const h2 = attribute({ hunks: lineHunks(withImg, newImg), headSource: withImg, workingSource: newImg }).hunks;
+    const gi = runGuards({ ...base, headLines: 34, headSource: withImg, workingSource: newImg, hunks: h2, format: 'markdown' });
+    assert.equal(gi.rewriteRatio, 0);
+    assert.deepEqual(gi.errors, []);
+    assert.deepEqual(gi.warnings.map((w) => w.code), ['unlinked']);
+  });
+
+  test('a short Markdown doc with long lines (over 300 words) gets the rewrite check too', () => {
+    const md = `${Array.from({ length: 10 }, (_, i) => para(i)).join('\n\n')}\n`;
+    const working = md.replace(/Finding ([0-6]) \(v1\)[^\n]*/g, 'Rewritten $1: entirely new words for this paragraph, with claims nobody asked for.');
+    const hunks = attribute({ hunks: lineHunks(md, working), headSource: md, workingSource: working, other: [{ at: 'L1-13', why: 'x' }] }).hunks;
+    const g = runGuards({ docId: 'd', headVersion: 1, headLines: 19, headSource: md, workingSource: working, hunks, config: cfg });
+    assert.deepEqual(g.errors.map((e) => e.code), ['rewrite']);
+    const tiny = 'one two three\nfour five six\n';
+    const tw = 'uno dos tres\ncuatro cinco seis\n';
+    const th = attribute({ hunks: lineHunks(tiny, tw), headSource: tiny, workingSource: tw, other: [{ at: 'L1-2', why: 'x' }] }).hunks;
+    assert.deepEqual(runGuards({ docId: 'd', headVersion: 1, headLines: 2, headSource: tiny, workingSource: tw, hunks: th, config: cfg }).errors, [], 'a tiny doc may be rewritten');
   });
 });
 
@@ -300,11 +500,14 @@ describe('runGuards / lockIntegrity (pure)', () => {
       lastDeliveredAt: '2026-02-01T00:00:00.000Z',
     });
     // reverting h1 first would turn h2 into h1: the later hunk comes first, and h1's revert is suggested once
-    assert.deepEqual(r.errors.map((e) => [e.hunk, e.fix?.split('   or   ')[0]]), [
-      ['h2', 'suiko revert d --hunk h2'],
-      ['h1', 'suiko revert d --hunk h1'],
+    const revertOf = (/** @type {string | undefined} */ fix) => /; (`suiko revert d --hunk h\d`|the revert of h\d above) restores/.exec(fix ?? '')?.[1];
+    assert.deepEqual(r.errors.map((e) => [e.hunk, revertOf(e.fix)]), [
+      ['h2', '`suiko revert d --hunk h2`'],
+      ['h1', '`suiko revert d --hunk h1`'],
       ['h1', 'the revert of h1 above'],
     ]);
+    // and no fix line leads with `suiko revert` (it restores only the file it runs on, not a built doc's sources)
+    for (const e of r.errors) assert.match(e.fix ?? '', /^undo it where you made it \(in the sources, then rebuild/);
   });
 
   test('enforceLocks off turns lock errors into warnings', () => {

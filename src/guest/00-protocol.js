@@ -47,16 +47,19 @@ const MSG = Object.freeze({
   SCROLL: 'scroll',
   PAGE_ERROR: 'pageError',
   TOOL_CHANGED: 'toolChanged', // {tool}: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip'
+  KEY_KEPT: 'keyKept',         // {key}: a single key the page kept for itself (it handles keys); once per page load
   CONNECT: 'connect',
   INIT: 'init',
   SET_TARGETS: 'setTargets',
   SET_CHANGES: 'setChanges',
+  SET_ACTIVE_HUNK: 'setActiveHunk', // {id}: the change the reviewer stepped to, drawn stronger
   FOCUS: 'focus',
   SCROLL_TO: 'scrollTo',
   SET_TOOL: 'setTool',         // {tool: 'select'|'pick'|'snip'}
   SET_THEME: 'setTheme',
   REVEAL: 'reveal',
   CLEAR_SELECTION: 'clearSelection',
+  DISMISS_TOOLBAR: 'dismissToolbar', // hide the selection toolbar for the current selection; the selection stays
   SET_HIDDEN: 'setHidden',
   SET_PREFS: 'setPrefs',       // {singleKeys: boolean} (also INIT.prefs); false: c s q a / b are forwarded, not acted on
 });

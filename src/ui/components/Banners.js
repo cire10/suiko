@@ -7,7 +7,7 @@
 
 import { html, useEffect, useRef, useState } from 'preact-htm';
 import { goToNewHead, recordWorkingCopy, reloadFrame, setMode, startRecording, stopRecording, switchVersion } from '../actions.js';
-import { agentName, kindCaps, showsDoc } from '../model.js';
+import { agentName, agentTitle, kindCaps, showsDoc } from '../model.js';
 import { useStore } from '../state.js';
 
 export function Banners() {
@@ -23,6 +23,7 @@ export function Banners() {
   if (!ds) return null;
   const head = Number(ds.doc.head);
   const agent = agentName(ds);
+  const agentLabel = agentTitle(agent);
   const live = kindCaps(ds).liveBanners;
   const out = [];
   if (live && s.lost && showsDoc(s.mode)) {
@@ -43,7 +44,7 @@ export function Banners() {
     out.push(html`<div class="banner banner-warn" role="status" key="working">
       <span>${previewing
         ? html`<strong>Previewing the unrecorded working copy</strong> (read-only, reloads as ${agent} edits).`
-        : html`<strong>Unrecorded changes on disk</strong> (${agent} is editing).`}</span>
+        : html`<strong>Unrecorded changes on disk</strong> (${agentLabel} is editing).`}</span>
       <span class="banner-actions">
         ${previewing
           ? html`<button type="button" class="btn btn-sm" onClick=${() => switchVersion(head)}>Back to v${head}</button>`

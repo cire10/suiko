@@ -5,16 +5,16 @@ allowed-tools: Bash(suiko *)
 disable-model-invocation: true
 ---
 
-<!-- /review-code: start a Suiko code review. The protocol is in the spec-review skill (section 9, Code review). -->
+<!-- /review-code: start a Suiko code review. The protocol is in the spec-review skill (section 8, Code review). -->
 
 !`suiko review $ARGUMENTS 2>&1 || true`
 
 The output above comes from `suiko review`. Without arguments it reviews everything on this branch since it left the default branch, uncommitted and untracked files included.
 
 - **If it is an error** (nothing to review, not a git repository, `gh` missing or not signed in for `--pr`, offline), tell the user what it says and stop.
-- **Otherwise** its first line is `suiko: code review <doc> …` and its `next:` line names the wait. Run that `suiko wait <doc>` with Bash `run_in_background: true`. Then tell the user in one line that the review is open in their browser: click a line number (shift-click for a range), press `c` to comment or `s` to suggest replacement lines, and click **Submit review**; you will pick it up automatically. End the turn. Do not poll.
+- **Otherwise** its first line is `suiko: code review <doc> …` and its `next:` line names the wait. Run that `suiko wait <doc>` with Bash `run_in_background: true`. Then tell the user in one line that the review is open in their browser: click a line number (shift-click for a range), press `c` to comment or `s` to suggest replacement lines; you will pick it up automatically. End the turn. Do not poll.
 
-When the wait exits, follow the spec-review skill, section 9 (Code review):
+When the wait exits, follow the spec-review skill, section 8 (Code review):
 1. Read each cited file before you edit it.
 2. Use the `src>` lines as exact Edit `old_string`s.
 3. Run `suiko apply <doc> <tid>` for the suggestions.

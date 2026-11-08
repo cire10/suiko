@@ -13,7 +13,8 @@
 //    attachments [path]. Its drafts.changed event carries {source:'snip', draft} so an open review UI toasts
 //    "Screenshot added from your Mac" with [Edit].
 // 4. --send submits just that draft as a one-item review (verdict comment), so a background `suiko wait`
-//    wakes with a packet whose item prints the image's absolute path.
+//    wakes with a packet whose item prints the image's absolute path. --edits batch marks that review as batched
+//    edits (the agent answers now and plans the change; protocol.js REVIEW_EDITS).
 // Works without the daemon (the engine writes the store; a running daemon picks the events up).
 // Exit 0 (also when the picker was cancelled: "cancelled", nothing added); 1 when screen snips are unsupported here
 // (not macOS, no screencapture) or the image is unusable; 4 when the doc is unknown / nothing is tracked.
@@ -22,25 +23,27 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { NotFoundError, SuikoError, UsageError } from '../../core/store/errors.js';
 import { captureScreenRegion, imageMime, imageSize } from '../../core/util/screen-capture.js';
-import { EXIT, LIMITS } from '../../shared/protocol.js';
+import { EXIT, LIMITS, REVIEW_EDITS } from '../../shared/protocol.js';
 import { expectPositionals } from '../args.js';
 import { callOp, docContext, listDocIds, openContext, realpathOr, resolveDoc } from '../runtime.js';
 
 export const spec = {
   name: 'snip',
-  usage: 'snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]',
+  usage: 'snip [<doc>] [-m <text>] [--question] [--send [--edits now|batch]] [--file <png>] [--json]',
   summary: 'Snip anywhere on screen (macOS picker) and add it to a doc as a draft comment, or send it now with --send.',
   options: {
     message: { type: 'string', short: 'm' },
     question: { type: 'boolean' },
     send: { type: 'boolean' },
+    edits: { type: 'string' },
     file: { type: 'string' },
   },
   details: [
-    '<doc>          doc id or spec path; default: the only doc of this workspace, else the most recently active one',
+    '<doc>          doc id or path; default: the only doc of this workspace, else the most recently active one',
     '-m <text>      the comment (default: none; add it from the review UI)',
     '--question     a question instead of a comment',
     '--send         submit it at once as a one-item review (verdict comment): a waiting agent gets it now',
+    '--edits batch  with --send: batched edits (the agent answers now and plans the change; you apply it later)',
     '--file <png>   attach an existing PNG/JPEG instead of opening the picker (any OS)',
     'Esc in the picker cancels (exit 0, nothing added). Screen snips need macOS (screencapture) and the',
     'Screen Recording permission for the app that runs this command.',
@@ -54,18 +57,23 @@ export const spec = {
 export async function parse({ values, positionals }, rt) {
   expectPositionals('snip', positionals, 0, 1, spec.usage);
   if (values.file !== undefined && !String(values.file).trim()) throw new UsageError('snip: --file needs a path to a PNG or JPEG image');
+  if (values.edits !== undefined) {
+    if (!REVIEW_EDITS.includes(values.edits)) throw new UsageError(`snip: --edits must be one of ${REVIEW_EDITS.join(', ')}`);
+    if (!values.send) throw new UsageError('snip: --edits applies to --send (the review it submits)');
+  }
   return {
     doc: positionals[0],
     body: values.message ?? '',
     question: Boolean(values.question),
     send: Boolean(values.send),
+    ...(values.edits !== undefined ? { edits: values.edits } : {}),
     file: values.file !== undefined ? path.resolve(rt.cwd, expandHome(String(values.file), rt.env)) : undefined,
   };
 }
 
 /**
  * @param {import('../runtime.js').Runtime} rt
- * @param {{ doc?: string, body?: string, question?: boolean, send?: boolean, file?: string }} input
+ * @param {{ doc?: string, body?: string, question?: boolean, send?: boolean, edits?: string, file?: string }} input
  * @returns {Promise<import('../io.js').CommandResult>}
  */
 export async function execute(rt, input) {
@@ -110,7 +118,7 @@ export async function execute(rt, input) {
   }
   // who is waiting is read BEFORE the submit: a waiter gets the packet at once and leaves
   const listening = await listeners(ctx, docId);
-  const review = await callOp(engine, 'submitReview', ctx, docId, { verdict: 'comment', draftIds: [draft.id] });
+  const review = await callOp(engine, 'submitReview', ctx, docId, { verdict: 'comment', draftIds: [draft.id], ...(input.edits ? { edits: input.edits } : {}) });
   json.sent = true;
   json.review = review.id;
   json.listening = listening;

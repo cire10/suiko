@@ -13,9 +13,21 @@
 // the container ({kind:'element', srid, region}) or the covered blocks ({kind:'source', srid, endSrid}).
 // `addSnipDraft` does what `suiko snip` does (a draft with the screenshot attached and the drafts.changed
 // {source:'snip'} hint).
+// One-item sends from the UI carry `instant: true` (422 unless a boolean): stored on the review, they leave the doc's
+// lastReviewedVersion ("since your last review") where it is, like submit.js.
+// Batched edits and rich replies, with the daemon's shapes and errors (src/core/review/ops/submit.js, drafts.js,
+// attachments.js; daemon api.js): reviews carry `edits` ('now' | 'batch'; 422 otherwise; an approval is 'now') and
+// may `apply` planned threads (422 for a malformed list or with an approval, 404 for an unknown thread, 409 for one
+// that is not planned, 422 when the same review resolves it; each applied thread is reopened with an "Apply this
+// change." comment marked `apply: true`; `draftIds: []` sends no draft, and neither does an Apply without draftIds);
+// reply drafts may carry `use` ('aN.ext' or
+// 'attachments/aN.ext', stored in the second form; 422 unless an attachment of that thread, at most 6), and a `use`
+// reply reopens a resolved thread; the agent's replies may carry `attachments` [{path, name, kind}]
+// (addAgentAttachment stores the file, agentReply posts a reply without a version, like `suiko reply`); DocState
+// versions carry `lines` and `textChars` (the visible text, render textCharsOf).
 
 import { createHash } from 'node:crypto';
-import { deepestBlockAt, elementText, renderFragmentSync, renderSourceSync, sectionAt } from '../../src/core/render/index.js';
+import { deepestBlockAt, elementText, renderFragmentSync, renderSourceSync, sectionAt, textCharsOf } from '../../src/core/render/index.js';
 import { changeSet, lineHunks, sourceDiff, wordDiff } from '../../src/core/diff/index.js';
 import { findQuote, lineIndex, linesOfRange } from '../../src/core/text/index.js';
 
@@ -218,7 +230,10 @@ export class MockDoc {
     let needs = 0;
     for (const [tid, r] of Object.entries(p.replies || {})) {
       const t = this.thread(tid);
-      t.comments.push({ id: this.nextId('comment'), by: { kind: 'agent', name: agent }, body: r.reply, at: this.clock(), version: v, status: r.status });
+      t.comments.push({
+        id: this.nextId('comment'), by: { kind: 'agent', name: agent }, body: r.reply, at: this.clock(), version: v, status: r.status,
+        ...(/** @type {any} */ (r).attachments?.length ? { attachments: /** @type {any} */ (r).attachments } : {}),
+      });
       t.status = r.status;
       t.updatedAt = this.clock();
       if (r.status === 'addressed' || r.status === 'answered' || r.status === 'declined') addressed++;
@@ -484,9 +499,13 @@ export class MockDoc {
     return {
       ws: this.ws,
       doc: { ...this.doc, counters: { ...this.counters } },
-      versions: this.versions.map(({ manifest: m }) => ({
-        v: m.v, author: m.author, summary: m.summary, createdAt: m.createdAt, stats: m.stats, guards: m.guards, respondsTo: m.respondsTo,
-      })),
+      versions: this.versions.map(({ manifest: m }) => {
+        const textChars = this.textChars(m.v);
+        return {
+          v: m.v, author: m.author, summary: m.summary, createdAt: m.createdAt, lines: m.lines,
+          ...(textChars != null ? { textChars } : {}), stats: m.stats, guards: m.guards, respondsTo: m.respondsTo,
+        };
+      }),
       threads: structuredClone(this.threads),
       locks: structuredClone(this.locks),
       reviews: structuredClone(this.reviews),
@@ -496,6 +515,14 @@ export class MockDoc {
       reviewer: { name: this.reviewer },
       decisions: this.threads.filter((t) => t.decision).map((t) => ({ ...t.decision, thread: t.id })),
     };
+  }
+
+  /** The visible text characters of version v (render textCharsOf, like the daemon's manifests), memoised. @param {number} v */
+  textChars(v) {
+    const rec = this.versions[Number(v) - 1];
+    if (!rec) return null;
+    if (rec.textChars === undefined) rec.textChars = textCharsOf(this.render(v));
+    return rec.textChars;
   }
 
   /** @param {string} id */
@@ -544,7 +571,10 @@ export class MockDoc {
     for (const t of this.threads) {
       const a = anchorOf(t);
       if (!a || a.kind === 'doc') continue;
-      let state = t.status === 'resolved' ? 'resolved' : t.status === 'needs_input' ? 'needs_input' : t.status === 'open' ? 'open' : 'addressed';
+      // a planned thread: the agent makes the change once the reviewer applies it ("Will change"), like the engine's
+      // threadState
+      let state = t.status === 'resolved' ? 'resolved' : t.status === 'needs_input' ? 'needs_input'
+        : t.status === 'planned' ? 'planned' : t.status === 'declined' ? 'declined' : t.status === 'open' ? 'open' : 'addressed';
       if (a.state === 'changed') state = 'outdated';
       if (a.state === 'orphaned') state = 'orphaned';
       threads.push(this.target(t.id, Number(t.id.slice(1)), a, state, { severity: t.severity, type: t.type }));
@@ -653,11 +683,47 @@ export class MockDoc {
       draft.severity = draft.severity || 'normal';
       draft.type = draft.type || 'comment';
     } else {
-      this.thread(draft.thread);
+      const t = this.thread(draft.thread);
+      if (draft.kind === 'reply') {
+        const use = this.normalizeUse(t, draft.use);
+        if (use.length) draft.use = use;
+        else delete draft.use;
+        draft.reopen = !!draft.reopen;
+      }
     }
     this.drafts.items.push(draft);
     this.emit('drafts.changed', { draft: draft.id });
     return draft;
+  }
+
+  /**
+   * The attachment paths of a thread a reviewer reply may `use`: the reviewer's screenshots and every file the agent
+   * attached to a reply (attachments.js useTargets).
+   * @param {any} t
+   * @returns {Set<string>}
+   */
+  useTargets(t) {
+    const out = new Set((t.attachments || []).filter((/** @type {any} */ p) => typeof p === 'string'));
+    for (const c of t.comments || []) for (const a of c.attachments || []) if (a && typeof a.path === 'string') out.add(a.path);
+    return out;
+  }
+
+  /**
+   * A reply's `use` like the engine's normalizeUse: 'a7.html' or 'attachments/a7.html', each an attachment of the
+   * thread, deduplicated, at most 6 (else 422). [] when absent.
+   * @param {any} t @param {unknown} use
+   * @returns {string[]}
+   */
+  normalizeUse(t, use) {
+    if (use == null) return [];
+    if (!Array.isArray(use) || !use.every((u) => typeof u === 'string' && u.trim())) {
+      throw httpError(422, `use: expected a list of attachment paths of ${t.id} (e.g. "attachments/a7.html")`, 'VALIDATION');
+    }
+    const list = [...new Set(use.map((u) => (u.trim().startsWith('attachments/') ? u.trim() : `attachments/${u.trim()}`)))];
+    if (list.length > 6) throw httpError(422, 'use: at most 6 attachments per reply', 'VALIDATION');
+    const known = this.useTargets(t);
+    for (const u of list) if (!known.has(u)) throw httpError(422, `use: ${u} is not an attachment of ${t.id}`, 'VALIDATION');
+    return list;
   }
 
   /** @param {string} id @param {any} patch */
@@ -665,7 +731,13 @@ export class MockDoc {
     const i = this.drafts.items.findIndex((d) => d.id === id);
     if (i < 0) throw httpError(404, `draft ${id} not found`);
     const { id: _i, kind: _k, ...rest } = patch || {};
-    this.drafts.items[i] = { ...this.drafts.items[i], ...rest, updatedAt: this.clock() };
+    const merged = { ...this.drafts.items[i], ...rest };
+    if (merged.kind === 'reply') {
+      const use = this.normalizeUse(this.thread(merged.thread), merged.use);
+      if (use.length) merged.use = use;
+      else delete merged.use;
+    }
+    this.drafts.items[i] = { ...merged, updatedAt: this.clock() };
     this.emit('drafts.changed', { draft: id });
     return this.drafts.items[i];
   }
@@ -681,22 +753,53 @@ export class MockDoc {
 
   /**
    * @param {{ verdict: string, body?: string, markFinal?: boolean, resolveAddressed?: boolean, draftIds?: string[],
-   *   reviewedVersion?: number, expectHead?: number }} p
+   *   reviewedVersion?: number, expectHead?: number, edits?: string, apply?: unknown, instant?: unknown }} p
    */
   submitReview(p) {
     if (!['comment', 'changes_requested', 'approved'].includes(p.verdict)) throw httpError(422, 'bad verdict');
+    // edits: 'now' | 'batch' (the daemon's 422 otherwise); an approval asks for no edits
+    if (p.edits !== undefined && p.edits !== null && !['now', 'batch'].includes(/** @type {any} */ (p.edits))) {
+      throw httpError(422, 'edits must be one of now, batch', 'VALIDATION');
+    }
+    // instant: a one-item send (the daemon's 422 when it is not a boolean); it leaves lastReviewedVersion alone
+    if (p.instant !== undefined && p.instant !== null && typeof p.instant !== 'boolean') {
+      throw httpError(422, 'instant must be a boolean', 'VALIDATION');
+    }
+    const instant = p.instant === true && p.verdict !== 'approved';
+    const edits = p.verdict === 'approved' ? 'now' : p.edits || 'now';
+    // apply: planned threads (the daemon's checks: a list of ids, never with an approval; then the engine's)
+    if (p.apply != null && (!Array.isArray(p.apply) || !p.apply.every((t) => typeof t === 'string' && /^t\d+$/.test(t)))) {
+      throw httpError(422, 'apply must be an array of thread ids, e.g. ["t2", "t5"]', 'VALIDATION');
+    }
+    const apply = [...new Set(/** @type {string[]} */ (p.apply || []))];
+    if (apply.length && p.verdict === 'approved') throw httpError(422, 'apply cannot come with an approval', 'VALIDATION');
     // Like the engine's expectHead check: an approve of a head the reviewer has not seen is refused.
     const seen = p.expectHead ?? p.reviewedVersion;
     if (p.verdict === 'approved' && seen != null && seen !== this.head) {
       throw httpError(409, `v${this.head} of ${this.id} was recorded after you opened v${seen}; review it before approving`, 'CONFLICT');
     }
-    const picked = p.draftIds ? this.drafts.items.filter((d) => p.draftIds?.includes(d.id)) : [...this.drafts.items];
+    // An Apply that names no drafts sends none (like the daemon): a reviewer's pending drafts never go out with it by
+    // accident. Any other review without draftIds sends them all.
+    const picked = p.draftIds ? this.drafts.items.filter((d) => p.draftIds?.includes(d.id))
+      : apply.length ? [] : [...this.drafts.items];
+    for (const tid of apply) {
+      const t = this.threads.find((x) => x.id === tid);
+      if (!t) throw httpError(404, `apply: thread ${tid} not found in ${this.id}`, 'NOT_FOUND');
+      if (t.status !== 'planned') {
+        throw httpError(409, `apply: ${tid} is ${String(t.status).replace('_', ' ')}, not planned; only a planned change (the agent said what it will change) can be applied`, 'CONFLICT');
+      }
+      if (picked.some((d) => d.kind === 'resolve' && d.thread === tid)) throw httpError(422, `apply: ${tid} is also resolved by this review`, 'VALIDATION');
+    }
+    // reply drafts' `use` is checked again before anything changes
+    for (const d of picked) if (d.kind === 'reply') this.normalizeUse(this.thread(d.thread), d.use);
     const id = this.nextId('review');
     const at = this.clock();
     const by = { kind: 'human', name: this.reviewer };
     const review = {
-      schema: 1, id, version: this.head, by, verdict: p.verdict, body: p.body || '', markFinal: !!p.markFinal,
+      schema: 1, id, version: this.head, by, verdict: p.verdict, body: p.body || '', markFinal: !!p.markFinal, edits,
+      ...(instant ? { instant: true } : {}),
       newThreads: /** @type {string[]} */ ([]), replies: /** @type {any[]} */ ([]), reopened: /** @type {string[]} */ ([]),
+      ...(apply.length ? { apply: [...apply].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))) } : {}),
       resolved: /** @type {string[]} */ ([]), locksAdded: /** @type {string[]} */ ([]), submittedAt: at, deliveredTo: {}, ackedBy: {},
     };
     const announced = new Set(this.reviews.flatMap((r) => r.locksAdded));
@@ -719,11 +822,13 @@ export class MockDoc {
       } else if (d.kind === 'reply') {
         const t = this.thread(d.thread);
         const cid = this.nextId('comment');
-        t.comments.push({ id: cid, by, body: d.body, at, review: id, version: this.head });
-        if (d.reopen) {
+        const use = this.normalizeUse(t, d.use);
+        t.comments.push({ id: cid, by, body: d.body, at, review: id, version: this.head, ...(use.length ? { use } : {}) });
+        // a "Use in doc" reply on a resolved thread reopens it, so the request reaches the agent
+        if (d.reopen || (use.length && t.status === 'resolved')) {
+          if (t.status !== 'open') review.reopened.push(t.id);
           t.status = 'open';
           t.resolvedIn = null;
-          review.reopened.push(t.id);
         }
         t.updatedAt = at;
         review.replies.push({ thread: t.id, comment: cid });
@@ -731,6 +836,14 @@ export class MockDoc {
         this.resolve(d.thread, d.decision);
         review.resolved.push(d.thread);
       }
+    }
+    // Apply: each planned thread is reopened with the "Apply this change." request (after the replies)
+    for (const tid of apply) {
+      const t = this.thread(tid);
+      t.comments.push({ id: this.nextId('comment'), by, body: 'Apply this change.', at, review: id, version: this.head, apply: true });
+      t.status = 'open';
+      t.resolvedIn = null;
+      t.updatedAt = at;
     }
     if (p.verdict === 'approved') {
       if (p.resolveAddressed) {
@@ -749,7 +862,8 @@ export class MockDoc {
     }
     this.drafts.items = this.drafts.items.filter((d) => !picked.includes(d));
     this.reviews.push(review);
-    this.doc.lastReviewedVersion = this.head;
+    // "since your last review": a one-item send (instant) does not move it
+    if (!instant) this.doc.lastReviewedVersion = this.head;
     this.emit('review.submitted', { review: id, verdict: p.verdict });
     if (p.verdict === 'approved' && p.markFinal) this.emit('doc.approved', { v: this.head });
     if (this.waiters.length) {
@@ -952,6 +1066,46 @@ export class MockDoc {
     const m = this.addVersion(this.working.source, { author: { kind: 'human', name: this.reviewer }, summary, capturedBy: 'ui-record' });
     this.emit('version.created', { v: m.v, author: `human:${this.reviewer}`, summary });
     return m;
+  }
+
+  /**
+   * The agent attaches a file to a reply (`suiko reply --attach`, revise threads.tN.attachments): stored like the
+   * engine's (attachments/aN.<ext>, 'jpeg' -> 'jpg', 'htm' -> 'html'). Returns the Comment.attachments entry.
+   * @param {string} name the original file name ('chart.html')
+   * @param {Buffer|string} content
+   * @returns {{ path: string, name: string, kind: 'image'|'html' }}
+   */
+  addAgentAttachment(name, content) {
+    const ext0 = String(name).split('.').pop()?.toLowerCase() || '';
+    const ext = ext0 === 'jpeg' ? 'jpg' : ext0 === 'htm' ? 'html' : ext0;
+    const mime = /** @type {Record<string, string>} */ ({
+      png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', html: 'text/html',
+    })[ext];
+    if (!mime) throw httpError(422, `${name} is not an attachable file`);
+    const path = `attachments/${this.nextId('attachment')}.${ext}`;
+    this.attachments.set(path, `data:${mime};base64,${Buffer.from(content).toString('base64')}`);
+    return { path, name, kind: ext === 'html' ? 'html' : 'image' };
+  }
+
+  /**
+   * The agent replies on a thread without recording a version (`suiko reply`, a replies-only revise): planned,
+   * answered, ... with optional attachments (addAgentAttachment). Emits thread.updated.
+   * @param {string} tid
+   * @param {{ status: string, body: string, attachments?: Array<{ path: string, name: string, kind: string }>, agent?: string }} r
+   */
+  agentReply(tid, r) {
+    const t = this.thread(tid);
+    const agent = r.agent || 'claude';
+    t.comments.push({
+      id: this.nextId('comment'), by: { kind: 'agent', name: agent }, body: r.body, at: this.clock(), version: this.head, status: r.status,
+      ...(r.attachments?.length ? { attachments: r.attachments } : {}),
+    });
+    t.status = r.status;
+    t.updatedAt = this.clock();
+    const last = this.latestReview();
+    if (last) last.ackedBy = { ...(last.ackedBy || {}), [agent]: this.clock() };
+    this.emit('thread.updated', { thread: tid });
+    return t;
   }
 
   /** @param {string} dataUrl */

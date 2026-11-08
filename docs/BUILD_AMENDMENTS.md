@@ -202,6 +202,10 @@ thread's head anchor source range (expanded to whole lines); (4) otherwise `unli
 covers it (`at:"L12"` new lines, or `at:"del:h6"` / `"h6"` hunk id). External/human edits are indistinguishable from
 agent edits; they show up as unlinked and the agent explains them with `other` (`why: "not mine: external edit"`).
 **Never instruct the agent to revert hunks it did not make.**
+Amended 2026-11 (fix round): the anchor is expanded to whole lines only on lines of up to 1,000 characters (on a
+longer line, e.g. a minified document, the exact anchored text). An explicit `at` (hint) explains what lands on the
+lines it names, for the deletion check and the unasked-rewrite measure alike; an overlap link is inferred and explains
+only its threads' scopes. See the header of `src/core/review/attribution.js`.
 
 ### 4.4 Guards (WP3) - content based, overrides design 8.4
 | Check | Default | Override |
@@ -210,6 +214,19 @@ agent edits; they show up as unlinked and the agent explains them with `other` (
 | ... but the lock was created after the last delivered packet (agent never saw it) | warn | |
 | An unlinked, unexplained hunk that removes/replaces >= `guards.unexplainedWords` (20) words or >= 3 whole old lines | refuse | `other` entry, `revert --hunk`, or `guards.unexplainedDeletion: warn|off` |
 | `rewriteRatio` > `guards.maxRewriteRatio` (0.5) and head has >= 40 lines | refuse | `--allow-rewrite` |
+
+Amended 2026-11 (calm-review redesign): both checks measure what the reviewer reads (`src/shared/visible-text.js`,
+shared with the pre-write hook): an HTML doc's visible text without whitespace (no tags, attributes, `data:` URIs,
+scripts, styles or JSON blobs); a Markdown doc's source less base64 `data:` images and raw `<script>`/`<style>`
+blocks. The rewrite check counts only text removed where no thread asked for it (unlinked hunks, and the part of a
+hint / overlap linked hunk outside its threads' scopes) and applies from 40 lines or 300 measured words (HTML: 300
+visible words). `rewriteRatio` in the version stats stays the share all hunks remove. See the header of
+`src/core/review/guards.js`.
+Amended 2026-11 (fix round): the prose-like string literals of an inline script of up to 256 KB count as visible text;
+a `reverted` check refuses a version that drops a suggestion an earlier version applied, unless a hunk removing it is
+linked with `at` (or tagged) or explained by `other`; fix lines never lead with `revert` (for a document built from
+sources the change is undone in the sources and rebuilt); the pre-write hook asks the user by default
+(`guards.writeHook` `warn`, synonym `ask`; `deny` and `off` unchanged).
 | Actionable thread with no reply entry | warn | |
 | Thread marked `addressed` with no linked hunk and no asset change | warn | add `at` |
 | Decision anchor intersects a hunk not linked to that decision's thread | warn | |
@@ -233,7 +250,8 @@ shortest unique window around the anchor (still a valid Edit `old_string` substr
   if Edit says the file changed since read, re-Read and retry. `specreview edit --stdin` accepts
   `[{threads:["t1"], old:"...", new:"...", all?:false}]` for CLI-only edits.
 - `bin/specreview.js` dispatches `hook *` BEFORE importing anything heavy: hooks live in `src/cli/hooks.js` and may only
-  import `node:*` modules + `src/shared/protocol.js`. They walk up from cwd/file with `statSync` looking for
+  import `node:*` modules + dependency-free `src/shared/` modules (`protocol.js`; `visible-text.js`, which imports
+  nothing). They walk up from cwd/file with `statSync` looking for
   `.specreview`, exit immediately if none, read JSON only, never run recovery, never print on error, always exit 0,
   and must run < 150 ms cold.
 - `install claude` writes hook commands with absolute paths: `"<process.execPath>" "<abs>/bin/specreview.js" hook ...`.

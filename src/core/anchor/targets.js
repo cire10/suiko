@@ -3,7 +3,8 @@
 // for the 'live' view.
 //
 //   toDomTarget(anchor, render, { id, num?, state?, label?, severity?, type?, format? }) -> DomTarget
-//     state: the caller's display state (open / addressed / resolved / needs_input / draft / lock); it becomes
+//     state: the caller's display state (open / addressed / declined / resolved / needs_input / planned / draft /
+//     lock); it becomes
 //     'orphaned' for an orphaned anchor and 'outdated' for a 'changed' anchor (unless resolved, draft or lock).
 //     srid / endSrid are the anchor's (dropped when the render has no such element, and always for orphans);
 //     quote / prefix / suffix come from anchor.quote for text-like kinds (text, code, source); element, cell,

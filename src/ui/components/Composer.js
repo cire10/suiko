@@ -1,21 +1,27 @@
 // @ts-check
 // The composer (design 11.4). It opens at the top of the side panel, or inside the drawer on narrow screens, for a
 // capture from the doc (selection toolbar, picker, keys), the outline, Source mode or "General comment".
-// - The anchor chip shows what the agent will see ("Agent will see: L42-43 §3.2 'rotated on every use'"), from the
-//   server's /anchors/resolve preview. [Widen to block] (in the header) asks the server to resolve the capture as its
-//   block. The preview resolves asynchronously, so it keeps a fixed two-line height: nothing below it moves.
+// - The anchor line says what the agent will see, in plain words (model.js agentSees): "Claude will see: “rotated on
+//   every use” (§3.2 Token refresh)", the source lines in its tooltip; from the server's /anchors/resolve preview.
+//   [Widen to block] (in the header) asks the server to resolve the capture as its block. The preview resolves
+//   asynchronously, so it keeps a fixed two-line height: nothing below it moves.
 // - Focus moves to the composer when it opens, also when a guest `action` opened it while focus was in the doc
 //   iframe: the textarea, or the suggestion input once it is ready (unless the user already typed elsewhere).
-// - Type chips (Comment / Question / Suggestion) and severity chips (Blocking / Normal / Nit, keys 1-3 outside the
-//   textarea).
+// - The type, a small segmented control (Comment / Question / Suggestion), and a "Must fix" toggle (severity
+//   blocking). Keys 1-3 outside the textarea set the severity: 1 must fix, 2 normal, 3 nit (shown as a removable
+//   "Nit" chip).
 // - A Markdown text box with formatting tools (MarkdownTextarea): paste or drop an image to attach it (re-encoded to
 //   PNG/JPEG, at most 5 MB).
 // - Screenshots: the crop of a doc snip (b) or a picked region, and attached images (pasted, a screen snip with
 //   Shift+B), show as thumbnails (TESTID.composerAttachment); a click shows one full size.
-// - Add to review (Cmd/Ctrl+Enter) creates a draft. Send now (Cmd/Ctrl+Shift+Enter) submits a one-item review with
-//   verdict `comment`; with "Ask before Send now" (Settings) it first asks in the composer (Send now / Not yet; the
-//   key again confirms, Esc backs out). Cancel (Esc) closes the composer, with an Undo toast. The buttons show their
-//   keys.
+// - The buttons follow Settings > Send comments. Right away (the default): "Send" (Cmd/Ctrl+Enter,
+//   TESTID.composerSendNow) sends the comment to the agent at once, as a one-item review, and "Save as draft"
+//   (Cmd/Ctrl+Shift+Enter, TESTID.composerAdd) keeps it for later. When I click Send: "Add to review"
+//   (Cmd/Ctrl+Enter, composerAdd) and "Send now" (Cmd/Ctrl+Shift+Enter, composerSendNow). With "Ask before sending"
+//   a send first asks in the composer (Send / Not yet; the key again confirms, Esc backs out). A held key sends once:
+//   its auto-repeat does nothing (it would otherwise answer the confirmation). Cancel (Esc) closes the composer, with
+//   an Undo toast. The buttons show their keys. A draft being edited has Save draft only. A Send that failed keeps the
+//   composer open with the error, bound to the draft it saved (actions.js): Send again sends that draft.
 // - Suggestions: text mode (an input prefilled with the exact slice) when the source slice equals the rendered
 //   quote modulo whitespace; otherwise source mode (a monospace textarea with the anchor's whole lines). A live word
 //   diff is shown, plus an optional rendered preview (/fragment, sanitised).
@@ -30,26 +36,28 @@ import {
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import { SafeHtml } from '../markdown.js';
-import { anchorChipParts, attachmentName, attachmentUrl, canSendNow, linesLabel } from '../model.js';
+import {
+  agentName, agentSees, agentTitle, anchorChipParts, attachmentName, attachmentUrl, composerKeyAction, linesLabel,
+  sendModeOf,
+} from '../model.js';
 import { store, useStore } from '../state.js';
 import { imageFileToDataUrl, isEditable } from '../util.js';
 import { MarkdownTextarea } from './MarkdownTextarea.js';
-import { Spinner, WordDiff } from './common.js';
+import { Icon, Spinner, WordDiff } from './common.js';
 
 const TYPES = /** @type {const} */ ([
   { key: 'comment', label: 'Comment' },
   { key: 'question', label: 'Question' },
   { key: 'suggestion', label: 'Suggestion' },
 ]);
-const SEVERITIES = /** @type {const} */ ([
-  { key: 'blocking', label: 'Blocking', n: 1 },
-  { key: 'normal', label: 'Normal', n: 2 },
-  { key: 'nit', label: 'Nit', n: 3 },
-]);
+/** Keys 1-3 (outside the textarea) set the severity. */
+const SEVERITY_KEYS = /** @type {const} */ (['blocking', 'normal', 'nit']);
 
 export function Composer() {
   const c = useStore((s) => s.composer);
   const bases = useStore((s) => ({ attachmentBase: s.ds?.attachmentBase, contentBase: s.ds?.contentBase }));
+  const sendMode = useStore((s) => sendModeOf(s));
+  const agent = useStore((s) => agentTitle(agentName(s.ds)));
   const taRef = useRef(/** @type {HTMLTextAreaElement|null} */ (null));
   const rootRef = useRef(/** @type {HTMLElement|null} */ (null));
 
@@ -66,15 +74,12 @@ export function Composer() {
   }, [c?.key]);
 
   if (!c) return null;
-  const chip = anchorChipParts(c.preview, c.anchor);
+  const sees = agentSees(c.preview, c.anchor, agent);
   const kind = c.capture?.kind || c.anchor?.kind;
   // Suggestions replace text: not for the whole doc or a section (also a snip or screen snip that resolved to one).
   const noSuggestion = ['doc', 'section'].includes(kind) || ['doc', 'section'].includes(c.anchor?.kind);
   const widenable = !c.draftId && c.capture?.kind === 'text';
   const title = c.draftId ? `Edit draft ${c.draftId}` : c.type === 'agree' ? 'Mark agreed' : 'New comment';
-  const previewText = c.resolving ? 'Locating what the agent will see…'
-    : typeof c.preview?.text === 'string' && c.preview.text ? c.preview.text
-      : ['Agent will see:', chip.lines, chip.section, chip.label ? `“${chip.label}”` : ''].filter(Boolean).join(' ');
 
   /** @param {KeyboardEvent} e */
   const onRootKey = (e) => {
@@ -83,11 +88,15 @@ export function Composer() {
     const el = /** @type {HTMLElement} */ (e.target);
     const typing = el.localName === 'textarea' || (el.localName === 'input' && /** @type {HTMLInputElement} */ (el).type === 'text');
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      // Cmd+Shift+Enter on a draft being edited or on "Mark agreed" bubbles up to the global Submit review.
-      if (e.shiftKey && !canSendNow(c)) return;
+      // Settings > Send comments decides which key sends (model.js composerKeyAction); Cmd+Shift+Enter on a draft
+      // being edited or on "Mark agreed" bubbles up to the global Send dialog.
+      const act = composerKeyAction(c, e.shiftKey, sendMode);
+      if (act === 'review' && !e.repeat) return;
       e.preventDefault();
       e.stopPropagation();
-      submitComposer(e.shiftKey ? { sendNow: true } : {});
+      // A held key repeats: only its first press acts (a repeat would confirm "Ask before sending", or send twice).
+      if (e.repeat) return;
+      submitComposer(act === 'send' ? { sendNow: true } : {});
       return;
     }
     if (e.key === 'Escape') {
@@ -104,7 +113,7 @@ export function Composer() {
     if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && ['1', '2', '3'].includes(e.key) && c.type !== 'agree') {
       e.preventDefault();
       e.stopPropagation();
-      updateComposer({ severity: SEVERITIES[Number(e.key) - 1].key });
+      updateComposer({ severity: SEVERITY_KEYS[Number(e.key) - 1] });
     }
   };
 
@@ -133,7 +142,7 @@ export function Composer() {
         onClick=${() => resolveComposerAnchor(!c.widened)}>${c.widened ? 'Back to selection' : 'Widen to block'}</button>` : null}</header>
     <div class=${`anchor-preview ${c.resolveError && !c.resolving ? 'is-error' : ''}`} aria-live="polite">
       ${c.resolving
-        ? html`<span class="preview-text muted"><${Spinner} label="Locating" /> Locating what the agent will see…</span>`
+        ? html`<span class="preview-text muted"><${Spinner} label="Locating" /> Locating what ${agent} will see…</span>`
         : c.resolveError
           ? html`<span class="preview-text error">Could not anchor this: ${c.resolveError}</span>
               <button type="button" class="link-btn" onClick=${() => {
@@ -142,25 +151,26 @@ export function Composer() {
                 store.set({ composer: null });
                 openComposer({ capture: { kind: 'doc' }, body, crop, attachments });
               }}>Make it a general comment</button>`
-          : typeof c.preview?.text === 'string' && c.preview.text
-            ? html`<span class="preview-text agent-sees" data-anchor-lines=${chip.lines} title=${previewText}>${c.preview.text}</span>`
-            : html`<span class="preview-text agent-sees" data-anchor-lines=${chip.lines} title=${previewText}><span class="muted">Agent will see:</span>
-              ${chip.lines ? html` <strong>${chip.lines}</strong>` : null}${chip.section ? html` <span>${chip.section}</span>` : null}
-              ${chip.label ? html` <q>${chip.label}</q>` : null}</span>`}
+          : html`<span class="preview-text agent-sees" data-anchor-lines=${anchorChipParts(c.preview, c.anchor).lines} title=${sees.title}><span
+              class="muted">${agent} will see:</span> ${sees.what}${sees.section ? html` <span class="muted">(${sees.section})</span>` : null}</span>`}
     </div>
     ${c.crop ? html`<button type="button" class="thumb-btn crop-btn" title="Show full size"
       onClick=${() => openLightbox(/** @type {string} */ (c.crop), cropAlt(c.capture))}>
       <img class="crop" data-testid=${TESTID.composerAttachment} data-attachment="crop" src=${c.crop} alt=${cropAlt(c.capture)} /></button>` : null}
     ${c.type === 'agree' ? html`<${AgreeForm} c=${c} kind=${kind} />` : html`
-      <div class="chip-row" role="radiogroup" aria-label="Type">
-        ${TYPES.map((t) => html`<button type="button" role="radio" aria-checked=${c.type === t.key}
-          class=${`chip-toggle ${c.type === t.key ? 'on' : ''}`} onClick=${() => setComposerType(t.key)}
-          disabled=${t.key === 'suggestion' && noSuggestion}>${t.label}</button>`)}
-      </div>
-      <div class="chip-row" role="radiogroup" aria-label="Severity">
-        ${SEVERITIES.map((sv) => html`<button type="button" role="radio" aria-checked=${c.severity === sv.key}
-          class=${`chip-toggle sev-${sv.key} ${c.severity === sv.key ? 'on' : ''}`} title=${`${sv.label} (${sv.n})`}
-          onClick=${() => updateComposer({ severity: sv.key })}>${sv.label}</button>`)}
+      <div class="composer-kind">
+        <span class="seg composer-type" role="radiogroup" aria-label="Type">
+          ${TYPES.map((t) => html`<button type="button" role="radio" aria-checked=${c.type === t.key}
+            class=${c.type === t.key ? 'active' : ''} onClick=${() => setComposerType(t.key)}
+            disabled=${t.key === 'suggestion' && noSuggestion}>${t.label}</button>`)}
+        </span>
+        <span class="spacer"></span>
+        ${c.severity === 'nit' ? html`<span class="flag flag-nit nit-chip">Nit
+          <button type="button" class="icon-btn icon-btn-xs" aria-label="Remove Nit" title="Not a nit (2)"
+            onClick=${() => updateComposer({ severity: 'normal' })}><${Icon} name="close" size=${12} /></button></span>` : null}
+        <button type="button" class=${`must-fix ${c.severity === 'blocking' ? 'on' : ''}`} aria-pressed=${c.severity === 'blocking' ? 'true' : 'false'}
+          title=${`Must fix: ${agent} has to change this before you approve (1; 2: normal, 3: nit)`}
+          onClick=${() => updateComposer({ severity: c.severity === 'blocking' ? 'normal' : 'blocking' })}>Must fix</button>
       </div>
       ${c.type === 'suggestion' ? html`<${SuggestionEditor} c=${c} />` : null}
       <label class="sr-only" for="sr-composer-body">Comment</label>
@@ -180,32 +190,58 @@ export function Composer() {
       })}</ul>` : null}
       ${c.error ? html`<p class="error small" role="alert">${c.error}</p>` : null}
       ${c.confirmSend && !c.busy ? html`<${ConfirmSend} onBack=${() => taRef.current?.focus()} />` : null}
-      <div class="composer-actions">
-        <button type="button" class="btn btn-primary" data-testid=${TESTID.composerAdd} disabled=${c.busy || c.resolving}
-          onClick=${() => submitComposer()} title=${`${c.draftId ? 'Save the draft' : 'Add to the review, send it later with Submit review'} (${shortcut(KEYS.add)})`}
-          aria-keyshortcuts="Meta+Enter Control+Enter">${c.draftId ? 'Save draft' : 'Add to review'}<kbd class="btn-kbd" aria-hidden="true">${shortcut(KEYS.add, { compact: true })}</kbd></button>
-        ${c.draftId ? null : html`<button type="button" class="btn" data-testid=${TESTID.composerSendNow} disabled=${c.busy || c.resolving}
-          onClick=${() => submitComposer({ sendNow: true })} title=${`Send just this comment to the agent now, as a review with verdict comment (${shortcut(KEYS.sendNow)})`}
-          aria-keyshortcuts="Meta+Shift+Enter Control+Shift+Enter">Send now<kbd class="btn-kbd" aria-hidden="true">${shortcut(KEYS.sendNow, { compact: true })}</kbd></button>`}
-        <button type="button" class="btn" onClick=${cancelComposer} title="Cancel (Esc)" aria-keyshortcuts="Escape">Cancel</button>
-        ${c.busy ? html`<${Spinner} label="Saving" />` : null}
-      </div>`}
+      <${ComposerActions} c=${c} sendMode=${sendMode} agent=${agent} />`}
   </section>`;
 }
 
 /**
- * "Ask before Send now": the question, with the focus on its Send now button (Enter sends, Esc backs out).
+ * The composer's buttons, by Settings > Send comments: Cancel, then the second way and the main one (rightmost).
+ * Right away: Save as draft (TESTID.composerAdd) and Send (composerSendNow); when I click Send: Send now
+ * (composerSendNow) and Add to review (composerAdd). A draft being edited: Save draft only.
+ * @param {{ c: any, sendMode: string, agent: string }} props
+ */
+function ComposerActions({ c, sendMode, agent }) {
+  const batch = sendMode === 'batch';
+  const off = c.busy || c.resolving;
+  const primaryKey = shortcut(KEYS.add, { compact: true });
+  // The key shows inside the main button; the other one names its key in its tooltip (the row stays one line).
+  const saveMain = batch || !!c.draftId;
+  const save = html`<button type="button" class=${`btn ${saveMain ? 'btn-primary' : ''}`} data-testid=${TESTID.composerAdd}
+    disabled=${off} onClick=${() => submitComposer()}
+    title=${c.draftId ? `Save the draft (${shortcut(KEYS.add)})` : batch ? `Add it to your review; it goes out when you send the review (${shortcut(KEYS.add)})`
+      : `Keep it as a draft of your review (${shortcut(KEYS.sendNow)})`}
+    aria-keyshortcuts=${saveMain ? 'Meta+Enter Control+Enter' : 'Meta+Shift+Enter Control+Shift+Enter'}>${c.draftId ? 'Save draft'
+      : batch ? 'Add to review' : 'Save as draft'}${saveMain ? html`<kbd class="btn-kbd" aria-hidden="true">${primaryKey}</kbd>` : null}</button>`;
+  const send = c.draftId ? null : html`<button type="button" class=${`btn ${batch ? '' : 'btn-primary'}`} data-testid=${TESTID.composerSendNow}
+    disabled=${off} onClick=${() => submitComposer({ sendNow: true })}
+    title=${`Send this comment to ${agent} now (${shortcut(batch ? KEYS.sendNow : KEYS.add)})`}
+    aria-keyshortcuts=${batch ? 'Meta+Shift+Enter Control+Shift+Enter' : 'Meta+Enter Control+Enter'}>${batch ? 'Send now' : 'Send'}${batch ? null
+      : html`<kbd class="btn-kbd" aria-hidden="true">${primaryKey}</kbd>`}</button>`;
+  return html`<div class="composer-actions">
+    <button type="button" class="btn btn-ghost" onClick=${cancelComposer} title="Cancel (Esc)" aria-keyshortcuts="Escape">Cancel</button>
+    <span class="composer-send">
+      ${c.busy ? html`<${Spinner} label="Saving" />` : null}
+      ${batch || c.draftId ? html`${send}${save}` : html`${save}${send}`}
+    </span>
+  </div>`;
+}
+
+/**
+ * "Ask before sending": the question, with the focus on its send button (Enter sends, Esc backs out).
  * @param {{ onBack: () => void }} props
  */
 function ConfirmSend({ onBack }) {
   const ref = useRef(/** @type {HTMLButtonElement|null} */ (null));
+  const batch = useStore((s) => sendModeOf(s) === 'batch');
+  const agent = useStore((s) => agentTitle(agentName(s.ds)));
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
   }, []);
   return html`<div class="confirm-send" role="alertdialog" aria-label="Send this comment now?" data-confirm-send>
-    <span class="small">Send this comment to the agent now, on its own? Your other drafts stay in the review.</span>
+    <span class="small">${batch ? `Send this comment to ${agent} now, on its own? Your other drafts stay in the review.`
+      : `Send this comment to ${agent} now?`}</span>
     <span class="row">
-      <button ref=${ref} type="button" class="btn btn-sm btn-primary" onClick=${() => submitComposer({ sendNow: true, confirmed: true })}>Send now</button>
+      <button ref=${ref} type="button" class="btn btn-sm btn-primary" onClick=${() => submitComposer({ sendNow: true, confirmed: true })}>${batch ? 'Send now' : 'Send'}</button>
       <button type="button" class="btn btn-sm" onClick=${() => { updateComposer({ confirmSend: false }); onBack(); }}>Not yet</button>
     </span>
   </div>`;
@@ -230,12 +266,13 @@ async function addImage(file) {
 /** @param {{ c: any, kind: string }} props */
 function AgreeForm({ c, kind }) {
   const ref = useRef(/** @type {HTMLButtonElement|null} */ (null));
+  const agent = useStore((s) => agentTitle(agentName(s.ds)));
   useEffect(() => {
     ref.current?.focus();
   }, []);
   return html`<div class="agree-form">
     <p>Mark this ${kind === 'section' ? 'section' : 'part'} as <strong>agreed</strong>? Revisions that change it will be refused
-      unless the agent breaks the lock with a reason.</p>
+      unless ${agent} breaks the lock with a reason.</p>
     <label for="sr-lock-note" class="small">Note (optional)</label>
     <input id="sr-lock-note" type="text" value=${c.note} placeholder="Agreed" onInput=${(/** @type {any} */ e) => updateComposer({ note: e.currentTarget.value })} />
     ${c.error ? html`<p class="error small" role="alert">${c.error}</p>` : null}

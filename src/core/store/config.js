@@ -25,7 +25,8 @@ export function defaultConfig() {
       unexplainedWords: 20,
       unexplainedDeletionLines: 3,
       unexplainedDeletion: 'refuse',
-      writeHook: 'deny',
+      // the pre-write hook's answer to a near-total Write: 'warn' (synonym 'ask') asks the user, 'deny', 'off'
+      writeHook: 'warn',
       writeHookRatio: 0.4,
     },
     anchoring: { minScore: 0.65, minQuoteSim: 0.6, contextChars: 32 },
@@ -48,7 +49,7 @@ export function defaultConfigFile() {
 /** Allowed values of enum-like settings, by dotted path. */
 const ENUMS = /** @type {Record<string, string[]>} */ ({
   'guards.unexplainedDeletion': ['refuse', 'warn', 'off'],
-  'guards.writeHook': ['deny', 'warn', 'off'],
+  'guards.writeHook': ['warn', 'ask', 'deny', 'off'],
   'render.network': ['allow', 'block'],
 });
 

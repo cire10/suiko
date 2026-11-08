@@ -5,7 +5,15 @@
 //   - resource load failures (capture-phase 'error' on img/script/link/video/audio/source/iframe/object/embed):
 //     external http(s) URLs (another origin) -> externalsFailed, same-origin URLs -> resourcesFailed;
 //   - PerformanceObserver 'resource' entries with responseStatus >= 400 (same-origin only; cross-origin statuses
-//     are opaque) -> resourcesFailed.
+//     are opaque) -> resourcesFailed;
+//   - frames the browser refused to show (the framed page's own frame-ancestors / X-Frame-Options): a same-origin
+//     <iframe> / <frame> whose document is not reachable once it loaded (cross-origin frames cannot be told apart)
+//     -> resourcesFailed (externalsFailed for another origin, never in practice);
+//   - Content-Security-Policy violations (securitypolicyviolation, enforced policies only): a blocked URL ->
+//     externalsFailed / resourcesFailed like a failed load, anything else (an inline script or style, eval, a data:
+//     image) -> count / last, once per directive and blocked thing. Not counted: what the guest itself causes (its
+//     scripts are under /__sr/), and the script rule of the snapshot profile (a fetched web page's scripts never
+//     run, by design: the policy with script-src 'self' and form-action 'none' that the content origin sends).
 // Changes are reported to the UI as `pageError {count, last, externalsFailed, resourcesFailed}` (debounced 250 ms,
 // at most 1 s apart: a document that keeps throwing, e.g. from a setInterval, is still reported while it throws);
 // `ready` carries externalsFailed too. The guest's own exceptions never reach these handlers (see guard()).
@@ -66,8 +74,72 @@ const PageErrors = (() => {
     report();
   }
 
+  /** Violations already counted (directive + what was blocked + where). @type {Set<string>} */
+  const cspSeen = new Set();
+
+  /**
+   * A policy of the content origin's snapshot profile (content.js #csp): its script rule blocks a fetched page's
+   * scripts on purpose. @param {string} policy
+   */
+  function isSnapshotProfile(policy) {
+    return /(^|;)\s*script-src 'self'\s*(;|$)/.test(policy) && /(^|;)\s*form-action 'none'\s*(;|$)/.test(policy);
+  }
+
+  /** @param {SecurityPolicyViolationEvent} ev */
+  function onCspViolation(ev) {
+    if (ev.disposition && ev.disposition !== 'enforce') return; // report-only
+    const directive = String(ev.effectiveDirective || ev.violatedDirective || '');
+    const t = ev.target;
+    if (t && isElement(t) && OWN_NODES.has(/** @type {Element} */ (t))) return;
+    if (/\/__sr\//.test(String(ev.sourceFile || ''))) return; // the guest's own (snip rasteriser, vendored libraries)
+    if (/^script-src/.test(directive) && isSnapshotProfile(String(ev.originalPolicy || ''))) return;
+    const blocked = String(ev.blockedURI || '');
+    if (/^https?:/i.test(blocked)) {
+      addFailedUrl(blocked);
+      return;
+    }
+    const key = `${directive}|${blocked}|${ev.sourceFile || ''}:${ev.lineNumber || 0}`;
+    if (cspSeen.has(key) || cspSeen.size >= MAX_URLS) return;
+    cspSeen.add(key);
+    count++;
+    const what = blocked === 'inline' ? 'an inline script or style' : blocked === 'eval' ? 'eval()' : blocked || 'a resource';
+    last = `Content Security Policy blocked ${what} (${directive})`.slice(0, 500);
+    report();
+  }
+
+  /**
+   * A frame finished loading: when its page is same-origin but its document is not reachable, the browser showed
+   * its "refused to connect" page instead (the framed page's frame-ancestors / X-Frame-Options).
+   * @param {Event} ev
+   */
+  function onFrameLoad(ev) {
+    const f = /** @type {HTMLIFrameElement} */ (ev.target);
+    if (!f || !isElement(f) || (f.localName !== 'iframe' && f.localName !== 'frame') || OWN_NODES.has(f)) return;
+    const src = f.getAttribute('src');
+    if (!src || f.hasAttribute('srcdoc')) return;
+    // a sandbox without allow-same-origin makes even a same-origin page opaque
+    if (f.hasAttribute('sandbox') && !/(^|\s)allow-same-origin(\s|$)/i.test(f.getAttribute('sandbox') || '')) return;
+    let abs;
+    try {
+      abs = new URL(src, location.href);
+    } catch {
+      return;
+    }
+    if ((abs.protocol !== 'http:' && abs.protocol !== 'https:') || abs.origin !== location.origin) return;
+    let reachable = false;
+    try {
+      reachable = !!f.contentDocument;
+    } catch {
+      reachable = false;
+    }
+    if (!reachable) addFailedUrl(abs.href);
+  }
+
   window.addEventListener('error', onError, true);
   window.addEventListener('unhandledrejection', onRejection);
+  window.addEventListener('securitypolicyviolation', guard(onCspViolation, 'csp-violation'), true);
+  // `load` of an element does not reach window: listen on the document (capture: frames anywhere in it)
+  document.addEventListener('load', guard(onFrameLoad, 'frame-load'), true);
   try {
     if (typeof PerformanceObserver === 'function' &&
         (PerformanceObserver.supportedEntryTypes || []).includes('resource')) {

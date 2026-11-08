@@ -20,7 +20,7 @@
 import { SSE } from '../../../shared/protocol.js';
 import { UsageError } from '../../store/errors.js';
 import { isSnapshot, normalizeOrigin, originInfo, snapshotPath } from '../../store/snapshot.js';
-import { renderSource } from '../../render/index.js';
+import { renderSource, textCharsOf } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { decodeText } from '../../util/stable-read.js';
 import { autoCommit } from '../git.js';
@@ -67,6 +67,7 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
     if (d.head > 0 && refreshDoc(d, o, renderOpt)) await ctx.store.saveDoc(d);
     if (d.head === 0) {
       const lines = lineIndex(text).count;
+      const textChars = textCharsOf(render);
       const manifest = await ctx.store.commitVersion(d, {
         source: buf,
         manifest: {
@@ -75,6 +76,7 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
           summary: 'initial snapshot',
           respondsTo: null,
           capturedBy: 'open',
+          ...(textChars != null ? { textChars } : {}),
           stats: { added: lines, removed: 0, hunks: 0, rewriteRatio: 0 },
           hunks: [],
           guards: { errors: [], warnings: [], forced: false, brokenLocks: [] },

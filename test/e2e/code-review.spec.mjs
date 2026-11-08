@@ -103,7 +103,7 @@ test('shift-click on new-side and old-side line numbers opens the composer; the 
   await expect(card(page, 'src/a.js').locator('tr.sel')).toHaveCount(2);
   await expect(page.locator('.code-selbar')).toContainText('src/a.js:L3-4');
   await page.keyboard.press('c');
-  await expect(composer).toContainText('Agent will see: src/a.js:L3-4');
+  await expect(composer).toContainText('Claude will see: src/a.js:L3-4');
   const resolve = requests(mock, 'POST', '/anchors/resolve').at(-1);
   expect(resolve.body.capture).toEqual({ kind: 'line', file: 'src/a.js', side: 'new', startLine: 3, endLine: 4 });
   expect(resolve.body.version).toBe(2);
@@ -123,7 +123,7 @@ test('shift-click on new-side and old-side line numbers opens the composer; the 
   await lineBtn(page, 'src/a.js', 'old', 6).click({ modifiers: ['Shift'] });
   await expect(page.locator('.code-selbar')).toContainText('src/a.js (old side) L5-6');
   await page.locator('.code-selbar').getByRole('button', { name: 'Comment' }).click();
-  await expect(composer).toContainText('Agent will see: src/a.js (old side) L5-6');
+  await expect(composer).toContainText('Claude will see: src/a.js (old side) L5-6');
   expect(requests(mock, 'POST', '/anchors/resolve').at(-1).body.capture).toEqual({ kind: 'line', file: 'src/a.js', side: 'old', startLine: 5, endLine: 6 });
   await page.getByTestId(TESTID.composerTextarea).fill('Keep the old signature as a wrapper.');
   await page.getByTestId(TESTID.composerAdd).click();
@@ -158,7 +158,8 @@ test('threads show inline on both sides; a click in the panel scrolls to them, o
   // the thread in the gap is listed at the top of the card until its line is shown
   await expect(card(page, 'src/a.js').locator('.cd-outside')).toContainText('Filler should go.');
 
-  // clicking its panel card expands the gap and scrolls to it inline
+  // clicking its panel card expands the gap and scrolls to it inline (All lists every thread)
+  await page.locator('.thread-panel .filter[data-filter="all"]').click();
   await ui.card(gapThread).click();
   const inline = card(page, 'src/a.js').locator(`.cd-inline [data-inline-id="${gapThread}"]`);
   await expect(inline).toBeVisible();
@@ -247,21 +248,21 @@ test('Changes shows the interdiff per file with thread chips; n / p and the side
   expect(ui.errors).toEqual([]);
 });
 
-test('Verify: an addressed code thread shows its mini-diff, and Accept resolves it', async ({ page, ui, mock }) => {
+test('Your turn: a changed code thread shows its mini-diff (Show change), and Looks good resolves it', async ({ page, ui, mock }) => {
   await openReview(ui, 'changes');
   await page.getByRole('tablist', { name: 'Side panel' }).getByRole('tab', { name: 'Threads' }).click();
-  await page.locator('[data-filter="verify"]').click();
+  await page.locator('[data-filter="mine"]').click();
   const t1 = ui.card('t1');
   await expect(t1).toBeVisible();
   await expect(ui.card('t2')).toBeVisible();
-  await t1.locator('summary', { hasText: 'Show change' }).click();
+  await ui.cardMenu(t1, 'show-change');
   await expect(t1.locator('.minidiff')).toContainText('Math.max(0, Math.min(');
   expect(requests(mock, 'GET', '/threads/t1/minidiff')).toHaveLength(1);
   // "View in Changes" goes to the linked hunk
   await t1.getByRole('button', { name: 'View in Changes' }).click();
   await expect(card(page, 'src/a.js').locator('.cd-hunk-row.active')).toHaveCount(1);
   await page.getByRole('tablist', { name: 'Side panel' }).getByRole('tab', { name: 'Threads' }).click();
-  await page.locator('[data-filter="verify"]').click();
+  await page.locator('[data-filter="mine"]').click();
   await ui.card('t1').getByTestId(TESTID.verifyAccept).click();
   await expect.poll(() => mock.doc(DOC).thread('t1').status).toBe('resolved');
   expect(requests(mock, 'POST', '/threads/t1/resolve')).toHaveLength(1);
@@ -289,6 +290,26 @@ test('Re-snapshot: changed files show a banner; Re-snapshot posts D/record and s
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('3');
   await expect(treeRow(page, 'src/c.js')).toBeVisible();
   await expect(page.locator('[data-view="code"][data-ready]')).toBeAttached();
+  // the version.created event of the reviewer's own record announces nothing more: no "Updated to v3" toast after
+  // "Recorded as v3.", no "(v3)" badge in the tab title
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Updated to v3' })).toHaveCount(0);
+  await expect(page).not.toHaveTitle(/\(v3\)/);
+  expect(ui.errors).toEqual([]);
+});
+
+test('Re-snapshot with "Just tell me": the reviewer\'s own round is shown, with one toast, no note and no tab badge', async ({ page, ui, mock }) => {
+  // "When Claude records a new version" is about the agent's versions: the reviewer's own record is shown anyway
+  await page.addInitScript(() => { if (window.top === window) localStorage.setItem('suiko.onNewVersion', 'toast'); });
+  await openReview(ui);
+  mock.doc(DOC).setWorking({ 'src/a.js': `${A_V2}export const extra = 1;\n` });
+  await page.getByTestId(CODE_TESTID.resnapshot).click();
+  await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('3');
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Recorded as v3' })).toHaveCount(1);
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'v3' })).toHaveCount(1);
+  await expect(page.getByText('You recorded v3')).toHaveCount(0);
+  await expect(page).not.toHaveTitle(/\(v3\)/);
   expect(ui.errors).toEqual([]);
 });
 
@@ -323,7 +344,7 @@ test('split and unified layouts; selection works on either side in split', async
 test('"Comment on file" on the binary file captures the whole file', async ({ page, ui, mock }) => {
   await openReview(ui);
   await card(page, 'assets/logo.png').getByRole('button', { name: 'Comment on file' }).click();
-  await expect(page.getByTestId(TESTID.composer)).toContainText('Agent will see: assets/logo.png (whole file)');
+  await expect(page.getByTestId(TESTID.composer)).toContainText('Claude will see: assets/logo.png (whole file)');
   expect(requests(mock, 'POST', '/anchors/resolve').at(-1).body.capture).toEqual({ kind: 'file', file: 'assets/logo.png' });
   // a whole-file comment has no suggestion
   await expect(page.getByTestId(TESTID.composer).getByRole('radio', { name: 'Suggestion' })).toBeDisabled();
@@ -339,12 +360,15 @@ test('pick, snip and hide are absent, and there is no Source mode', async ({ pag
   await openReview(ui);
   await expect(page.getByTestId(TESTID.pickTool)).toHaveCount(0);
   await expect(page.getByTestId(TESTID.snipTool)).toHaveCount(0);
+  // no tool dock: a code review comments from its line numbers and file headers
+  await expect(page.getByTestId(TESTID.toolDock)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Hide annotations' })).toHaveCount(0);
   await expect(page.getByTestId(TESTID.docFrame)).toHaveCount(0);
   await expect(modeTab(page, 'source')).toHaveCount(0);
   await expect(modeTab(page, 'review')).toHaveText(/Files/);
-  // History hides the code view
-  await modeTab(page, 'history').click();
+  // History (from the More menu) hides the code view
+  await ui.menu('history');
+  await expect(modeTab(page, 'history')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(CODE_TESTID.view)).toBeHidden();
   await modeTab(page, 'review').click();
   await expect(page.getByTestId(CODE_TESTID.view)).toBeVisible();
@@ -423,7 +447,7 @@ test('keys: j / k move between files, n / p between hunks, c comments the select
   await expect(page.locator('.code-selbar')).not.toContainText('src/a.js:L8');
   await lineBtn(page, 'src/a.js', 'new', 8).click();
   await page.keyboard.press('c');
-  await expect(page.getByTestId(TESTID.composer)).toContainText('Agent will see: src/a.js:L8');
+  await expect(page.getByTestId(TESTID.composer)).toContainText('Claude will see: src/a.js:L8');
   await page.keyboard.press('Escape');
   await expect(page.getByTestId(TESTID.composer)).toHaveCount(0);
 
@@ -453,7 +477,7 @@ test('narrow window: the file tree is a drawer, the diff is unified and nothing 
   // lines can still be selected and commented
   await lineBtn(page, 'src/new-name.js', 'new', 5).click();
   await page.locator('.code-selbar').getByRole('button', { name: 'Comment' }).click();
-  await expect(page.getByTestId(TESTID.composer)).toContainText('Agent will see: src/new-name.js:L5');
+  await expect(page.getByTestId(TESTID.composer)).toContainText('Claude will see: src/new-name.js:L5');
   expect(ui.errors).toEqual([]);
 });
 
@@ -489,7 +513,7 @@ test('light and dark themes use the tokens', async ({ page, ui }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   const dark = await colors();
   expect(dark.card).toBe(dark.bg);
-  expect(dark.card).toBe('rgb(13, 17, 23)');
+  expect(dark.card).toBe('rgb(15, 15, 18)');
   expect(dark.ins).toBe(dark.insBg);
   expect(dark.head).toBe(dark.header);
   expect(dark.ins).not.toBe(light.ins);

@@ -1,6 +1,6 @@
 {
   "name": "suiko",
-  "description": "Suiko: an iterative, commentable, versioned review loop for AI-written HTML and Markdown specs.",
+  "description": "Suiko: an iterative, commentable, versioned review loop for the HTML and Markdown documents AI agents write.",
   "owner": {
     "name": "Eric Tang"
   },
@@ -8,9 +8,9 @@
     {
       "name": "suiko",
       "source": "./integrations/claude-code",
-      "description": "Review AI-written specs in a local UI, send located feedback to Claude, get targeted edits and see exactly what changed. Adds the spec-review skill, /review-spec, /review-code, /suiko-last, and the Write and prompt hooks.",
+      "description": "Review the documents Claude writes (reports, specs, plans; HTML or Markdown) in a local UI, send located feedback, get changes to exactly what you commented on and see what changed. Adds the spec-review skill, /review-spec, /review-code, /suiko-last, and the Write and prompt hooks.",
       "category": "productivity",
-      "tags": ["review", "specs", "documentation", "markdown", "html", "design-docs"]
+      "tags": ["review", "reports", "documentation", "html", "markdown", "specs"]
     }
   ]
 }

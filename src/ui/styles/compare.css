@@ -1,0 +1,217 @@
+/* Changes side by side ("compare focus": components/ComparePane.js, CompareBar.js; actions.js hides the outline rail
+   and the thread panel while it is shown). The center column becomes a grid: the compare bar across the top, a
+   header over each frame, then the older version (left) and the newer one (right) at equal widths. The older
+   version's elements follow the newer frame in the DOM; the grid places them, so the newer frame never moves (and is
+   never reloaded). Colour carries one meaning only: red is the older version's removed text, green the newer one's
+   added text; the chrome stays neutral. */
+
+/* The 1 px gap shows the (border-coloured) background between the columns: the divider takes no width from either
+   frame, so both lay the doc out at exactly the same width (a heading never wraps on one side only). */
+.center.is-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  column-gap: 1px;
+  background: var(--border);
+}
+
+.center.is-split > .frame-wrap {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.compare-split {
+  display: contents;
+}
+
+/* ---------------------------------------------------------------- the compare bar */
+
+.compare-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.compare-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.compare-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.compare-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.compare-step-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.compare-step-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.compare-step-label {
+  min-width: 8ch;
+  text-align: center;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-offpage {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.compare-bar .compare-layout {
+  flex: 0 0 auto;
+}
+
+.compare-done {
+  flex: 0 0 auto;
+}
+
+/* ---------------------------------------------------------------- the frame headers */
+
+.compare-head {
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.compare-head-old {
+  grid-column: 1;
+}
+
+.compare-head-new {
+  grid-column: 2;
+}
+
+.compare-select {
+  flex: 0 0 auto;
+  height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-weight: 600;
+}
+
+.compare-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+}
+
+/* The key to the marks, in their own style: "removed" struck through in red, "added" in green. */
+.compare-key {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+}
+
+.compare-key-del {
+  color: var(--danger);
+  background: var(--del-bg);
+  text-decoration: line-through;
+}
+
+.compare-key-ins {
+  color: var(--ok);
+  background: var(--ins-bg);
+}
+
+/* ---------------------------------------------------------------- the frames */
+
+.frame-wrap.compare-base {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.center.is-split > .frame-wrap {
+  background: var(--bg);
+}
+
+/* The links between the frames: a 16 px band over the seam (8 px over each frame's margin) joining each change both
+   frames show, in the change's colour; it fades out while the frames scroll and back in once they are still. */
+.compare-links {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.compare-links.is-moving {
+  opacity: 0;
+}
+
+.compare-links svg {
+  position: absolute;
+  top: 0;
+  left: calc(50% - 8px);
+  overflow: visible;
+}
+
+.compare-link {
+  stroke-width: 1;
+}
+
+.compare-link.op-add { fill: rgba(45, 164, 78, 0.16); stroke: rgba(45, 164, 78, 0.5); }
+.compare-link.op-mod { fill: rgba(212, 167, 44, 0.18); stroke: rgba(191, 135, 0, 0.5); }
+.compare-link.op-del { fill: rgba(207, 34, 46, 0.14); stroke: rgba(207, 34, 46, 0.45); }
+.compare-link.active { stroke-width: 1.5; fill-opacity: 1; }
+.compare-link.op-add.active { fill: rgba(45, 164, 78, 0.3); }
+.compare-link.op-mod.active { fill: rgba(212, 167, 44, 0.34); }
+.compare-link.op-del.active { fill: rgba(207, 34, 46, 0.26); }
+
+@media (prefers-reduced-motion: reduce) {
+  .compare-links { transition: none; }
+}
+
+/* Between 900 and 1199 px both rails are hidden while comparing (the frames need the width); the bar keeps one row. */
+.is-medium .compare-title {
+  display: none;
+}

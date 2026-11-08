@@ -18,13 +18,15 @@
 import { test as base, expect } from '@playwright/test';
 import { CODE_TESTID, TESTID } from '../../src/shared/protocol.js';
 import { designRepo } from '../helpers/git-repo.js';
-import { Ui } from './fixtures.mjs';
+import { pinnedPage, Ui } from './fixtures.mjs';
 import { startRealCodeDaemon } from './real-daemon.mjs';
 
 /** @typedef {Awaited<ReturnType<typeof startRealCodeDaemon>>} Real */
 /** @typedef {import('@playwright/test').Page} Page */
 
 const test = base.extend(/** @type {any} */ ({
+  // the preferences these specs were written for (fixtures.mjs LEGACY_PREFS)
+  page: pinnedPage,
   // eslint-disable-next-line no-empty-pattern -- Playwright requires a destructuring pattern here
   real: async ({}, /** @type {(r: Real) => Promise<void>} */ use) => {
     const repo = await designRepo();
@@ -76,8 +78,8 @@ test('review -> UI comments and submit -> wait prints the packet -> apply + edit
   await lineBtn(page, 'src/auth/refresh.js', 'new', 41).click();
   await lineBtn(page, 'src/auth/refresh.js', 'new', 44).click({ modifiers: ['Shift'] });
   await page.keyboard.press('c');
-  await expect(composer).toContainText('Agent will see: src/auth/refresh.js:L41-44');
-  await composer.getByRole('radio', { name: 'Blocking' }).check();
+  await expect(composer).toContainText('Claude will see: src/auth/refresh.js:L41-44');
+  await composer.getByRole('button', { name: 'Must fix' }).click();
   await page.getByTestId(TESTID.composerTextarea).fill('Two tabs refreshing at once will trip this. Allow reuse within 30 s.');
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toHaveCount(0);
@@ -96,7 +98,7 @@ test('review -> UI comments and submit -> wait prints the packet -> apply + edit
   await lineBtn(page, 'src/auth/store.js', 'old', 12).click();
   await lineBtn(page, 'src/auth/store.js', 'old', 14).click({ modifiers: ['Shift'] });
   await page.keyboard.press('q');
-  await expect(composer).toContainText('Agent will see: src/auth/store.js (old side) base L12-14');
+  await expect(composer).toContainText('Claude will see: src/auth/store.js (old side) L12-14');
   await page.getByTestId(TESTID.composerTextarea).fill('scripts/migrate.js still calls legacyLookup. Was removing it intended?');
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toHaveCount(0);
@@ -161,13 +163,13 @@ test('review -> UI comments and submit -> wait prints the packet -> apply + edit
   expect(revised.stdout).toMatch(/src\/auth\/refresh\.js#h\d+ +L88 +-> t2 addressed +\(tagged: apply\)/);
 
   // ---- v2 arrives live
-  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'v2 ready' });
-  await expect(toast).toContainText('from claude');
+  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'Updated to v2' });
+  await expect(toast).toBeVisible();
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   await expect(page.getByTestId(CODE_TESTID.resnapshot)).toHaveCount(0);
 
   // Changes: the interdiff v1 -> v2 of the one changed file, with the thread chips on its hunks
-  await toast.getByRole('button', { name: 'Review changes' }).click();
+  await toast.getByRole('button', { name: 'Show changes' }).click();
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#sr-base')).toHaveValue('1');
   await expect(page.locator('[data-view="code"][data-mode="changes"][data-ready]')).toBeAttached();
@@ -185,18 +187,18 @@ test('review -> UI comments and submit -> wait prints the packet -> apply + edit
   const r1 = page.locator('.round-results .result[data-thread-id="t1"]');
   await expect(r1).toContainText('Added a 30 s reuse grace window.');
   await r1.getByTestId(TESTID.verifyAccept).click();
-  await expect(r1).toContainText('Resolved');
+  await expect(r1).toContainText('Done');
   await expect.poll(async () => {
     const st = await r.cli(['threads', DOC, '--status', 'all', '--json']);
     return JSON.parse(st.stdout).threads.find((/** @type {any} */ t) => t.id === 't1')?.status;
   }).toBe('resolved');
 
-  // Verify (Threads tab): t2's change between the rounds
+  // Your turn (Threads tab): t2's change between the rounds (Show change, in its ⋯ menu)
   await page.locator('.side-tabs').getByRole('tab', { name: 'Threads' }).click();
-  await page.locator('.thread-panel [data-filter="verify"]').click();
+  await page.locator('.thread-panel [data-filter="mine"]').click();
   const t2 = ui.card('t2');
   await expect(t2).toContainText('Applied.');
-  await t2.locator('summary').filter({ hasText: 'Show change' }).click();
+  await ui.cardMenu(t2, 'show-change');
   await expect(t2.locator('.minidiff')).toContainText('config.refreshTtlSec');
 
   // Files: the review diff at v2, with t1 inline on its moved lines
@@ -237,7 +239,7 @@ test('the reviewer applies a suggestion (a ui-apply round) and re-snapshots edit
   expect(repo.read('test/refresh.test.js')).toBe("import { test } from 'node:test';\n\ntest('refresh', async () => {});\n");
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   // the reviewer's own apply resolves the thread, as for specs
-  await page.locator('.thread-panel [data-filter="resolved"]').click();
+  await page.locator('.thread-panel [data-filter="done"]').click();
   await expect(t1).toContainText('Applied in v2');
 
   // the agent edits a reviewed file: `wait` refuses until the round is recorded, the UI offers Re-snapshot
@@ -255,8 +257,8 @@ test('the reviewer applies a suggestion (a ui-apply round) and re-snapshots edit
   expect(log.stdout).toContain('ui-apply');
   expect(log.stdout).toContain('ui-record');
 
-  // History lists the three rounds
-  await modeTab(page, 'history').click();
+  // History lists the three rounds (the More menu)
+  await ui.menu('history');
   await expect(page.getByTestId(TESTID.historyRow)).toHaveCount(3);
   expect(ui.errors).toEqual([]);
 });

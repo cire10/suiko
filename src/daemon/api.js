@@ -14,12 +14,20 @@
 // - Versions are `3`, `v3` or `live` and reach the engine as a number or 'live'.
 // - `by` for reviewer actions is the reviewer's display name (string) from the workspace context (ctx.reviewer) or
 //   config; the engine turns it into the {kind:'human', name} actor.
+// - POST .../reviews {verdict, body?, draftIds?, reviewedVersion?, markFinal?, resolveAddressed?, edits?, apply?,
+//   instant?}: `edits` 'now' | 'batch' (batched edits, stored on the review); `apply` ['t2', ...] planned threads to
+//   apply now (409 when one is not planned, 404 when unknown, 422 with an approval). Without `draftIds`, a review
+//   submits every pending draft, except one with a non-empty `apply`: an Apply submits no draft unless `draftIds` names
+//   it, so the reviewer's unsent drafts never go out with it. Reply drafts may carry `use` (attachments of their thread
+//   to put into the doc). `instant` (boolean, 422 otherwise): a one-item send from the UI (a comment, a reply, a
+//   draft's Send, Use in doc, Apply), stored on the review; it does not move the doc's "since your last review"
+//   (lastReviewedVersion).
 // - Screen snips (POST .../snip/screen) run the macOS region picker (`screencapture -i`, via
 //   src/core/util/screen-capture.js) on the reviewer's machine and store the image with ops.saveAttachment. At most
 //   one picker runs per daemon (409 {code:'busy'}); a cancelled picker (Esc) is 200 {cancelled:true}; no picker on
 //   this platform is 501 {code:'unsupported'}. A client that disconnects while the picker is up closes the picker.
 
-import { APP_NAME, LIMITS, VERDICTS } from '../shared/protocol.js';
+import { APP_NAME, LIMITS, REVIEW_EDITS, VERDICTS } from '../shared/protocol.js';
 import { getRender, renderFragment } from '../core/render/index.js';
 import { docKind, docOriginType, isCode } from '../core/store/snapshot.js';
 import { createLogger } from '../core/util/log.js';
@@ -109,7 +117,8 @@ export function registerApiRoutes(router, deps) {
     const { wsId, docId } = await resolveDoc(params);
     const state = await engine.call('docState', wsId, docId);
     const base = contentBase(wsId, docId);
-    // attachmentBase + basename('attachments/a3.png') is the image URL (served by the content origin, see content.js)
+    // attachmentBase + basename('attachments/a3.png') is the attachment's URL (an image, or an agent's HTML preview
+    // to embed in <iframe sandbox="allow-scripts">; served by the content origin, see content.js)
     sendJson(res, 200, { ...(state ?? {}), ws: state?.ws ?? wsId, contentBase: base, attachmentBase: `${base}/__att/` });
   });
 
@@ -194,6 +203,8 @@ export function registerApiRoutes(router, deps) {
     optionalString(body.body, 'body');
     optionalBoolean(body.markFinal, 'markFinal');
     optionalBoolean(body.resolveAddressed, 'resolveAddressed');
+    // instant: a one-item send (Send, a reply's Send, Use in doc, Apply): "since your last review" stays where it is
+    optionalBoolean(body.instant, 'instant');
     if (body.draftIds !== undefined && body.draftIds !== null) {
       if (!Array.isArray(body.draftIds) || !body.draftIds.every((d) => typeof d === 'string' && ITEM_ID_RE.test(d))) {
         throw invalid('draftIds must be an array of draft ids');
@@ -203,13 +214,25 @@ export function registerApiRoutes(router, deps) {
     // other head is refused with 409 by the engine, so a revision recorded meanwhile is never approved unseen.
     optionalVersion(body.reviewedVersion, 'reviewedVersion');
     optionalVersion(body.expectHead, 'expectHead');
+    // edits: 'now' | 'batch' (batched edits: the agent answers now, replies `planned`, edits in one APPLY round)
+    if (body.edits !== undefined && body.edits !== null && !REVIEW_EDITS.includes(body.edits)) {
+      throw invalid(`edits must be one of ${REVIEW_EDITS.join(', ')}`);
+    }
+    // apply: planned threads to apply now (the engine answers 409 for a thread that is not planned, 404 for an
+    // unknown one); may come with drafts and a summary, never with an approval. [] is the same as none. The drafts
+    // that go with an Apply are only the ones draftIds names (none without it).
+    const apply = applyIds(body.apply);
+    if (apply && body.verdict === 'approved') throw invalid('apply cannot come with an approval');
     const review = await engine.call('submitReview', wsId, docId, {
       verdict: body.verdict,
       body: body.body ?? '',
       markFinal: Boolean(body.markFinal),
       resolveAddressed: Boolean(body.resolveAddressed),
-      draftIds: body.draftIds ?? undefined,
+      draftIds: body.draftIds ?? (apply ? [] : undefined),
       expectHead: body.expectHead ?? body.reviewedVersion ?? undefined,
+      ...(body.edits ? { edits: body.edits } : {}),
+      ...(apply ? { apply } : {}),
+      ...(body.instant === true ? { instant: true } : {}),
       by: await engine.reviewer(wsId),
     });
     sendJson(res, 200, review);
@@ -608,6 +631,19 @@ function threadIds(list, { allowEmpty = false } = {}) {
     throw invalid(`threads must be an array of ${allowEmpty ? 0 : 1} to ${MAX_BULK_THREADS} thread ids`);
   }
   return [...new Set(/** @type {string[]} */ (list))];
+}
+
+/**
+ * The `apply` of a review body: thread ids ('t2'), deduplicated; undefined when absent or empty; else 422.
+ * @param {unknown} list
+ * @returns {string[] | undefined}
+ */
+function applyIds(list) {
+  if (list === undefined || list === null) return undefined;
+  if (!Array.isArray(list) || list.length > MAX_BULK_THREADS || !list.every((t) => typeof t === 'string' && /^t\d+$/.test(t))) {
+    throw invalid('apply must be an array of thread ids, e.g. ["t2", "t5"]');
+  }
+  return list.length ? [...new Set(/** @type {string[]} */ (list))] : undefined;
 }
 
 /**

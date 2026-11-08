@@ -3,13 +3,14 @@
 // child directory are compacted, 'src/util'). Each file row shows its status letter (A added, M modified, D
 // deleted, R renamed, T type changed, = unchanged but carrying a thread), its name, +/- line counts, the number of
 // open threads and a badge for binary / too-large files. In Changes mode the tree lists the files that changed
-// between the two rounds. Clicking a row scrolls the centre to that file's card (and closes the drawer on a narrow
-// window). The filter also narrows the cards in the centre. Below the tree: the review's rounds.
+// between the two versions. Clicking a row scrolls the centre to that file's card (and closes the drawer on a narrow
+// window). The filter (inset like the rail's title and rows) also narrows the cards in the centre. Below the tree:
+// the review's versions.
 
 import { html, useEffect, useMemo, useState } from 'preact-htm';
 import { CODE_TESTID } from 'protocol';
 import { setMode, switchVersion } from '../../actions.js';
-import { actorLabel, numericVersion, relTime, versionNumbers } from '../../model.js';
+import { actorLabel, agentTitle, isAgent, numericVersion, relTime, versionNumbers } from '../../model.js';
 import { store, useStore } from '../../state.js';
 import { Icon } from '../common.js';
 import { buildTree, fileStatus, matchesFilter, openCounts, outsideReview } from './code-model.js';
@@ -96,7 +97,7 @@ export function FileTree({ ds }) {
       ${c.list?.status === 'loading' || !c.list ? html`<p class="small muted">Loading files…</p>` : null}
       ${c.list?.status === 'error' ? html`<p class="small error" role="alert">${c.list.error}
         <button type="button" class="link-btn" onClick=${() => loadList(v, base, { retry: true })}>Retry</button></p>` : null}
-      ${c.list?.status === 'ok' && !files.length ? html`<p class="small muted">${changes ? 'No files changed between these rounds.' : 'No changed files.'}</p>` : null}
+      ${c.list?.status === 'ok' && !files.length ? html`<p class="small muted">${changes ? 'No files changed between these versions.' : 'No changed files.'}</p>` : null}
       ${c.list?.status === 'ok' && files.length && !shown.length ? html`<p class="small muted">No file matches.</p>` : null}
       ${tree.length ? html`<ul class="cd-tree" role="tree" aria-label="Files">${renderNodes(tree, 0)}</ul>` : null}
       ${skipped.length ? html`<p class="small muted cd-tree-skipped" title=${skipped.map((/** @type {any} */ k) => `${k.path} (${k.reason})`).join('\n')}>
@@ -106,12 +107,12 @@ export function FileTree({ ds }) {
   </div>`;
 }
 
-/** The review's rounds (newest first), like the outline rail's history. @param {{ ds: any, version: number|'live'|null }} props */
+/** The review's versions (newest first), like the outline rail's history. @param {{ ds: any, version: number|'live'|null }} props */
 function Rounds({ ds, version }) {
   const vs = versionNumbers(ds).slice().reverse().slice(0, 12);
   if (vs.length < 2) return null;
-  return html`<section class="mini-history" aria-label="Rounds">
-    <h2 class="rail-title">Rounds</h2>
+  return html`<section class="mini-history" aria-label="Versions">
+    <h2 class="rail-title">Versions</h2>
     <ul>
       ${vs.map((n) => {
         const meta = (ds.versions || []).find((/** @type {any} */ x) => Number(x.v) === n);
@@ -120,8 +121,8 @@ function Rounds({ ds, version }) {
           <button type="button" class=${`mini-version ${current ? 'active' : ''}`} aria-current=${current ? 'true' : undefined}
             onClick=${() => switchVersion(n)} title=${meta?.summary || ''}>
             <strong>v${n}</strong>
-            <span class="mini-author">${actorLabel(meta?.author)}</span>
-            ${ds.doc.final?.version === n ? html`<span class="badge tone-ok">FINAL</span>` : null}
+            <span class="mini-author">${isAgent(meta?.author) ? agentTitle(actorLabel(meta?.author)) : actorLabel(meta?.author)}</span>
+            ${ds.doc.final?.version === n ? html`<span class="badge tone-ok">Final</span>` : null}
             <span class="mini-time">${relTime(meta?.createdAt)}</span>
           </button>
         </li>`;

@@ -2,17 +2,18 @@
   "name": "suiko",
   "displayName": "Suiko",
   "version": "0.3.1",
-  "description": "Iterative review loop for HTML/Markdown specs: the spec-review skill, the /review-spec, /review-code and /suiko-last commands, and hooks that block whole-file rewrites of specs under review and surface submitted reviews. Requires the suiko CLI on PATH (npm install && npm link).",
+  "description": "Review loop for the documents an agent writes (HTML or Markdown), and for code changes: the spec-review skill, the /review-spec, /review-code and /suiko-last commands, and hooks that ask before a whole-file rewrite of a document under review and surface sent feedback. Requires the suiko CLI on PATH (npm install && npm link).",
   "author": {
     "name": "Eric Tang"
   },
   "license": "MIT",
   "keywords": [
     "review",
+    "report",
     "spec",
     "design-doc",
-    "markdown",
     "html",
+    "markdown",
     "feedback",
     "versioning"
   ]

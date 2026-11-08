@@ -4,7 +4,18 @@
 //
 // - Threads: every actionable thread (open, or the reviewer spoke last), plus with `allOpen` every unresolved one.
 //   Order: working-copy line, blocking first within ties, then id; threads without lines (whole doc, orphaned)
-//   come last.
+//   come last. A `planned` thread (batched edits) is not actionable until the reviewer applies it: then it is an
+//   item with why 'apply' (APPLY), and its conversation shows the reviewer's original request (the first comment
+//   with content) above the agent's planned reply, since the agent may no longer have the round it planned in.
+// - Edits (batched edits, Review.edits): decided per actionable thread by the newest review that handed it over,
+//   delivered or not (editsByThread: its new threads, replies and reopened threads; an applied thread is edited
+//   now), so `suiko feedback` re-reading a delivered round says what `wait` said. A thread whose review asked for
+//   'batch' (not an approval) is marked `edits: 'batch'`; the packet's `edits` is 'batch' when any is, which prints
+//   the EDITS line and, when every actionable thread is batched and none is to APPLY, a replies-only NEXT ("replies
+//   only, no edits yet"); 'now' otherwise.
+// - Comments: a reviewer reply's `use` (attachments of the thread to put into the doc) as absolute paths with their
+//   original names (packet.js prints them as `use:` lines); the "Apply this change." comment keeps its `apply`
+//   marker (packet.js leaves it out of the text: the APPLY label says it).
 // - Lines and `src` come from the working copy: head anchors are mapped through a precise head->working mapper.
 // - Locks (active), decisions (resolved threads with a decision), counts, drafts (only with includeDrafts).
 // - Attachments (region crops, snips, screenshots, pasted images) are ABSOLUTE paths the agent can Read, for every
@@ -12,7 +23,7 @@
 //   image), which picks the packet line ('crop:' / 'image:' and its Read hint, packet.js attachmentLine).
 // - Paths: `path` is workspace-relative (doc.path); `root` (workspace root) and `file` (absolute path) are added
 //   when known, and `pathFromCwd` is how the agent's cwd reaches the file (relative when under the cwd, else
-//   absolute): in a non-git project whose `.specreview/` sits next to the spec in a subfolder, the bare doc.path
+//   absolute): in a non-git project whose `.specreview/` sits next to the doc in a subfolder, the bare doc.path
 //   does not resolve from the directory the agent runs in.
 // - Code docs (kind 'code'): each thread is presented by the code kind (kinds.js describeThread -> code/packet.js
 //   describeCodeThread: repo file, side, working-tree lines, src> / was> lines, file state); the header label, the
@@ -26,7 +37,8 @@ import { compareIds } from '../store/store.js';
 import { lineIndex } from '../text/index.js';
 import { attachmentKind, envOf, label as anchorLabel, quoteText } from './anchoring.js';
 import { linesLabel, quote as quoteLabel, sectionPath, truncate } from './labels.js';
-import { anchorAt, conversation, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
+import { anchorAt, conversation, hasContent, isAwaitingReviewer, isOutdated, whyOf } from './threadstate.js';
+import { useTargets } from './attachments.js';
 import { docOriginType, docRefFor, isCode, isSnapshot, originType, pageUrlOf, planFileOf, resnapshotCommand } from '../store/snapshot.js';
 import { kindOf } from './kinds.js';
 import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js';
@@ -48,6 +60,11 @@ import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js'
  * @property {number} version
  * @property {string | null} status agent reply status
  * @property {string | null} hunk hunk of that version linked to the thread (agent replies)
+ * @property {Array<{ path: string, name: string }>} [use] reviewer replies ("Use in doc"): absolute paths of the
+ *   thread's attachments to put into the doc, with their original names
+ * @property {true} [apply] the reviewer's "Apply this change." request (why 'apply')
+ * @property {true} [request] an APPLY item: the reviewer's original request, shown above the agent's planned reply
+ *   (it is not part of the newest exchange the packet shows otherwise)
  *
  * @typedef {object} PacketThread
  * @property {string} id
@@ -67,12 +84,15 @@ import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js'
  * @property {boolean} srcEditable
  * @property {string} anchorState
  * @property {string | null} note '(outdated: text changed)' / '(orphaned: ...)'
- * @property {PacketComment[]} comments last agent reply and every reviewer comment after it
- * @property {number} earlier collapsed older comments
+ * @property {PacketComment[]} comments last agent reply and every reviewer comment after it (an APPLY item: the
+ *   reviewer's original request first)
+ * @property {number} earlier collapsed older comments (not counting a request shown)
  * @property {object | null} suggestion
  * @property {string[]} attachments absolute paths
  * @property {'region' | 'snip' | 'image'} attachmentKind what the attachments show (region crop, snipped area, other image)
  * @property {string | null} apply command applying the suggestion
+ * @property {'batch'} [edits] an actionable thread whose newest handing review asked for batched edits: answer it now
+ *   (a change agreed to: status planned), edit later in the APPLY round
  * Code docs only (kind 'code'; filled from the code kind's describeThread):
  * @property {string | null} [file] repo-root-relative path of the anchored file (null: a whole-review thread)
  * @property {string | null} [fileFromCwd] that file as reached from the agent's cwd
@@ -106,14 +126,17 @@ import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js'
  * @property {'clean' | 'dirty' | 'missing'} working
  * @property {Array<{ id: string, version: number, verdict: string, body: string, by: string, at: string }>} reviews
  * @property {string | null} verdict newest delivered review's verdict
+ * @property {'now' | 'batch'} edits 'batch' when an actionable thread is batched (its newest handing review, not an
+ *   approval, asked for batched edits; PacketThread.edits says which)
  * @property {Doc['final']} final
  * @property {PacketThread[]} threads
  * @property {Array<{ id: string, lines: [number, number] | null, section: string[], label: string }>} locks
  * @property {Array<{ id: string, thread: string, text: string }>} decisions
  * @property {object[] | null} drafts
  * @property {{ actionable: number, new: number, reopened: number, reply: number, answer: number, open: number,
- *   awaitingReviewer: number, resolved: number, resolvedThisRound: number, outdated: number, unresolved: number,
- *   drafts: number, undelivered: number }} counts
+ *   apply: number, planned: number, awaitingReviewer: number, resolved: number, resolvedThisRound: number,
+ *   outdated: number, unresolved: number, drafts: number, undelivered: number }} counts planned: threads waiting for
+ *   the reviewer's APPLY
  * @property {string[]} resolvedThisRound
  * @property {boolean} firstPacket no earlier review was delivered to this agent (adds the protocol reminder)
  * @property {boolean} replyOnly approved with a final version that is head, but threads still need action: the agent
@@ -196,6 +219,8 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     reply: items.filter((i) => i.why === 'reply').length,
     answer: items.filter((i) => i.why === 'answer').length,
     open: items.filter((i) => i.why === 'open').length,
+    apply: items.filter((i) => i.why === 'apply').length,
+    planned: snap.threads.filter((t) => t.status === 'planned' && isAwaitingReviewer(t)).length,
     awaitingReviewer: snap.threads.filter(isAwaitingReviewer).length,
     resolved: snap.threads.filter((t) => t.status === 'resolved').length,
     resolvedThisRound: resolvedThisRound.length,
@@ -206,7 +231,15 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
   };
   const latest = deliver[deliver.length - 1] ?? null;
   const approval = approvalOf(doc, latest);
+  // batched edits, per actionable thread (an APPLY item is edited now): the newest review that handed it over; not
+  // for a plan (the plan gate wants the plan edited) nor a public web page (nothing to edit)
+  const modes = editsByThread(snap.reviews);
+  const batched = takesBatchedEdits(doc) ? items.filter((i) => i.why !== 'awaiting' && i.why !== 'apply' && modes.get(i.id) === 'batch') : [];
+  for (const i of batched) i.edits = 'batch';
+  const edits = batched.length ? 'batch' : 'now';
   const replyOnly = approval.approved && approval.finalNow && counts.actionable > 0;
+  // a batched round with nothing to edit now: the agent answers (planned / answered) and edits nothing yet
+  const repliesNow = batched.length > 0 && batched.length === counts.actionable && !replyOnly && doc.state !== 'closed';
   // nothing to apply once the reviewer approved the final version: a suggestion that came with it gets a reply
   if (replyOnly) for (const i of items) i.apply = null;
   const firstPacket = !snap.reviews.some((r) => r.deliveredTo?.[agent] && !delivering.has(r.id));
@@ -237,6 +270,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
       working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
       reviews: deliver.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
       verdict: latest?.verdict ?? null,
+      edits,
       final: doc.final ?? null,
       threads: items,
       locks: [],
@@ -247,7 +281,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
       firstPacket,
       replyOnly,
       agent,
-      next: codeNextStep(doc, ref, approval, counts.actionable),
+      next: repliesNow ? batchNextStep(ref) : codeNextStep(doc, ref, approval, counts.actionable),
     };
   }
 
@@ -273,6 +307,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
     reviews: deliver.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
     verdict: latest?.verdict ?? null,
+    edits,
     final: doc.final ?? null,
     threads: items,
     locks,
@@ -283,8 +318,55 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     firstPacket,
     replyOnly,
     agent,
-    next: snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable, root) : nextStep(doc, approval, counts.actionable),
+    next: repliesNow
+      ? batchNextStep(ref, { byReply: snapshot })
+      : snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable, root) : nextStep(doc, approval, counts.actionable),
   };
+}
+
+/**
+ * How each thread a review handed over is to be edited: the mode of the newest review that handed it over, delivered
+ * or not. Its new threads, replies and reopened threads take the review's mode ('batch' when it asked for batched
+ * edits and is not an approval, else 'now'); a thread it applies (review.apply, the APPLY round) is edited now.
+ * Threads no review handed over (an agent's question before the reviewer answered) are absent: edited now.
+ * @param {Review[]} reviews
+ * @returns {Map<string, 'now' | 'batch'>}
+ */
+export function editsByThread(reviews) {
+  /** @type {Map<string, 'now' | 'batch'>} */
+  const out = new Map();
+  for (const r of [...reviews].sort((a, b) => compareIds(a.id, b.id))) {
+    const mode = r.edits === 'batch' && r.verdict !== 'approved' ? 'batch' : 'now';
+    for (const id of r.newThreads ?? []) out.set(id, mode);
+    for (const x of r.replies ?? []) out.set(x.thread, mode);
+    for (const id of r.reopened ?? []) out.set(id, mode);
+    for (const id of r.apply ?? []) out.set(id, 'now');
+  }
+  return out;
+}
+
+/**
+ * Whether a doc takes batched edits (the EDITS line, packet.js): file and code docs, and a snapshot the agent
+ * revises; not a plan (the plan gate wants the plan edited) nor a public web page (nothing to edit). Only a snapshot
+ * has an origin type or a page URL (originType / pageUrlOf are empty for the other kinds).
+ * @param {Doc} doc
+ * @returns {boolean}
+ */
+export function takesBatchedEdits(doc) {
+  if (originType(doc) === 'plan') return false;
+  return !(pageUrlOf(doc) && /** @type {any} */ (doc).origin?.private !== true);
+}
+
+/**
+ * The NEXT line of a batched round with nothing to APPLY: replies only, no edits yet (the EDITS line says how). A
+ * file or code doc posts them with one replies-only revise; a snapshot (no working file) with `suiko reply`.
+ * @param {string} ref
+ * @param {{ byReply?: boolean }} [o] byReply: a snapshot doc
+ * @returns {string}
+ */
+function batchNextStep(ref, { byReply = false } = {}) {
+  if (byReply) return `answer each thread with suiko reply ${ref} <tid> -m <md> --status planned|answered|declined (no edits yet) -> suiko wait ${ref} (background)`;
+  return `replies only, no edits yet -> suiko revise ${ref} --replies - -> suiko wait ${ref} (background)`;
 }
 
 /**
@@ -359,6 +441,12 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
     note = `(orphaned: was ${quoteLabel(lk?.text ?? '', 60)} in ${where}; reanchor with suiko reanchor ${snap.doc.id} ${t.id} --lines A-B)`;
   }
   const conv = conversation(t);
+  // an APPLY item: the reviewer's original request goes above the planned reply (the agent may no longer have the
+  // round it planned in, e.g. after a compaction)
+  const request = why === 'apply' ? (t.comments ?? []).find((c) => c?.by?.kind !== 'agent' && !c?.apply && hasContent(c)) : undefined;
+  const shown = request && !conv.shown.includes(request) ? [request, ...conv.shown] : conv.shown;
+  const earlier = shown === conv.shown ? conv.earlier : conv.earlier - 1;
+  const useFiles = useTargets(t);
   const suggestion = t.suggestion ? { ...t.suggestion } : null;
   const pendingSuggestion = suggestion && (suggestion.status === 'pending' || suggestion.status === 'conflict');
   const section = code ? [] : anchor?.state === 'orphaned' ? d?.lastKnown?.section ?? anchor.section ?? [] : anchor?.section ?? [];
@@ -380,7 +468,7 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
     srcEditable: d?.srcEditable ?? true,
     anchorState: gone ? 'changed' : anchor?.state ?? 'exact',
     note,
-    comments: conv.shown.map((c) => ({
+    comments: shown.map((c) => ({
       by: c.by?.name ?? '',
       kind: c.by?.kind ?? 'human',
       body: c.body ?? '',
@@ -388,8 +476,11 @@ function packetThread(t, why, { snap, workingText, attachmentPath, env, cwd = nu
       version: c.version,
       status: c.status ?? null,
       hunk: c.by?.kind === 'agent' ? (t.changes ?? []).find((ch) => ch.version === c.version)?.hunk ?? null : null,
+      ...(c.use?.length ? { use: c.use.map((rel) => ({ path: attachmentPath(rel), name: useFiles.get(rel)?.name ?? nodePath.posix.basename(rel) })) } : {}),
+      ...(c.apply ? { apply: /** @type {true} */ (true) } : {}),
+      ...(c === request && shown !== conv.shown ? { request: /** @type {true} */ (true) } : {}),
     })),
-    earlier: conv.earlier,
+    earlier,
     suggestion,
     attachments: d?.crops ?? (t.attachments ?? []).map((a) => attachmentPath(a)),
     attachmentKind: d?.cropKind ?? attachmentKind(anchor),

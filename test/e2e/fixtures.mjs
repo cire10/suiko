@@ -2,7 +2,15 @@
 // Shared Playwright fixtures and helpers for the UI e2e tests:
 //   - `mock`: a fresh mock daemon per test (scenario chosen with test.use({ scenario })), closed afterwards;
 //   - `ui`: helpers to open a doc and wait for the guest handshake, reach the doc iframe, select text in it, click
-//     elements inside it, and read the guest's debug state.
+//     elements inside it, read the guest's debug state, run an item of the top bar's More menu (Source, History,
+//     Hide marks, Theme, Keyboard shortcuts, Settings, Document info), open a Settings section, run an item of a
+//     card's ⋯ menu, start a general comment (opening the thread panel, which a doc without threads opens without),
+//     show the outline rail (behind the ≡ button below 1600 px) and check the mode shown;
+//   - `page`: with the preferences the specs written before the calm-review defaults expect (LEGACY_PREFS: open on
+//     the changes, comments as drafts until Send, edits right away; and a new version shown where the reviewer reads,
+//     'latest': "Just tell me" no longer moves the view, and these specs expect the view to follow the head), pinned
+//     in localStorage before the app loads. Specs of the new defaults opt out with test.use({ prefs: 'defaults' }).
+//     The real-daemon specs, which extend Playwright's own test, add `page: pinnedPage`.
 
 import { test as base, expect } from '@playwright/test';
 import { TESTID } from '../../src/shared/protocol.js';
@@ -11,6 +19,37 @@ import { startMockServer } from './mock-server.mjs';
 /** @typedef {Awaited<ReturnType<typeof startMockServer>>} Mock */
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Frame} Frame */
+
+/**
+ * The preferences of the UI before the calm-review defaults (state.js readPrefs): what the existing specs test. A new
+ * version follows the head ('latest': from Read or Review while nothing is open), as the old 'toast' did before
+ * "Just tell me" stopped moving the view.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const LEGACY_PREFS = Object.freeze({ openIn: 'auto', sendMode: 'batch', onNewVersion: 'latest', editMode: 'now' });
+
+/**
+ * Pins LEGACY_PREFS (or `prefs`) in the UI's localStorage before the app loads, on every navigation of the page; a
+ * preference the test changed meanwhile (Settings) is kept. The doc frames are left alone.
+ * @param {Page} page
+ * @param {Record<string, string>} [prefs]
+ */
+export async function pinLegacyPrefs(page, prefs = LEGACY_PREFS) {
+  await page.addInitScript((p) => {
+    if (window.top !== window) return;
+    try {
+      for (const [k, v] of Object.entries(p)) if (localStorage.getItem(`suiko.${k}`) == null) localStorage.setItem(`suiko.${k}`, v);
+    } catch {
+      /* no storage: the defaults apply */
+    }
+  }, prefs);
+}
+
+/** The `page` fixture with LEGACY_PREFS pinned, for specs that extend Playwright's own test (the real daemon). */
+export const pinnedPage = async (/** @type {any} */ { page }, /** @type {(p: Page) => Promise<void>} */ use) => {
+  await pinLegacyPrefs(page);
+  await use(page);
+};
 
 export class Ui {
   /** @param {Page} page @param {Mock} mock */
@@ -145,10 +184,79 @@ export class Ui {
   card(id) {
     return this.page.locator(`[data-testid="thread-card"][data-thread-id="${id}"]`);
   }
+
+  /**
+   * An item of the top bar's More menu (⋯), by its data-menu-item.
+   * @param {'source'|'history'|'hide'|'theme'|'help'|'settings'|'info'} item
+   */
+  menuItem(item) {
+    return this.page.locator(`[role="menuitem"][data-menu-item="${item}"]`);
+  }
+
+  /**
+   * Opens the More menu (⋯) and clicks one of its items (the menu closes, except for the theme, which cycles).
+   * @param {'source'|'history'|'hide'|'theme'|'help'|'settings'|'info'} item
+   */
+  async menu(item) {
+    const more = this.page.getByTestId(TESTID.moreMenu);
+    if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+    await this.menuItem(item).click();
+  }
+
+  /**
+   * Opens Settings (if needed) on one of its sections; returns the dialog.
+   * @param {'general'|'reading'|'sending'|'context'|'about'} section
+   */
+  async settings(section) {
+    const dialog = this.page.getByTestId(TESTID.settingsDialog);
+    if (!(await dialog.count())) await this.menu('settings');
+    await dialog.locator(`[role="tab"][data-section="${section}"]`).click();
+    await expect(dialog.locator(`[role="tab"][data-section="${section}"]`)).toHaveAttribute('aria-selected', 'true');
+    return dialog;
+  }
+
+  /**
+   * Runs an item of a card's ⋯ menu (data-action: reopen, done, decision, show-change, apply, move, general,
+   * view-on, delete, send, reply, ...).
+   * @param {import('@playwright/test').Locator} card
+   * @param {string} action
+   */
+  async cardMenu(card, action) {
+    await card.locator('[data-card-menu]').click();
+    await this.page.locator(`[role="menuitem"][data-action="${action}"]`).click();
+  }
+
+  /**
+   * "General comment" (the thread panel's +). A doc without threads or drafts opens without the thread panel: the
+   * top bar's threads button opens it first.
+   */
+  async generalComment() {
+    const button = this.page.getByRole('button', { name: 'General comment' });
+    if (!(await button.isVisible())) await this.page.locator('.threads-toggle').click();
+    await button.click();
+  }
+
+  /** Shows the outline rail beside the doc (below 1600 px it is behind the ≡ button) or as a drawer (narrow). */
+  async showOutline() {
+    const nav = this.page.locator('#sr-nav');
+    if (!(await nav.isVisible())) await this.page.locator('button[aria-controls="sr-nav"]').click();
+    await expect(nav).toBeVisible();
+  }
+
+  /** Waits until the doc view shows a mode (Source and History have no tab unless shown). @param {string} mode */
+  async inMode(mode) {
+    await expect(this.page.locator('.doc-view')).toHaveAttribute('data-mode', mode);
+  }
 }
 
 export const test = base.extend(/** @type {any} */ ({
   scenario: ['round2', { option: true }],
+  // 'legacy' (LEGACY_PREFS pinned) or 'defaults' (the UI's own defaults)
+  prefs: ['legacy', { option: true }],
+  page: async (/** @type {any} */ { page, prefs }, /** @type {(p: Page) => Promise<void>} */ use) => {
+    if (prefs === 'legacy') await pinLegacyPrefs(page);
+    await use(page);
+  },
   mock: async (/** @type {any} */ { scenario }, /** @type {any} */ use) => {
     const mock = await startMockServer({ scenario });
     await use(mock);

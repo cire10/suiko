@@ -5,11 +5,13 @@
 //   getRender(store, doc, ver|'live', { stamp })     -> cached RenderResult (disk cache for versions, LRU for live)
 //   finalizeHtml(render, { assetBase, guestTag, stripCsp }) -> the HTML string the daemon serves
 //   renderFragment({ format, source })               -> sanitised HTML fragment
+//   textCharsOf(render)                              -> visible text characters (VersionManifest.textChars)
 //
 // RenderResult = { format, html, guestInsertAt, bodyEndAt, srcmap, text: { text, spans }, outline, assets,
 //                  externals, title, features: { mermaid, math, code } }
 // (`format` and `bodyEndAt` are additions to the frozen shape; bodyEndAt is where finalizeHtml appends the
-// vendored mermaid scripts for HTML docs.) getRender results also carry `sourceSha256`.
+// vendored mermaid scripts for HTML docs.) getRender results also carry `sourceSha256`, and version renders `rules`
+// (RENDER_RULES: a disk-cached render made under other rules is recomputed).
 
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -44,7 +46,15 @@ export { ASSET_BASE_PLACEHOLDER } from './shell.js';
  * @property {string} title
  * @property {{ mermaid: boolean, math: boolean, code: boolean }} features
  * @property {string} [sourceSha256]
+ * @property {number} [rules] RENDER_RULES of a version render (disk cache)
  */
+
+/**
+ * Revision of the render rules that change what a render holds without a RENDERER_VERSION change (e.g. when an HTML
+ * doc gets the vendored mermaid: 2 = never with module scripts or a mermaid of its own). A version render cached on
+ * disk under other rules is recomputed, so a fixed rule reaches docs reviewed before the fix.
+ */
+export const RENDER_RULES = 2;
 
 /**
  * Normalise a format name ('md' / 'markdown' / 'html' / 'htm' / 'text'); falls back to the doc path's extension.
@@ -107,6 +117,19 @@ export function textRender() {
   };
 }
 
+/**
+ * Visible text characters of a render: its text stream (protocol.js TEXT_EXCLUDE left out: scripts, styles, diagram
+ * sources...) with whitespace runs collapsed, trimmed. Recorded on each version's manifest (textChars) so the review
+ * UI can tell a long doc by what the reviewer reads, not by its source size (a report's data blobs and scripts do not
+ * count). null for the empty 'text' render of a code doc.
+ * @param {RenderResult | null | undefined} render
+ * @returns {number | null}
+ */
+export function textCharsOf(render) {
+  if (!render || render.format === 'text') return null;
+  return String(render.text?.text ?? '').replace(/\s+/g, ' ').trim().length;
+}
+
 const memory = new LruCache(32);
 
 /** Drop in-memory renders (tests). */
@@ -156,12 +179,15 @@ export async function getRender(store, doc, ver, { stamp = true } = {}) {
   const file = dir ? path.join(dir, name) : null;
   if (file) {
     const cached = await readJsonCache(file);
-    if (cached && cached.format === format && typeof cached.html === 'string' && cached.srcmap) {
+    const usable = cached && cached.format === format && typeof cached.html === 'string' && cached.srcmap;
+    if (usable && cached.rules === RENDER_RULES) {
       memory.set(key, cached);
       return cached;
     }
   }
-  const r = { ...renderSourceSync({ format, source: text, docPath: doc.path, stamp }), sourceSha256: sha };
+  const r = {
+    ...renderSourceSync({ format, source: text, docPath: doc.path, stamp }), sourceSha256: sha, rules: RENDER_RULES,
+  };
   if (file) await writeJsonCache(file, r);
   memory.set(key, r);
   return r;

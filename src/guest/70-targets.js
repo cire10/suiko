@@ -11,9 +11,14 @@
 //     scope's TEXT_EXCLUDE text with prefix/suffix scoring; else in the whole document (proximity hint = scope
 //     start); else outline the scope element(s) with state 'block'; else 'missing'.
 //   - no quote (section, source, lock ranges): the scope element(s); sections and locks get a bracket.
-// Painting: text ranges go to CSS highlights by state (open/addressed/needs_input -> sr-open, resolved ->
-// sr-resolved, outdated/orphaned -> sr-outdated, draft -> sr-draft, lock -> sr-lock; the active one also sr-active);
-// numbered pins in the right margin (stacked 22 px apart); outlines/regions/brackets in the overlay.
+// Painting, coloured by whose turn the thread is, like its card's chip (the UI's colour language): text ranges go
+// to CSS highlights by state (open -> sr-open, with the agent; addressed -> sr-check, answered or changed, for the
+// reviewer to check; declined -> sr-declined, the agent did not change it; needs_input -> sr-answer, a question for
+// the reviewer; planned -> sr-planned, will change;
+// resolved -> sr-resolved; outdated / orphaned -> sr-outdated, lost its place; draft -> sr-draft; lock -> sr-lock;
+// the active one also sr-active); numbered pins in the right margin (stacked 22 px apart) and outlines / regions /
+// brackets in the overlay get the matching st-* class (40-overlay.js); the active thread keeps its colour and gets
+// the accent's ring.
 // A resolved thread is done with: nothing of it is drawn and clicks go through it unless it is the active one (its
 // card selected), but it keeps its position, so the card can still scroll to it.
 // Positions (posted by Main): {[id]: {top, height, state: 'ok'|'block'|'hidden'|'missing'}} where top/height are in
@@ -24,14 +29,16 @@
 
 const Targets = (() => {
   const STATE_HL = /** @type {Record<string, string>} */ ({
-    open: 'sr-open', addressed: 'sr-open', needs_input: 'sr-open', resolved: 'sr-resolved', outdated: 'sr-outdated',
-    orphaned: 'sr-outdated', draft: 'sr-draft', lock: 'sr-lock',
+    open: 'sr-open', addressed: 'sr-check', declined: 'sr-declined', needs_input: 'sr-answer', planned: 'sr-planned',
+    resolved: 'sr-resolved',
+    outdated: 'sr-outdated', orphaned: 'sr-outdated', draft: 'sr-draft', lock: 'sr-lock',
   });
-  const STATE_COLOR = /** @type {Record<string, string>} */ ({
-    open: '#d29922', needs_input: '#e16f24', addressed: '#1f6feb', outdated: '#8c959f', orphaned: '#8c959f',
-    draft: '#0969da', lock: '#8250df',
+  /** The overlay's colour class of a target's marks (40-overlay.js st-*), by state. */
+  const STATE_TONE = /** @type {Record<string, string>} */ ({
+    open: 'st-with', addressed: 'st-check', declined: 'st-declined', needs_input: 'st-answer', planned: 'st-planned',
+    outdated: 'st-lost',
+    orphaned: 'st-lost', resolved: 'st-done', draft: 'st-draft', lock: 'st-lock',
   });
-  const ACTIVE_COLOR = '#fb8500';
   const PIN_GAP = 22;
   const ELEMENT_KINDS = new Set(['element', 'cell']);
 
@@ -233,7 +240,7 @@ const Targets = (() => {
     pins.begin();
     /** @type {typeof positions} */
     const pos = {};
-    /** @type {Array<{id: string, label: string, top: number, color: string, active: boolean}>} */
+    /** @type {Array<{id: string, label: string, top: number, tone: string, active: boolean}>} */
     const pinQueue = [];
     const sy = window.scrollY;
     for (const r of resolved.values()) {
@@ -255,33 +262,30 @@ const Targets = (() => {
       };
       if (hidden || !isDrawn(r) || !geo.visible || !geo.rect) continue;
       const active = id === activeId;
-      const color = active ? ACTIVE_COLOR : STATE_COLOR[r.t.state] || STATE_COLOR.open;
+      const tone = STATE_TONE[r.t.state] || STATE_TONE.open;
       const isLock = r.t.state === 'lock';
       if (isLock || r.t.kind === 'section') {
         const rect = geo.rect;
-        const b = marks.el('bracket:' + id, 'bracket');
+        const b = marks.el('bracket:' + id, `bracket ${tone}${active ? ' active' : ''}`);
         Overlay.place(b, Math.max(1, rect.left - 12), rect.top, null, rect.height);
-        b.style.setProperty('--c', color);
         b.title = isLock ? 'Agreed (locked)' + (r.t.label ? ': ' + r.t.label : '') : r.t.label || 'Section comment';
         b.onclick = guard(() => activate(id), 'bracket-click');
       }
       if (!r.range) {
         if (geo.region) {
-          const box = marks.el('region:' + id, 'box region');
+          const box = marks.el('region:' + id, `box region ${tone}${active ? ' active' : ''}`);
           Overlay.place(box, geo.region.left, geo.region.top, geo.region.width, geo.region.height);
-          box.style.setProperty('--c', color);
         } else if (!isLock && r.t.kind !== 'section') {
           const el = /** @type {Element} */ (r.mark || r.el);
           const rect = el === r.el && r.endEl ? geo.rect : el.getBoundingClientRect();
           const cls = 'box ' + (r.mark && r.mark !== r.el ? 'node' : 'outline') + (r.status === 'block' ? ' block' : '') +
-            (active ? ' active' : '');
+            ` ${tone}` + (active ? ' active' : '');
           const box = marks.el('outline:' + id, cls);
           Overlay.place(box, rect.left - 3, rect.top - 3, rect.width + 6, rect.height + 6);
-          box.style.setProperty('--c', color);
         }
       }
       if (!isLock) {
-        pinQueue.push({ id, label: r.t.num != null ? String(r.t.num) : '•', top: geo.rect.top, color, active });
+        pinQueue.push({ id, label: r.t.num != null ? String(r.t.num) : '•', top: geo.rect.top, tone, active });
       }
     }
     // Pins in the right margin, stacked so they never overlap.
@@ -293,11 +297,10 @@ const Targets = (() => {
       const top = Math.max(p.top, prev + PIN_GAP);
       prev = top;
       if (top < -PIN_GAP || top > vh + PIN_GAP) continue;
-      const pin = pins.el('pin:' + p.id, 'pin' + (p.active ? ' active' : ''), 'button');
+      const pin = pins.el('pin:' + p.id, `pin ${p.tone}${p.active ? ' active' : ''}`, 'button');
       pin.textContent = p.label;
       pin.setAttribute('type', 'button');
       pin.setAttribute('aria-label', 'Thread ' + p.label);
-      pin.style.setProperty('--c', p.color);
       Overlay.place(pin, vw - 26, top);
       pin.onclick = guard(() => activate(p.id), 'pin-click');
     }

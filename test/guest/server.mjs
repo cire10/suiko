@@ -9,7 +9,8 @@
 //                  bundle from buildGuestBundle(); /__sr/<RV>/vendor/<path> - vendored doc libraries through
 //                  VENDOR_DOC (the snip rasteriser, modern-screenshot, is imported from there, like on the daemon);
 //                  /img/*.png - PNGs generated in memory (plain zlib, no deps); /raw/<name>.html - the same fixture
-//                  without the guest (baseline for observe-only checks).
+//                  without the guest (baseline for observe-only checks); /frame/ok.html and /frame/blocked.html -
+//                  pages a doc frames (blocked.html sends frame-ancestors 'none').
 // Both servers bind 127.0.0.1 on port 0 by default (never the default Suiko ports).
 
 import http from 'node:http';
@@ -113,6 +114,14 @@ export async function startHarness(opts = {}) {
       return send(200, /\.m?js$/.test(abs) ? 'text/javascript; charset=utf-8' : 'application/octet-stream', readFileSync(abs));
     }
     if (url.pathname === '/img/arch.png') return send(200, 'image/png', ARCH_PNG);
+    if (url.pathname === '/frame/blocked.html' || url.pathname === '/frame/ok.html') {
+      // a page a doc frames: blocked.html refuses every framer (its own frame-ancestors), ok.html loads
+      const headers = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' };
+      if (url.pathname === '/frame/blocked.html') Object.assign(headers, { 'content-security-policy': "frame-ancestors 'none'" });
+      res.writeHead(200, headers);
+      res.end('<!doctype html><title>status</title><p>all systems normal</p>');
+      return undefined;
+    }
     const raw = /^\/raw\/([a-z0-9-]+)\.html$/.exec(url.pathname);
     if (raw && existsSync(join(FIXTURES, raw[1] + '.html'))) {
       return send(200, 'text/html; charset=utf-8', readFileSync(join(FIXTURES, raw[1] + '.html'), 'utf8'));

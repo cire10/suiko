@@ -7,7 +7,7 @@
 //   - fuzzy search with highlighted matches; arrows / Enter; dimmed commands show why and do not run;
 //   - "t4" jumps to a thread, headings and versions are found, sub-lists (version, compare in two steps, the close
 //     confirmation, another doc) with a breadcrumb and Backspace to go back; recent commands come first;
-//   - palette-only commands: filters, Submit review as a verdict, Mark all changes seen, Record, copy, close session;
+//   - palette-only commands: filters, Send / Approve with a verdict, Mark all changes seen, Record, copy, close session;
 //   - every setting takes effect and is remembered: theme, outline rail, thread panel, single-letter shortcuts (off:
 //     c / b / j do nothing in the UI or the doc, the guest is told), switching to Changes on a new version, asking
 //     before Send now, the default verdict, About;
@@ -61,8 +61,10 @@ async function focusDoc(ui) {
 
 test('Cmd+K and Ctrl+K toggle the palette from the UI, from inside the doc and from the button; Esc gives the focus back', async ({ page, ui }) => {
   await ui.open('kitchen-sink');
+  // In a doc the palette button is a search icon; its key is in its tooltip.
   const button = page.getByTestId(TESTID.commandPaletteOpen);
-  await expect(button.locator('kbd')).toHaveText(/^(⌘K|Ctrl\+K)$/);
+  await expect(button).toHaveAttribute('aria-label', 'Command palette');
+  await expect(button).toHaveAttribute('title', /\((⌘K|Ctrl\+K)\)$/);
 
   await focusUi(page);
   await page.keyboard.press(`${MOD}+k`);
@@ -106,13 +108,16 @@ test('fuzzy search ranks and highlights; arrows and Enter run; an empty query li
   expect(count).toBeGreaterThan(40);
   expect(count).toBeLessThanOrEqual(200);
   // Shortcut chips at the right.
-  await expect(item(page, 'verify').locator('.pi-keys kbd')).toHaveText('v');
+  await expect(item(page, 'my-turn').locator('.pi-keys kbd')).toHaveText('v');
   await expect(item(page, 'settings').locator('.pi-keys kbd')).toHaveText(/^(⌘,|Ctrl\+,)$/);
 
-  await paletteInput(page).fill('verif');
-  await expect(firstItem(page)).toHaveAttribute('data-command-id', 'verify');
-  await expect(firstItem(page).locator('mark')).toHaveText(['Verif']);
+  await paletteInput(page).fill('your tu');
+  await expect(firstItem(page)).toHaveAttribute('data-command-id', 'my-turn');
+  await expect(firstItem(page).locator('mark')).toHaveText(['your tu']);
   await expect(firstItem(page)).toHaveAttribute('aria-selected', 'true');
+  // the words of earlier versions still find it
+  await paletteInput(page).fill('verify');
+  await expect(item(page, 'my-turn')).toBeVisible();
 
   // A subsequence across words, in any order.
   await paletteInput(page).fill('approve submit');
@@ -226,7 +231,7 @@ test('"t4" jumps to a thread; headings, versions, compare in two steps; Backspac
   await expect(paletteInput(page)).toHaveAttribute('placeholder', /thread id like t4/);
   await page.keyboard.press('Backspace');
   await expect(page.locator('.palette-crumbs')).toHaveCount(0);
-  await expect(item(page, 'verify')).toBeVisible();
+  await expect(item(page, 'my-turn')).toBeVisible();
   await page.keyboard.press('Escape');
 
   // Switch to version…: v1, then the doc shows v1.
@@ -285,9 +290,10 @@ test('palette-only commands: filters, submit as a verdict, mark all seen, record
   await page.keyboard.press('Escape');
 
   await openPalette(page, 'filter resolved');
-  await expect(firstItem(page)).toHaveAttribute('data-command-id', 'filter-resolved');
+  await expect(firstItem(page)).toHaveAttribute('data-command-id', 'filter-done');
+  await expect(firstItem(page)).toContainText('Show done threads');
   await page.keyboard.press('Enter');
-  await expect(page.locator('.filter[data-filter="resolved"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.filter[data-filter="done"]')).toHaveAttribute('aria-selected', 'true');
   await expect(ui.card('t5')).toBeVisible();
 
   await openPalette(page, 'submit request changes');
@@ -321,7 +327,7 @@ test('palette-only commands: filters, submit as a verdict, mark all seen, record
   await expect(firstItem(page)).toHaveAttribute('data-command-id', 'copy-prompt');
   await page.keyboard.press('Enter');
   await expect(toastWith(page, 'Prompt copied')).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Run `suiko feedback kitchen-sink` and address it.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Run suiko feedback kitchen-sink and address it.');
   await openPalette(page, 'copy spec path');
   await page.keyboard.press('Enter');
   await expect(toastWith(page, 'kitchen-sink.md')).toBeVisible();
@@ -366,7 +372,7 @@ test('on the doc list the palette offers what works there and opens a doc', asyn
   await expect(page.getByTestId(TESTID.docFrame)).toBeVisible();
 });
 
-test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now confirmation, About; remembered', async ({ page, ui, mock }) => {
+test('Settings: Cmd+, and the More menu; theme, rail, thread panel, verdict, Ask before sending, About; remembered', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   await focusUi(page);
   const settings = page.getByTestId(TESTID.settingsDialog);
@@ -378,10 +384,13 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await expect(settings).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settings).toHaveCount(0);
-  await page.getByTestId(TESTID.settingsOpen).click();
+  await ui.menu('settings');
   await expect(settings).toBeVisible();
+  /** Shows a section of Settings (its sidebar). @param {string} section */
+  const section = (section) => settings.locator(`[role="tab"][data-section="${section}"]`).click();
 
   // About.
+  await section('about');
   const about = settings.locator('[data-setting="about"]');
   await expect(about.locator('[data-about="version"]')).toHaveText('v0.0.0-mock');
   await expect(about.locator('[data-about="root"]')).toHaveText(FIXTURE_DIR);
@@ -390,11 +399,16 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await expect(about).toContainText('suiko feedback kitchen-sink');
 
   // Theme: the same state as `t`.
+  await section('general');
   await settings.getByRole('radio', { name: 'Dark' }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
-  // Outline rail: Never hides it beside the doc (the menu button shows it again), Always / Auto.
+  // Outline rail: Auto keeps it behind the ≡ button below 1600 px; Always shows it beside the doc; Never hides it
+  // (the ≡ button shows it again).
   const nav = page.locator('#sr-nav');
+  await expect(nav).toBeHidden();
+  await section('reading');
+  await settings.getByRole('radio', { name: 'Always' }).check();
   await expect(nav).toBeVisible();
   await settings.getByRole('radio', { name: 'Never' }).check();
   await expect(nav).toBeHidden();
@@ -404,10 +418,11 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await settings.getByRole('switch', { name: 'Thread panel open by default' }).uncheck();
   await expect(page.locator('#sr-side')).toBeHidden();
 
-  // Default verdict when nothing is blocking.
-  await settings.locator('[data-setting="defaultVerdict"]').getByRole('radio', { name: 'Request changes' }).check();
-  // Ask before Send now.
-  await settings.getByRole('switch', { name: 'Ask before Send now' }).check();
+  // The verdict when sending drafts, when nothing is a Must fix.
+  await section('sending');
+  await settings.locator('[data-setting="defaultVerdict"]').getByRole('radio', { name: 'Needs changes' }).check();
+  // Ask before sending.
+  await settings.getByRole('switch', { name: 'Ask before sending' }).check();
   await page.keyboard.press('Escape');
 
   await page.reload();
@@ -420,11 +435,12 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await page.locator('button[aria-controls="sr-nav"]').click();
   await expect(nav).toBeHidden();
 
-  await page.getByTestId(TESTID.submitReviewOpen).click();
-  await expect(page.getByTestId(TESTID.submitReviewDialog).locator('input[value="changes_requested"]')).toBeChecked();
+  // the verdict for drafts is remembered (the Send dialog starts on it when there are drafts: defaults.spec)
+  await ui.settings('sending');
+  await expect(settings.locator('[data-setting="defaultVerdict"] input[value="changes_requested"]')).toBeChecked();
   await page.keyboard.press('Escape');
 
-  // Ask before Send now: the key asks first; nothing goes out until confirmed.
+  // Ask before sending: the key asks first; nothing goes out until confirmed.
   await page.locator('.threads-toggle').click();
   await modeTab(page, 'review').click();
   await page.getByRole('button', { name: 'General comment' }).click();
@@ -441,25 +457,27 @@ test('Settings: Cmd+, and the gear; theme, rail, thread panel, verdict, Send now
   await page.getByTestId(TESTID.composerSendNow).click();
   await expect(confirm).toBeVisible();
   await confirm.getByRole('button', { name: 'Send now' }).click();
-  await expect(toastWith(page, 'Sent to the agent.')).toBeVisible();
+  await expect(toastWith(page, 'Saved for Claude. It gets it when it connects.')).toBeVisible();
   expect(reviews()).toBe(1);
 
-  // Back to the defaults: Auto rail and the panel open by default.
-  await page.getByTestId(TESTID.settingsOpen).click();
+  // Back to the defaults: Auto rail (behind the ≡ button at this width) and the panel open by default.
+  await ui.menu('settings');
+  await section('reading');
   await settings.getByRole('radio', { name: 'Always' }).check();
   await expect(nav).toBeVisible();
   await settings.getByRole('radio', { name: 'Auto' }).check();
+  await expect(nav).toBeHidden();
   await settings.getByRole('switch', { name: 'Thread panel open by default' }).check();
   await expect(page.locator('#sr-side')).toBeVisible();
-  await expect(page.locator('button[aria-controls="sr-nav"]')).toHaveCount(0);
+  await expect(page.locator('button[aria-controls="sr-nav"]')).toBeVisible();
   expect(ui.errors).toEqual([]);
 });
 
-test('Settings: "Switch to Changes" on a new version, never while a comment is open', async ({ page, ui, mock }) => {
+test('Settings: "Show what changed" on a new version, never while a comment is open', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   await modeTab(page, 'review').click();
-  await page.getByTestId(TESTID.settingsOpen).click();
-  await page.getByTestId(TESTID.settingsDialog).getByRole('radio', { name: 'Switch to Changes' }).check();
+  const settings = await ui.settings('reading');
+  await settings.getByRole('radio', { name: 'Show what changed' }).check();
   await page.keyboard.press('Escape');
   const d = mock.doc('kitchen-sink');
   d.revise({ source: d.source(2).replace('Last revised 2026-10-11.', 'Last revised 2026-10-12.'), summary: 'date' });
@@ -472,7 +490,7 @@ test('Settings: "Switch to Changes" on a new version, never while a comment is o
   await page.getByRole('button', { name: 'General comment' }).click();
   await page.getByTestId(TESTID.composerTextarea).fill('Hold on');
   d.revise({ source: d.source(3).replace('Last revised 2026-10-12.', 'Last revised 2026-10-14.'), summary: 'date again' });
-  await expect(toastWith(page, 'v4 ready')).toBeVisible();
+  await expect(toastWith(page, 'Claude recorded v4')).toBeVisible();
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('3');
   await expect(page.getByTestId(TESTID.composerTextarea)).toHaveValue('Hold on');
@@ -482,7 +500,7 @@ test('Settings: "Switch to Changes" on a new version, never while a comment is o
 test('single-letter shortcuts off: letters do nothing in the UI or the doc; Esc and Cmd combos work; remembered', async ({ page, ui }) => {
   await ui.open('kitchen-sink');
   await modeTab(page, 'review').click();
-  await page.getByTestId(TESTID.settingsOpen).click();
+  await ui.menu('settings');
   const settings = page.getByTestId(TESTID.settingsDialog);
   await expect(settings).toContainText('Single-letter shortcuts');
   await settings.getByRole('switch', { name: 'Single-letter shortcuts' }).uncheck();
@@ -514,7 +532,7 @@ test('single-letter shortcuts off: letters do nothing in the UI or the doc; Esc 
   // Cmd+K still works from the doc; the help shows those keys as off.
   await page.keyboard.press(`${MOD}+k`);
   await expect(palette(page)).toBeVisible();
-  await expect(item(page, 'verify').locator('.pi-keys')).toHaveCount(0);
+  await expect(item(page, 'my-turn').locator('.pi-keys')).toHaveCount(0);
   await expect(item(page, 'submit').locator('.pi-keys kbd')).toHaveText(/^(⌘⇧↵|Ctrl\+Shift\+Enter)$/);
   await page.keyboard.press(`${MOD}+/`);
   const help = page.getByTestId(TESTID.helpOverlay);
@@ -522,6 +540,13 @@ test('single-letter shortcuts off: letters do nothing in the UI or the doc; Esc 
   await expect(palette(page)).toHaveCount(0);
   await expect(help.locator('[data-key-row="comment"] .keys')).toHaveText('off (Settings)');
   await expect(help.locator('[data-key-row="submit"] kbd')).toHaveText(/^(⌘⇧↵|Ctrl\+Shift\+Enter)$/);
+  await page.keyboard.press('Escape');
+  // The More menu shows only the keys that still work.
+  await page.getByTestId(TESTID.moreMenu).click();
+  await expect(ui.menuItem('source').locator('.menu-key')).toHaveCount(0);
+  await expect(ui.menuItem('theme').locator('.menu-key')).toHaveCount(0);
+  await expect(ui.menuItem('help').locator('.menu-key')).toHaveText(/^(⌘\/|Ctrl\+\/)$/);
+  await expect(ui.menuItem('settings').locator('.menu-key')).toHaveText(/^(⌘,|Ctrl\+,)$/);
   await page.keyboard.press('Escape');
 
   // Remembered, and sent to the guest with init.
@@ -578,7 +603,7 @@ test('keyboard shortcuts: Cmd+/ and ?, generated from the command registry, with
   await expect(help).toBeVisible();
   await page.keyboard.press('?');
   await expect(help).toHaveCount(0);
-  await page.getByTestId(TESTID.helpOpen).click();
+  await ui.menu('help');
   await expect(help).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(help).toHaveCount(0);
@@ -613,8 +638,9 @@ test('Cmd+K inside the composer opens the palette and keeps the draft; one dialo
   await expect(page.getByTestId(TESTID.helpOverlay)).toHaveCount(0);
   await expect(ta).toHaveValue('Keep this text');
 
-  // A reply box keeps its text too.
+  // A reply box keeps its text too (t3 waits for Claude: listed under its filter).
   await page.getByTestId(TESTID.composer).getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('.thread-panel .filter[data-filter="agent"]').click();
   await ui.card('t3').getByRole('button', { name: 'Reply', exact: true }).click();
   const reply = page.getByTestId(TESTID.replyTextarea);
   await reply.fill('Still open?');

@@ -190,6 +190,54 @@ test('mermaid-init shows parse errors and the diagram source in place', async (t
   }
 });
 
+test('mermaid-init leaves diagrams the doc rendered (svg / data-processed) and empty sources alone', async (t) => {
+  if (!browser) return t.skip(skipReason);
+  // A doc whose own mermaid already drew one diagram and is in the middle of another (mermaid empties the element
+  // while it renders), next to one that nobody drew: only that one is Suiko's to render.
+  const page = `<!doctype html><html><head><title>Own diagrams</title></head><body>
+<pre class="mermaid" id="mine">flowchart LR
+  A --> B</pre>
+<div class="mermaid" id="drawn" data-processed="true"><svg id="own-svg" width="10" height="10"><text>own</text></svg></div>
+<div class="mermaid" id="themed"><svg id="own-svg-2" width="10" height="10"></svg></div>
+<pre class="mermaid" id="busy" data-processed="true"></pre>
+<pre class="mermaid" id="empty">   </pre>
+<script src="${base}/__sr/vendor/mermaid/mermaid.min.js"></script><script src="${base}/__sr/static/mermaid-init.js"></script>
+</body></html>`;
+  pages.set('/docs/own-mermaid.html', page);
+  const p = await browser.newPage();
+  const errors = [];
+  p.on('pageerror', (e) => errors.push(String(e)));
+  try {
+    await p.goto(`${base}/docs/own-mermaid.html`);
+    await p.waitForSelector('#mine svg', { timeout: 20000 });
+    // a theme change re-renders Suiko's own diagram only
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('sr-theme', { detail: 'dark' })));
+    await p.waitForTimeout(300);
+    await p.waitForSelector('#mine svg', { timeout: 20000 });
+    const state = await p.evaluate(() => ({
+      drawn: document.getElementById('drawn').innerHTML,
+      drawnKind: document.getElementById('drawn').getAttribute('data-sr-kind'),
+      themed: !!document.getElementById('own-svg-2'),
+      busy: document.getElementById('busy').innerHTML,
+      empty: document.getElementById('empty').textContent,
+      emptyProcessed: document.getElementById('empty').getAttribute('data-processed'),
+      errors: document.querySelectorAll('.sr-mermaid-error').length,
+      mine: document.getElementById('mine').getAttribute('data-processed'),
+    }));
+    assert.equal(state.drawn, '<svg id="own-svg" width="10" height="10"><text>own</text></svg>');
+    assert.equal(state.drawnKind, null, 'not even marked');
+    assert.equal(state.themed, true);
+    assert.equal(state.busy, '');
+    assert.equal(state.empty, '   ');
+    assert.equal(state.emptyProcessed, null);
+    assert.equal(state.errors, 0, 'no "No diagram type detected" error boxes');
+    assert.equal(state.mine, 'true');
+    assert.deepEqual(errors, []);
+  } finally {
+    await p.close();
+  }
+});
+
 test('HTML doc in Chrome: appended mermaid renders, srids present, static text matches the stream', async (t) => {
   if (!browser) return t.skip(skipReason);
   const source = readFileSync(path.join(FIXTURES, 'app-spec.html'), 'utf8');

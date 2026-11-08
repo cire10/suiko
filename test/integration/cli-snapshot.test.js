@@ -167,7 +167,7 @@ describe('open <dir>', () => {
     ]);
     assert.equal(lines[4], 'skipped: 1 dot-directory, 1 node_modules, 1 symlink leading outside the directory or into a skipped path');
     assert.equal(lines[5], 'next: run `suiko wait --all` in the background');
-    assert.equal(lines[6], `created ${path.join(ws.root, '.specreview')}/ (commit it with the specs)`);
+    assert.equal(lines[6], `created ${path.join(ws.root, '.specreview')}/ (commit it with the docs)`);
     assert.equal(lines.length, 7);
 
     const again = await cli(['open', 'specs', '--json']);
@@ -265,7 +265,7 @@ describe('open <dir>: workspaces, symlinks, overlaps, dirty docs', () => {
     fs.writeFileSync(path.join(dir, 'f.md'), '# F\n');
     const first = await cli(['open', 'mixed']);
     assert.equal(first.code, 0, first.stderr);
-    assert.match(first.stdout, /^suiko: tracking mixed\/e\.md as "e" .*\nexternal hosts loaded live by the doc: tracker\.example\.com \(set render\.network/m);
+    assert.match(first.stdout, /^suiko: tracking mixed\/e\.md as "e" .*\nthe doc loads content from tracker\.example\.com when viewed$/m);
     fs.appendFileSync(path.join(dir, 'e.md'), '\nMore.\n');
     const r = await cli(['open', 'mixed']);
     assert.equal(r.code, 0, r.stderr);
@@ -289,7 +289,7 @@ describe('open - and status: encodings, externals, no fake file paths', () => {
     });
     assert.equal(code, 0, err.text());
     assert.match(out.text(), /^suiko: tracking piped text as "u16" \(markdown, 3 lines\)/);
-    assert.match(out.text(), /^external hosts loaded live by the doc: cdn\.example\.com /m);
+    assert.match(out.text(), /^the doc loads content from cdn\.example\.com when viewed$/m);
     const ctx = await engineCtx(ws.root);
     assert.equal((await ctx.store.readVersion('u16', 1)).source, text);
   });

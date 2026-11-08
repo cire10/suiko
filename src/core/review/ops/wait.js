@@ -9,6 +9,10 @@
 //    requireAnswers (`suiko wait`; never the plan gate), also refuses ('unanswered', with
 //    the threads) when every review of a doc reached this agent but a thread they handed over still waits on its
 //    reply: the reviewer reads replies in Suiko, so an answer given only in the agent's chat never reaches them.
+//    A `planned` reply answers a thread (it waits for the reviewer's APPLY, threadstate.js); an applied thread
+//    (review.apply) is handed over again until the agent records the change. Each thread says whether the newest
+//    review that handed it over asked for batched edits (`batch`, packet-data.js editsByThread), so the refusal can
+//    ask for a `planned` reply instead of an edit.
 // 2. Registers a waiter per doc (or '_all' for every doc), which supersedes older waiters of the same agent;
 //    heartbeats every heartbeatMs (10 s). A superseded waiter returns 'superseded' and never delivers.
 // 3. Checks for undelivered reviews now and on every change: fs.watch on each doc's reviews/ directory and its
@@ -30,6 +34,7 @@ import { ALL_DOCS } from '../../store/store.js';
 import { isGated, isVirtual } from '../../store/snapshot.js';
 import { createLogger } from '../../util/log.js';
 import { isActionable, lastIndexes } from '../threadstate.js';
+import { editsByThread, takesBatchedEdits } from '../packet-data.js';
 import { deliverPacket } from './feedback.js';
 import { readHead, readWorkingState, resolveDoc } from './common.js';
 
@@ -39,7 +44,8 @@ const log = createLogger('review:wait');
  * @typedef {import('../context.js').Ctx} Ctx
  * @typedef {import('../../../shared/types.js').Doc} Doc
  * @typedef {import('../packet-data.js').Packet} Packet
- * @typedef {{ id: string, type: string, status: string, replied: boolean }} UnansweredThread
+ * @typedef {{ id: string, type: string, status: string, replied: boolean, batch: boolean }} UnansweredThread
+ *   batch: the newest review that handed it over asked for batched edits (answer now, edit in the APPLY round)
  * @typedef {{ status: 'delivered' | 'timeout' | 'closed' | 'dirty' | 'unanswered' | 'superseded', packets: Packet[],
  *   text: string, docId?: string, threads?: UnansweredThread[], by?: number, aborted?: boolean,
  *   missing?: boolean, path?: string }} WaitResult missing: 'dirty' because the working copy is gone
@@ -48,8 +54,9 @@ const log = createLogger('review:wait');
 /**
  * The threads a doc's delivered reviews handed to `agent` that still wait on its reply (actionable: open, or the
  * reviewer spoke last). `replied`: the agent's reply is the newest comment, so the thread is open only because that
- * reply set no status. Empty while any review has not reached the agent yet: the wait delivers it at once, together
- * with every thread that needs action.
+ * reply set no status; `batch`: its newest handing review asked for batched edits (a plan doc or a public web page
+ * never: the packet asks for edits or replies there). Empty while any review has not reached the agent yet: the wait
+ * delivers it at once, together with every thread that needs action.
  * @param {Ctx} ctx
  * @param {Doc} doc
  * @param {string} agent
@@ -58,19 +65,15 @@ const log = createLogger('review:wait');
 export async function unansweredThreads(ctx, doc, agent) {
   const reviews = await ctx.store.listReviews(doc.id);
   if (!reviews.length || reviews.some((r) => !r.deliveredTo?.[agent])) return [];
-  /** @type {Set<string>} */
-  const handed = new Set();
-  for (const r of reviews) {
-    for (const id of r.newThreads ?? []) handed.add(id);
-    for (const x of r.replies ?? []) handed.add(x.thread);
-    for (const id of r.reopened ?? []) handed.add(id);
-  }
+  // every thread a review handed over (new threads, replies, reopened, applied), with its edits mode
+  const handed = editsByThread(reviews);
   if (!handed.size) return [];
+  const batchable = takesBatchedEdits(doc);
   return (await ctx.store.listThreads(doc.id))
     .filter((t) => handed.has(t.id) && isActionable(t))
     .map((t) => {
       const { lastAgent, lastHuman } = lastIndexes(t);
-      return { id: t.id, type: t.type, status: t.status, replied: lastAgent > lastHuman };
+      return { id: t.id, type: t.type, status: t.status, replied: lastAgent > lastHuman, batch: batchable && handed.get(t.id) === 'batch' };
     });
 }
 

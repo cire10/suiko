@@ -8,19 +8,58 @@
   min-width: 0;
 }
 
+/* The header: "v1 → v3 since your last review" with Accept all at its right, the stats and seen progress, the
+   version summary, then Prev / Next and the Inline / Side by side switch. Sticky: the list scrolls under it, just
+   below the side panel's Changes | Threads tabs (41 px: their 40 px buttons and the border), so Prev / Next and the
+   switch never scroll away. */
 .changes-head {
   display: grid;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  position: sticky;
+  top: var(--side-tabs-h, 41px);
+  z-index: 2;
+}
+
+.changes-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .changes-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 4px 8px;
   flex-wrap: wrap;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.accept-revisions {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.changes-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.changes-step {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.changes-step .btn {
+  gap: 2px;
+  padding: 0 8px;
 }
 
 .changes-stats {
@@ -66,8 +105,10 @@
   gap: 8px;
 }
 
-/* One change: a file-diff-like box; the +/~/- mark carries the kind, the box stays neutral. */
+/* One change: a file-diff-like box; the +/~/- mark carries the kind, the box stays neutral. Scrolled into view
+   (n / p, a click in the doc), it stops below the sticky header. */
 .change-item {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 8px;
@@ -76,6 +117,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+  scroll-margin-top: calc(var(--side-tabs-h, 41px) + var(--changes-head-h, 150px) + 8px);
 }
 
 .change-item:hover { border-color: var(--border-strong); }
@@ -171,6 +213,42 @@
   color: var(--fg-subtle);
 }
 
+/* The markup of an HTML doc's change (its Source toggle on). */
+.hunk-diff.is-source {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.hd-markup-only,
+.hd-code-note {
+  font-style: italic;
+}
+
+/* Source: in the change's top right corner, on the line of its +/~/- mark. */
+.hunk-source {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  font-size: var(--fs-xs);
+  color: var(--fg-subtle);
+}
+
+.change-item:hover .hunk-source,
+.hunk-source:focus-visible {
+  color: var(--fg-muted);
+}
+
+.hunk-source[aria-pressed="true"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The agent's word on a change no thread asked for. */
+.change-other {
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
 .hunk-more {
   grid-column: 2;
   justify-self: start;
@@ -242,30 +320,44 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* A segmented control: a sunken track with the current option raised (the mode switch, Inline / Side by side,
+   Unified / Split, the Settings choices). */
 .seg {
   display: inline-flex;
+  align-items: center;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-muted);
+  border: 0;
+  border-radius: 8px;
+  background: var(--seg-track);
 }
 
 .seg button {
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
-  padding: 1px 10px;
-  cursor: pointer;
-  font-size: var(--fs-sm);
   color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 100ms ease, background-color 100ms ease;
+}
+
+.seg button:hover:not(.active):not(:disabled) {
+  color: var(--fg);
+}
+
+.seg button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .seg button.active {
-  background: var(--bg);
-  border-color: var(--border);
+  background: var(--seg-thumb);
   color: var(--fg);
-  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 16, 20, 0.1), 0 0 0 1px rgba(16, 16, 20, 0.04);
 }
 
 .sel-bar {
@@ -436,8 +528,13 @@
   z-index: 1;
 }
 
+/* A review is a lighter line between the versions: what the reviewer sent, and whether the agent has it. */
 .tl-review .tl-marker {
-  border-color: var(--info);
+  width: 10px;
+  height: 10px;
+  margin-top: 12px;
+  margin-left: 4px;
+  border-color: var(--border-strong);
 }
 
 .tl-item.current .tl-marker {
@@ -453,11 +550,46 @@
   background: var(--bg);
 }
 
+.tl-review .tl-body {
+  border-color: transparent;
+  background: transparent;
+  padding: 6px 2px 4px;
+}
+
 .tl-head {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
   align-items: center;
+}
+
+.tl-what {
+  font-weight: 600;
+}
+
+.tl-waiting {
+  color: var(--warn);
+}
+
+.tl-expand {
+  font-size: var(--fs-xs);
+}
+
+/* An expanded run of comments sent one at a time: one line each. */
+.tl-run {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0 0 0 2px;
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-sm);
+}
+
+.tl-run li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
 }
 
 .tl-summary {

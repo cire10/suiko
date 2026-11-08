@@ -550,11 +550,12 @@
   font-size: var(--fs-xs);
 }
 
+/* Inset like the rail's title and tree rows, not edge to edge. */
 .cd-filter {
   display: block;
-  width: 100%;
+  width: calc(100% - 24px);
   box-sizing: border-box;
-  margin: 0 0 8px;
+  margin: 0 12px 8px;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

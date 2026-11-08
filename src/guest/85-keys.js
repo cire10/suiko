@@ -4,21 +4,33 @@
 // would never reach the UI. The guest forwards `key {key, meta, ctrl, shift, alt}` to the UI when:
 //   - the event is trusted (a real keystroke): a script in the reviewed document cannot fake keys, e.g. Shift+B,
 //     which opens the reviewer's native screen picker, or `b`, which enters snip mode;
-//   - the focus is not in an editable element (input, textarea, select, contenteditable) and not composing (IME);
+//   - the focus is not in an editable element (input, textarea, select, contenteditable) and not composing (IME),
+//     and not in an interactive widget that takes keys itself (any other form control, or an element with an ARIA
+//     widget role such as listbox, menu, tablist, tab, slider, grid, tree or combobox: typeahead and arrows are the
+//     widget's);
 //   - the page did not call preventDefault() — checked after the event finished dispatching, so handlers registered
 //     after the guest's are respected too;
 //   - the key is a single printable character without Cmd/Ctrl/Alt, Escape, or Enter with Cmd/Ctrl
 //     (Cmd+Enter, Cmd+Shift+Enter); auto-repeat is ignored.
+// When the page handles keys itself (07-page.js PageKeys: key listeners on window / document / <html> / <body>, or
+// on an element the key passes through, or on<key> handlers there), its keys are the page's: a doc's own `r`, `3` or
+// `f` must never reload, switch modes or open Submit in Suiko. Then only Escape, Cmd/Ctrl+Enter (with or without
+// Shift), the app-level combos below, and c / s / q / a while the document has a text selection (the selection
+// actions) reach Suiko; every other single key stays with the page (the tool dock, the palette and the keys typed
+// in the UI itself still reach everything). Without such listeners nothing changes. The first single key that stays
+// with the page (single-key shortcuts on, no Cmd/Ctrl/Alt, not a space) is reported once per page load as
+// `keyKept {key}`, so the UI can tell the reviewer once why b, e, j ... do nothing in this document.
 // The UI only maps forwarded keys to non-mutating actions. Keys consumed by pick mode ('[' ']' Esc and the cell
 // chooser digits) and snip mode (Esc) are stopped in 60-picker.js / 65-snip.js and never forwarded. Esc first closes
 // an open "removed" popover.
 // Exception: c / s / q / a while the document has a text capture (50-selection.js) are handled here, under the same
 // conditions: the guest posts `action {action, capture, rect}` exactly like the mini-toolbar and dismisses the
 // toolbar, and does NOT forward the key, so the UI opens the composer once (from `action`). Without a capture
-// (nothing selected, readonly mode, pick mode) the key is forwarded as before.
+// (nothing selected, readonly mode, pick mode) the key is forwarded as before (not when the page handles keys).
 // Likewise `b` (also 'B' without Shift, i.e. Caps Lock) toggles snip mode in the guest (65-snip.js posts
 // toolChanged {tool:'snip'} / {tool:'select'}) and is not forwarded; it is forwarded only when snips are not allowed
-// (readonly). Shift+B (snip the screen, a daemon job) is always forwarded as a normal key.
+// (readonly). Shift+B (snip the screen, a daemon job) is always forwarded as a normal key. Neither of them when the
+// page handles keys.
 // Both exceptions are single-key shortcuts the reviewer can turn off: after `setPrefs {singleKeys:false}` (or INIT
 // with prefs {singleKeys:false}) the guest acts on none of these keys and forwards them like any other key (the UI
 // then ignores them). The mini-toolbar, and pick / snip started from the UI (setTool), keep working.
@@ -35,6 +47,7 @@
 // handler (capture or bubble, on any node including window, whenever registered). If one of them prevented the
 // default or stopped propagation, the page keeps the key. Same other rules: trusted, not composing, not before the
 // UI is connected; an auto-repeat is default-prevented but not forwarded again.
+// The guest adds its own key listeners with listenOwn (07-page.js), so they never count as the page's.
 
 const Keys = (() => {
   /** Keys that act on the current text selection like the mini-toolbar buttons (same map as src/ui/keys.js). */
@@ -53,6 +66,51 @@ const Keys = (() => {
   /** `b` without Shift (Caps Lock reports 'B'): snip the document. @param {{key: string, shift: boolean}} p */
   function isSnipKey(p) {
     return p.key === 'b' || (p.key === 'B' && !p.shift);
+  }
+
+  /** ARIA roles of widgets that take keys themselves (typeahead, arrows, Space): keys typed there stay there. */
+  const WIDGET_ROLES = new Set([
+    'application', 'combobox', 'grid', 'gridcell', 'listbox', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox',
+    'menuitemradio', 'option', 'radio', 'radiogroup', 'scrollbar', 'searchbox', 'slider', 'spinbutton', 'switch', 'tab',
+    'tablist', 'textbox', 'tree', 'treegrid', 'treeitem',
+  ]);
+
+  /**
+   * Whether an element is (inside) an interactive widget that takes keys itself: a form control of any kind, or an
+   * element with an ARIA widget role (up to <body>).
+   * @param {Element|null} el
+   */
+  function inWidget(el) {
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      const tag = n.localName;
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return true;
+      const role = n.getAttribute('role');
+      if (role && role.split(/\s+/).some((r) => WIDGET_ROLES.has(r))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The keys that still reach the UI when the page handles keys itself: Escape and Cmd/Ctrl+Enter (with or without
+   * Shift). The app-level combos go their own way (onAppKeyCapture); c / s / q / a with a selection are actions.
+   * @param {{key: string, meta: boolean, ctrl: boolean}} p
+   */
+  function passesPageKeys(p) {
+    return p.key === 'Escape' || (p.key === 'Enter' && (p.meta || p.ctrl));
+  }
+
+  /** `keyKept` was posted for this page load. */
+  let keptSent = false;
+
+  /**
+   * Reports, once per page load, a single-key shortcut that stayed with a page that handles keys itself (the UI says
+   * why once). Not with single keys off (Suiko would not act on them anyway), not for combos or the space bar.
+   * @param {{key: string, meta: boolean, ctrl: boolean, alt: boolean}} p
+   */
+  function noteKept(p) {
+    if (keptSent || !prefs.singleKeys || p.meta || p.ctrl || p.alt || p.key.length !== 1 || p.key === ' ') return;
+    keptSent = true;
+    Channel.send(MSG.KEY_KEPT, { key: p.key });
   }
 
   /** @param {KeyboardEvent} ev */
@@ -101,7 +159,7 @@ const Keys = (() => {
       ev.preventDefault();
       if (!ev.repeat) Channel.send(MSG.KEY, payloadOf(ev, key));
     }, 'app-key');
-    window.addEventListener('keydown', finish);
+    listenOwn(window, 'keydown', finish);
     setTimeout(() => window.removeEventListener('keydown', finish), 0);
   }
 
@@ -115,15 +173,21 @@ const Keys = (() => {
     if (!shouldForward(ev)) return;
     const path = ev.composedPath();
     const origin = /** @type {Element|null} */ (path.find((n) => isElement(n)) || null);
-    if (isEditable(origin) || isEditable(deepActiveElement())) return;
+    const active = deepActiveElement();
+    if (isEditable(origin) || isEditable(active) || inWidget(origin) || inWidget(active)) return;
     const payload = { key: ev.key, meta: ev.metaKey, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey };
     // Decide after dispatch so that page handlers that run after ours can still claim the key.
     setTimeout(guard(() => {
       if (ev.defaultPrevented) return;
+      const pageKeys = PageKeys.handled(path);
       if (prefs.singleKeys) {
         const action = SELECTION_KEYS[payload.key];
         if (action && SelectionCapture.keyAction(action)) return; // posted `action`; the UI must not see the key too
-        if (isSnipKey(payload) && Snip.keyToggle()) return; // posted `toolChanged`; the UI follows it
+        if (!pageKeys && isSnipKey(payload) && Snip.keyToggle()) return; // posted `toolChanged`; the UI follows it
+      }
+      if (pageKeys && !passesPageKeys(payload)) { // the page's own key
+        noteKept(payload);
+        return;
       }
       Channel.send(MSG.KEY, payload);
     }, 'key-forward'), 0);
@@ -131,8 +195,8 @@ const Keys = (() => {
 
   return {
     start() {
-      window.addEventListener('keydown', guard(onAppKeyCapture, 'app-keydown'), true);
-      window.addEventListener('keydown', guard(onKeyDown, 'keydown'));
+      listenOwn(window, 'keydown', guard(onAppKeyCapture, 'app-keydown'), true);
+      listenOwn(window, 'keydown', guard(onKeyDown, 'keydown'));
     },
     /**
      * Applies `setPrefs` / `init.prefs`. Only the fields present (as booleans) change; the rest keep their value.
@@ -144,6 +208,10 @@ const Keys = (() => {
     /** Debug: the current preferences. */
     get prefs() {
       return { singleKeys: prefs.singleKeys };
+    },
+    /** Debug: whether the page handles keys itself (07-page.js; listeners on window / document / <html> / <body>). */
+    get pageKeys() {
+      return PageKeys.handled([]);
     },
   };
 })();

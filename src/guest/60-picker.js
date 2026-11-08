@@ -330,7 +330,7 @@ const Picker = (() => {
     if (notify) Channel.send(MSG.TOOL_CHANGED, { tool: 'select' });
   }
 
-  window.addEventListener('keydown', guard(onKey, 'pick-key'), true);
+  listenOwn(window, 'keydown', guard(onKey, 'pick-key'), true);
 
   return {
     get active() {

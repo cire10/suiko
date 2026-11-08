@@ -1,7 +1,9 @@
 // @ts-check
 // Browser tests for comparing versions in the guest: the older version of a side-by-side comparison (changes with
-// side 'old', painted from hunks[].oldSide), the placement of removed-content tabs, and the heading carried by
-// scroll reports (which lines the two versions up). Run: node --test "test/guest/**/*.test.mjs"
+// side 'old', painted from hunks[].oldSide), the newer one beside it (layout 'split'), the active change, outlines of
+// changed figures, the placement of removed-content tabs (never piled at the top edge), the positions the UI lines
+// the two versions up on (tops and ends of changes, heading tops), and the scroll reports (the headings around the
+// reading line; byUi for scrolls the UI asked for). Run: node --test "test/guest/**/*.test.mjs"
 
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { startHarness } from './server.mjs';
-import { openDoc, send, mark, waitMsg, inspect, settle, rectOf } from './helpers.mjs';
+import { openDoc, send, mark, waitMsg, msgsOf, inspect, settle, rectOf } from './helpers.mjs';
 
 const home = mkdtempSync(join(tmpdir(), 'sr-guest-home-'));
 process.env.SPECREVIEW_HOME = home;
@@ -247,6 +249,201 @@ describe('scroll reports', () => {
       }));
       const reports = await d.page.evaluate((f) => /** @type {any} */ (window).__msgs.slice(f).filter((/** @type {any} */ m) => m.type === 'scroll').length, from);
       assert.ok(reports >= 3, `several scroll reports while scrolling (${reports})`);
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('carry scrollY, the viewport and the document height; byUi marks the scrolls the UI asked for', async () => {
+    const d = await openDoc(browser, harness, 'prose', { initPayload: { prefs: { scrollSync: true } } });
+    try {
+      // scrollTo {top}: a follow, marked
+      let from = await mark(d.page);
+      await send(d.page, 'scrollTo', { top: 600 });
+      let scroll = await waitMsg(d.page, 'scroll', from, (m) => m.y === 600);
+      assert.equal(scroll.byUi, true);
+      assert.equal(scroll.vh, 700);
+      assert.equal(scroll.docH, await d.frame.evaluate(() => document.documentElement.scrollHeight));
+      // the reader scrolls on: not marked
+      from = await mark(d.page);
+      await d.frame.evaluate(() => window.scrollBy(0, 120));
+      scroll = await waitMsg(d.page, 'scroll', from, (m) => m.y === 720);
+      assert.equal(scroll.byUi, false);
+      // a change step (scrollTo {hunk}) is marked too; a scroll to a thread or a heading is not (the other version follows it)
+      await send(d.page, 'setChanges', { changes: { hunks: [{ id: 'h9', op: 'mod', srids: [8], words: [], deleted: null, insertBefore: null }] } });
+      await settle(d.frame);
+      from = await mark(d.page);
+      await send(d.page, 'scrollTo', { hunk: 'h9' });
+      scroll = await waitMsg(d.page, 'scroll', from);
+      assert.equal(scroll.byUi, true);
+      from = await mark(d.page);
+      await send(d.page, 'scrollTo', { srid: 30 });
+      scroll = await waitMsg(d.page, 'scroll', from);
+      assert.equal(scroll.byUi, false);
+    } finally {
+      await d.close();
+    }
+  });
+});
+
+describe('positions the two versions are lined up on', () => {
+  test('changes report their top and end in document coordinates, the same wherever the page is scrolled', async () => {
+    const d = await openDoc(browser, harness, 'prose', { initPayload: { mode: 'changes' } });
+    try {
+      let from = await mark(d.page);
+      await send(d.page, 'setChanges', { changes: {
+        hunks: [
+          { id: 'h1', op: 'mod', srids: [3, 6], words: [], deleted: null, insertBefore: null, threads: ['t1'] },
+          { id: 'h2', op: 'del', srids: [], words: [], deleted: { text: 'gone', html: null, lines: 1 }, insertBefore: { srid: 8 }, threads: ['t2'] },
+        ],
+      } });
+      const at0 = await waitMsg(d.page, 'positions', from, (m) => typeof m.hunks.h2 === 'number');
+      const doc = await d.frame.evaluate(() => {
+        const r = (/** @type {string} */ s) => /** @type {Element} */ (document.querySelector(s)).getBoundingClientRect();
+        return { p3: Math.round(r('[data-srid="3"]').top), p6: Math.round(r('[data-srid="6"]').bottom), h8: Math.round(r('[data-srid="8"]').top) };
+      });
+      assert.equal(at0.hunks.h1, doc.p3, 'top: the first block');
+      assert.equal(at0.hunkEnds.h1, doc.p6, 'end: the last block');
+      assert.equal(at0.hunks.h2, doc.h8, 'a deletion: where it was removed');
+      assert.equal(at0.hunkEnds.h2, doc.h8);
+      // scrolled past both: same document positions, and the marks scroll away with the page (not piled at the top)
+      from = await mark(d.page);
+      await d.frame.evaluate(() => window.scrollTo(0, 900));
+      const at900 = await waitMsg(d.page, 'positions', from, (m) => m.scrollY === 900);
+      await settle(d.frame);
+      assert.deepEqual([at900.hunks, at900.hunkEnds], [at0.hunks, at0.hunkEnds]);
+      const marks = (await inspect(d.frame)).layers.changes;
+      for (const key of ['badge:h1:t:t1', 'tab:h2', 'badge:h2:t:t2']) {
+        const m = marks.find((/** @type {any} */ x) => x.key === key);
+        assert.ok(m && m.rect.y < -100, `${key} is above the viewport (y ${m && m.rect.y}), not at its top edge`);
+      }
+      // headings only while side by side (scrollSync)
+      assert.equal(at900.headings, undefined);
+      from = await mark(d.page);
+      await send(d.page, 'setPrefs', { scrollSync: true });
+      const withHeadings = await waitMsg(d.page, 'positions', from, (m) => !!m.headings);
+      assert.equal(withHeadings.headings[8], doc.h8);
+      assert.equal(typeof withHeadings.headings[2], 'number');
+    } finally {
+      await d.close();
+    }
+  });
+});
+
+describe('the newer version beside the older one (layout split) and the active change', () => {
+  const CHANGES = {
+    layout: 'split',
+    hunks: [
+      { id: 'h1', op: 'mod', srids: [3], words: [{ srid: 3, quote: 'rotated on every use', prefix: 'Refresh tokens are ', suffix: ' and expire' }],
+        deleted: { text: 'rotated hourly', html: null, lines: 1 }, insertBefore: null, threads: ['t1'], other: null },
+      { id: 'h2', op: 'del', srids: [], words: [], deleted: { text: 'gone', html: null, lines: 2 }, insertBefore: { srid: 8 }, threads: [], other: null },
+    ],
+  };
+
+  test('no "was" tab, a deletion is a note (not a button); the active change is framed on both sides', async () => {
+    const d = await openDoc(browser, harness, 'prose', { initPayload: { mode: 'changes' } });
+    try {
+      let from = await mark(d.page);
+      await send(d.page, 'setChanges', { changes: CHANGES });
+      await waitMsg(d.page, 'positions', from, (m) => typeof m.hunks.h2 === 'number');
+      await settle(d.frame);
+      let byKey = Object.fromEntries((await inspect(d.frame)).layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      assert.equal(byKey['tab:h1'], undefined, 'the older version beside it shows the replaced words');
+      assert.ok(byKey['badge:h1:t:t1'], 'the thread badge stays');
+      assert.equal(byKey['tab:h2'].text, '⊖ 2 lines removed');
+      assert.match(byKey['tab:h2'].cls, /\bnote\b/);
+      const tab = byKey['tab:h2'].rect;
+      await d.page.mouse.click(tab.x + tab.width / 2, tab.y + tab.height / 2);
+      await settle(d.frame, 60);
+      assert.equal((await inspect(d.frame)).popover, null, 'a note opens nothing');
+
+      // the active change: a frame around its blocks, wider bars; another one moves it; null clears it
+      await send(d.page, 'setActiveHunk', { id: 'h1' });
+      await settle(d.frame);
+      let ins = await inspect(d.frame);
+      byKey = Object.fromEntries(ins.layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      assert.equal(ins.activeHunk, 'h1');
+      const p3 = await rectOf(d.frame, '[data-srid="3"]');
+      const box = byKey['active:h1'];
+      assert.match(box.cls, /\bchg-active\b.*\bmod\b/);
+      assert.ok(box.rect.x <= p3.x && box.rect.y <= p3.y && box.rect.x + box.rect.width >= p3.x + p3.w && box.rect.y + box.rect.height >= p3.y + p3.h);
+      assert.match(byKey['bar:h1:3'].cls, /\bactive\b/);
+      await send(d.page, 'setActiveHunk', { id: 'h2' });
+      await settle(d.frame);
+      byKey = Object.fromEntries((await inspect(d.frame)).layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      assert.equal(byKey['active:h1'], undefined);
+      assert.match(byKey['tab:h2'].cls, /\bactive\b/, 'a change with no block here: its note is marked');
+      await send(d.page, 'setActiveHunk', { id: null });
+      await settle(d.frame);
+      ins = await inspect(d.frame);
+      assert.equal(ins.activeHunk, null);
+      assert.ok(!ins.layers.changes.some((/** @type {any} */ x) => /\bactive\b/.test(x.cls)));
+
+      // inline (no layout): the "was" tab and the removed-content button are back
+      from = await mark(d.page);
+      await send(d.page, 'setChanges', { changes: { ...CHANGES, layout: undefined } });
+      await settle(d.frame);
+      byKey = Object.fromEntries((await inspect(d.frame)).layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      assert.equal(byKey['tab:h1'].text, '⊖ was');
+      assert.doesNotMatch(byKey['tab:h2'].cls, /\bnote\b/);
+
+      // init carries the active change too (a reconnecting guest)
+      await send(d.page, 'init', { mode: 'changes', theme: 'light', targets: [], changes: CHANGES, activeId: null, activeHunk: 'h1', hidden: false });
+      await settle(d.frame);
+      assert.equal((await inspect(d.frame)).activeHunk, 'h1');
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('changed figures get an outline; a change bar lines up beside a list, not on its bullets', async () => {
+    const d = await openDoc(browser, harness, 'media', { initPayload: { mode: 'changes' } });
+    try {
+      const from = await mark(d.page);
+      await send(d.page, 'setChanges', { changes: { hunks: [
+        { id: 'f1', op: 'mod', srids: [5], words: [], deleted: null, insertBefore: null },
+        { id: 'f2', op: 'add', srids: [31], words: [], deleted: null, insertBefore: null },
+      ] } });
+      await waitMsg(d.page, 'positions', from, (m) => typeof m.hunks.f2 === 'number');
+      await settle(d.frame);
+      const byKey = Object.fromEntries((await inspect(d.frame)).layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      const img = await rectOf(d.frame, '[data-srid="5"]');
+      assert.match(byKey['fig:f1:5'].cls, /\bchg-fig\b.*\bmod\b/);
+      assert.ok(byKey['fig:f1:5'].rect.x < img.x && byKey['fig:f1:5'].rect.width > img.w, 'around the image');
+      assert.match(byKey['fig:f2:31'].cls, /\bchg-fig\b.*\badd\b/, 'a rendered diagram is a figure too');
+    } finally {
+      await d.close();
+    }
+
+    const p = await openDoc(browser, harness, 'prose', { initPayload: { mode: 'changes' } });
+    try {
+      const from = await mark(p.page);
+      await send(p.page, 'setChanges', { changes: { hunks: [{ id: 'l1', op: 'mod', srids: [10, 11], words: [], deleted: null, insertBefore: null }] } });
+      await waitMsg(p.page, 'positions', from, (m) => typeof m.hunks.l1 === 'number');
+      await settle(p.frame);
+      const byKey = Object.fromEntries((await inspect(p.frame)).layers.changes.map((/** @type {any} */ x) => [x.key, x]));
+      const list = await rectOf(p.frame, '[data-srid="9"]');
+      assert.equal(byKey['bar:l1:10'].rect.x, byKey['bar:l1:11'].rect.x, 'one column');
+      assert.ok(byKey['bar:l1:10'].rect.x + byKey['bar:l1:10'].rect.width <= list.x, 'left of the list (its bullets)');
+    } finally {
+      await p.close();
+    }
+  });
+
+  test('the older version: a change step scrolls to an addition at the end of the newer one', async () => {
+    const d = await openDoc(browser, harness, 'prose', { initPayload: { mode: 'readonly' } });
+    try {
+      await send(d.page, 'setChanges', { changes: { side: 'old', hunks: [
+        { id: 'a9', op: 'add', new: { start: 40, lines: 3 }, srids: [], words: [], oldSide: { srids: [], words: [], insertBefore: null, insertAfter: { srid: 30 } } },
+      ] } });
+      await settle(d.frame);
+      const from = await mark(d.page);
+      await send(d.page, 'scrollTo', { hunk: 'a9' });
+      const pos = await waitMsg(d.page, 'positions', from, (m) => m.scrollY > 500);
+      assert.equal(pos.scrollY + pos.viewportH, pos.docH, 'at the end');
+      assert.equal(pos.hunks.a9, pos.docH, 'where the added lines go: the end');
+      assert.equal((await waitMsg(d.page, 'scroll', from)).byUi, true);
+      assert.ok((await msgsOf(d.page, 'scroll', from)).every((/** @type {any} */ m) => m.byUi));
     } finally {
       await d.close();
     }

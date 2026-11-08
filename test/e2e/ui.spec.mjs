@@ -37,11 +37,11 @@ test.describe('narrow viewport (600 px)', () => {
     expect(frameBox?.width).toBeGreaterThan(580);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-    // "Threads (5)" opens the drawer over the doc; Esc closes it.
+    // "Threads (5)" opens the drawer over the doc, on Your turn (t1, t2, t4, t6); Esc closes it.
     await page.locator('.threads-toggle').click();
     await expect(side).toBeVisible();
     await expect(side.getByTestId(TESTID.threadPanel)).toBeVisible();
-    await expect(side.getByTestId(TESTID.threadCard)).toHaveCount(5);
+    await expect(side.getByTestId(TESTID.threadCard)).toHaveCount(4);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await page.keyboard.press('Escape');
     await expect(side).toBeHidden();
@@ -97,11 +97,17 @@ test('theme toggle: light and dark custom properties, explicit body background, 
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   const light = await bg();
   expect(light).toMatch(/^rgb\(/);
+  // The theme item of the More menu cycles, and the menu stays open for the next click.
+  await page.getByTestId(TESTID.moreMenu).click();
   const toggle = page.locator('[data-theme-toggle]');
+  await expect(toggle).toHaveText(/Theme: System/);
   await toggle.click(); // system -> light
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(toggle).toHaveText(/Theme: Light/);
   await toggle.click(); // light -> dark
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.keyboard.press('Escape');
+  await expect(toggle).toHaveCount(0);
   const dark = await bg();
   expect(dark).not.toBe(light);
   const [r, g, b] = (dark.match(/\d+/g) || []).map(Number);
@@ -117,7 +123,7 @@ test('theme toggle: light and dark custom properties, explicit body background, 
   await expect.poll(async () => (await ui.inspect()).theme).toBe('dark');
 
   // Back to "system": follows prefers-color-scheme.
-  await page.locator('[data-theme-toggle]').click();
+  await ui.menu('theme');
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
   expect(await bg()).toBe(light);
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -141,12 +147,12 @@ test('keyboard: ?, 1-4, j / k, x, e + Esc, c, Esc cancels, h, \\, and keys forwa
     await expect(modeTab(page, mode)).toHaveAttribute('aria-selected', 'true');
   }
 
-  // j / k walk the Open threads in document order (t2 image L29, t3 cell L46, t1 L51, ...).
+  // j / k walk the threads of Your turn in document order (t2 image L29, t1 L51, t4, t6).
   await page.keyboard.press('j');
   await expect(ui.card('t2')).toHaveAttribute('aria-current', 'true');
   await expect.poll(async () => (await ui.inspect()).activeId).toBe('t2');
   await page.keyboard.press('j');
-  await expect(ui.card('t3')).toHaveAttribute('aria-current', 'true');
+  await expect(ui.card('t1')).toHaveAttribute('aria-current', 'true');
   await page.keyboard.press('k');
   await expect(ui.card('t2')).toHaveAttribute('aria-current', 'true');
   // x accepts the focused (answered) thread.
@@ -187,20 +193,22 @@ test('keyboard: ?, 1-4, j / k, x, e + Esc, c, Esc cancels, h, \\, and keys forwa
   await expect(page.getByTestId(TESTID.threadPanel)).toBeVisible();
 
   // Keys typed with focus inside the doc are forwarded: navigation works, mutations (x) do not.
-  await page.keyboard.press('j'); // t3 (t2 is resolved now and left the Open list)
-  await expect(ui.card('t3')).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('j'); // t1 (t2 is done now and left Your turn)
+  await expect(ui.card('t1')).toHaveAttribute('aria-current', 'true');
   const p = await ui.pointIn('p', 'This spec describes');
   await page.mouse.click(p.x + 5, p.cy);
   await page.keyboard.press('x');
   await page.keyboard.press('2');
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
-  expect(mock.doc('kitchen-sink').thread('t3').status).toBe('open');
+  expect(mock.doc('kitchen-sink').thread('t1').status).toBe('addressed');
   expect(ui.errors).toEqual([]);
 });
 
 test('Source mode: diff against the base, numbered source, select lines and press c', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
-  await modeTab(page, 'source').click();
+  await ui.menu('source');
+  // while it is shown, Source is a tab too, so the switch says where you are
+  await expect(modeTab(page, 'source')).toHaveAttribute('aria-selected', 'true');
   const view = page.locator('.source-view');
   await expect(view.locator('.diff-hunk')).toHaveCount(3);
   await expect(view.locator('.diff-hunk').first().locator('.hunk-head')).toContainText('t1');
@@ -217,7 +225,7 @@ test('Source mode: diff against the base, numbered source, select lines and pres
   await page.keyboard.press('c');
   const composer = page.getByTestId(TESTID.composer);
   await expect(composer).toBeVisible();
-  await expect(composer.locator('.agent-sees')).toContainText('L51-52');
+  await expect(composer.locator('.agent-sees')).toContainText('lines 51-52');
   await page.getByTestId(TESTID.composerTextarea).fill('Split this paragraph.');
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toBeHidden();
@@ -225,14 +233,15 @@ test('Source mode: diff against the base, numbered source, select lines and pres
   expect(item.anchor).toMatchObject({ kind: 'source', src: { startLine: 51, endLine: 52 } });
 });
 
-test('History: versions and reviews interleaved; View an old version, Diff vs previous', async ({ page, ui }) => {
+test('History: versions and reviews interleaved; View an old version, What changed', async ({ page, ui }) => {
   await ui.open('kitchen-sink');
-  await modeTab(page, 'history').click();
+  await ui.menu('history');
   const rows = page.getByTestId(TESTID.historyRow);
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toHaveAttribute('data-version', '2');
-  await expect(page.locator('.tl-review')).toContainText('Changes requested');
-  await expect(page.locator('.tl-review')).toContainText('delivered to claude');
+  // plain words (history.spec.mjs has the rest)
+  await expect(page.locator('.tl-review')).toContainText('Needs changes');
+  await expect(page.locator('.tl-review')).toContainText('Claude has it');
 
   await rows.and(page.locator('[data-version="1"]')).getByRole('button', { name: 'View' }).click();
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
@@ -241,16 +250,16 @@ test('History: versions and reviews interleaved; View an old version, Diff vs pr
   await ui.ready();
   await expect.poll(async () => (await ui.frame()).url()).toContain('/v1/');
 
-  await modeTab(page, 'history').click();
-  await rows.and(page.locator('[data-version="2"]')).getByRole('button', { name: 'Diff vs previous' }).click();
+  await ui.menu('history');
+  await rows.and(page.locator('[data-version="2"]')).getByRole('button', { name: 'What changed' }).click();
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   await expect(page.locator('#sr-base')).toHaveValue('1');
   await expect(page.getByTestId(TESTID.changeItem)).toHaveCount(3);
 
-  // Compare with...: any pair.
-  await modeTab(page, 'history').click();
-  await rows.and(page.locator('[data-version="1"]')).getByRole('button', { name: 'Compare with...' }).click();
+  // Compare with…: any pair.
+  await ui.menu('history');
+  await rows.and(page.locator('[data-version="1"]')).getByRole('button', { name: 'Compare with…' }).click();
   await page.locator('#cmp-1').selectOption('2');
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
@@ -265,10 +274,12 @@ test('home lists every tracked doc and follows the event stream', async ({ page,
   const ks = list.locator('li', { hasText: 'kitchen-sink.md' });
   await expect(ks).toContainText('v2');
   await expect(ks).toContainText('In review');
-  await expect(ks).toContainText('5 open');
+  // whose turn its threads are, in the turn pill's words (history.spec.mjs: Waiting for Claude, Final)
+  await expect(ks).toContainText('Your turn 4');
+  await expect(ks).toContainText('With Claude 1');
   await expect(ks).not.toContainText('listening');
   mock.doc('kitchen-sink').setWaiters([{ agent: 'claude' }]);
-  await expect(ks).toContainText('listening');
+  await expect(ks).toContainText('Claude is listening');
   await ks.getByRole('link').click();
   await expect(page).toHaveURL(/\/d\/ws0e2e01\/kitchen-sink$/);
   await expect(page.getByTestId(TESTID.docFrame)).toBeVisible();
@@ -288,5 +299,5 @@ test('a rejected token shows the reconnect banner until the daemon accepts it ag
   // The event stream is back: a new version still arrives.
   const d = mock.doc('kitchen-sink');
   d.revise({ source: d.source(2).replace('Last revised 2026-10-11.', 'Last revised 2026-10-12.'), summary: 'date' });
-  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'v3 ready' })).toBeVisible();
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'v3 is ready' })).toBeVisible();
 });

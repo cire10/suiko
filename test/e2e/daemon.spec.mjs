@@ -6,13 +6,15 @@
 import { test as base, expect } from '@playwright/test';
 import { formatPacket } from '../../src/core/review/packet.js';
 import { TESTID } from '../../src/shared/protocol.js';
-import { Ui } from './fixtures.mjs';
+import { pinnedPage, Ui } from './fixtures.mjs';
 import { makePng } from './mock-data.mjs';
 import { startRealDaemon } from './real-daemon.mjs';
 
 /** @typedef {Awaited<ReturnType<typeof startRealDaemon>>} Real */
 
 const test = base.extend(/** @type {any} */ ({
+  // the preferences these specs were written for (fixtures.mjs LEGACY_PREFS)
+  page: pinnedPage,
   // eslint-disable-next-line no-empty-pattern -- Playwright requires a destructuring pattern here
   real: async ({}, /** @type {(r: Real) => Promise<void>} */ use) => {
     const real = await startRealDaemon();
@@ -41,8 +43,8 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   await ui.open('kitchen-sink');
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('1');
   await expect(page.locator('.outline-link')).toHaveCount(7);
-  await expect(page.getByTestId(TESTID.threadPanel)).toContainText('No threads yet');
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/No agent listening/);
+  await expect(page.getByTestId(TESTID.threadPanel)).toContainText('No comments yet');
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude isn't connected/);
   await expect(page).toHaveTitle(/Token Service Implementation Spec/);
 
   // 1. Select text with the mouse inside the doc; the guest forwards `c`.
@@ -55,10 +57,10 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   await expect(page.locator('[data-selection-comment]')).toBeEnabled();
   await page.keyboard.press('c');
   const composer = page.getByTestId(TESTID.composer);
-  await expect(composer.locator('.agent-sees')).toContainText('Agent will see: L51');
-  await expect(composer.locator('.agent-sees')).toContainText('"rotated on every use"');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /^Claude will see: L51 /);
+  await expect(composer.locator('.agent-sees')).toContainText('“rotated on every use”');
   await page.getByTestId(TESTID.composerTextarea).fill('Rotation on **every** use breaks concurrent clients.');
-  await composer.getByRole('radio', { name: 'Blocking' }).click();
+  await composer.getByRole('button', { name: 'Must fix' }).click();
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toBeHidden();
   await expect(page.locator(`[data-testid="${TESTID.threadCard}"][data-draft-id]`)).toHaveCount(1);
@@ -76,7 +78,7 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   await page.mouse.move(img.cx - 10, img.cy - 10);
   await page.mouse.move(img.cx, img.cy, { steps: 3 });
   await page.mouse.click(img.cx, img.cy);
-  await expect(composer.locator('.agent-sees')).toContainText('L29');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /L29/);
   await composer.getByRole('radio', { name: 'Question' }).click();
   await page.getByTestId(TESTID.composerTextarea).fill('Is the token store really behind the auth service?');
   await page.getByTestId(TESTID.composerAdd).click();
@@ -97,30 +99,30 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   expect(st.drafts.items.map((/** @type {any} */ d) => [d.type, d.anchor.kind])).toEqual([['comment', 'text'], ['question', 'element'], ['suggestion', 'text']]);
   expect(st.drafts.items[2].suggestion).toMatchObject({ mode: 'text', old: 'Ship rotation behind a flag.', new: 'Ship rotation behind the token-rotation flag.' });
 
-  // 4. Submit with "Request changes".
+  // 4. Send it as "Needs changes".
   await page.getByTestId(TESTID.submitReviewOpen).click();
   const dialog = page.getByTestId(TESTID.submitReviewDialog);
-  await expect(dialog).toContainText('No agent is listening');
+  await expect(dialog).toContainText('Claude isn\'t connected');
   await expect(dialog.locator('.draft-list li')).toHaveCount(3);
   await dialog.locator(`[data-testid="${TESTID.submitVerdict}"] input[value="changes_requested"]`).check();
   await dialog.getByLabel('Summary').fill('Good start; see the comments.');
   await page.getByTestId(TESTID.submitConfirm).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Changes requested (rv1)' })).toBeVisible();
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Saved for Claude: needs changes (rv1). It gets it when it connects.' })).toBeVisible();
   for (const id of ['t1', 't2', 't3']) await expect(ui.card(id)).toBeVisible();
-  await expect(page.locator('.drafts-count')).toContainText('0');
-  await expect(page.locator('.review-progress')).toContainText('Submitted');
+  await expect(page.getByTestId(TESTID.submitReviewOpen)).toHaveText('Approve');
+  await expect(page.locator('.review-progress')).toHaveText(/^Sent \d\d:\d\d$/);
   st = await r.state('kitchen-sink');
   expect(st.reviews).toMatchObject([{ id: 'rv1', verdict: 'changes_requested', newThreads: ['t1', 't2', 't3'] }]);
 
   // 5. The agent fetches the feedback (delivery), then edits the spec and redraws the image.
   await r.agentFeedback('kitchen-sink');
-  await expect(page.locator('.review-progress')).toContainText('Delivered to claude');
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/claude is revising/);
+  await expect(page.locator('.review-progress')).toHaveText(/^Claude has it · \d\d:\d\d$/);
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude is working/);
   r.write('docs/kitchen-sink.md', r.read('docs/kitchen-sink.md')
     .replace('rotated on every use, and', 'rotated on every use with a 30 s reuse-detection grace window, and'));
   await expect(page.locator('.banner-warn')).toContainText('Unrecorded changes on disk', { timeout: 15000 });
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/claude is editing \(unrecorded\)/);
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude is editing/);
   r.write('docs/img/arch.png', /** @type {any} */ (REDRAWN_PNG));
 
   // 6. `suiko revise`: v2 answers rv1.
@@ -134,11 +136,12 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   });
   expect(res.refused).toBe(false);
   expect(res.version).toBe(2);
-  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'v2 ready' });
-  await expect(toast).toContainText('from claude');
+  // the view follows to v2 (Review, nothing open): "Updated to v2 · Show changes"
+  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'Updated to v2' });
+  await expect(toast).toBeVisible();
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   await expect(page.locator('.banner-warn')).toHaveCount(0);
-  await toast.getByRole('button', { name: 'Review changes' }).click();
+  await toast.getByRole('button', { name: 'Show changes' }).click();
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#sr-base')).toHaveValue('1');
   const change = page.getByTestId(TESTID.changeItem);
@@ -157,20 +160,20 @@ test('a full round: comment, pick, suggestion, submit, delivery, revision, Chang
   const r1 = page.locator('.round-results .result[data-thread-id="t1"]');
   await expect(r1).toContainText('30 s');
   await r1.getByTestId(TESTID.verifyAccept).click();
-  await expect(r1).toContainText('Resolved');
+  await expect(r1).toContainText('Done');
   st = await r.state('kitchen-sink');
   expect(st.threads.find((/** @type {any} */ t) => t.id === 't1').status).toBe('resolved');
 
-  // 7. Verify queue: t2 shows the image pair; reopen it with a reply.
+  // 7. Your turn: t2 shows the image pair (Show change); reopen it with a reply.
   await focusUi(page);
   await page.keyboard.press('v');
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.threadPanel).getByTestId(TESTID.threadCard)).toHaveCount(2);
   const t2 = ui.card('t2');
-  await t2.locator('.minidiff summary').click();
+  await ui.cardMenu(t2, 'show-change');
   await expect(t2.locator('.minidiff img')).toHaveCount(2);
   await expect.poll(() => t2.locator('.minidiff img').nth(1).evaluate((/** @type {HTMLImageElement} */ i) => i.naturalWidth)).toBe(240);
-  await t2.getByTestId(TESTID.verifyReopen).click();
+  await ui.cardMenu(t2, 'reopen');
   await t2.getByTestId(TESTID.replyTextarea).fill('The store should sit behind the auth service, not next to it.');
   await t2.getByTestId(TESTID.replyAdd).click();
   await expect.poll(async () => (await r.state('kitchen-sink')).drafts.items).toMatchObject([{ kind: 'reply', thread: 't2', reopen: true }]);
@@ -199,12 +202,14 @@ test('Accept all revisions against the real engine: the version is accepted, the
   /** Thread marks the guest draws: text highlights of any state and pins (t1 is about the whole doc: it has neither). */
   const threadMarks = async () => {
     const ins = await ui.inspect();
-    return { open: ins.highlights['sr-open'] || 0, resolved: ins.highlights['sr-resolved'] || 0, pins: (ins.layers.pins || []).map((/** @type {any} */ p) => p.key) };
+    // open: unresolved threads, whoever's turn (t2 is addressed: drawn as one to check, sr-check)
+    const open = ['sr-open', 'sr-check', 'sr-declined', 'sr-answer', 'sr-planned'].reduce((n, k) => n + (ins.highlights[k] || 0), 0);
+    return { open, resolved: ins.highlights['sr-resolved'] || 0, pins: (ins.layers.pins || []).map((/** @type {any} */ p) => p.key) };
   };
 
   await ui.open('kitchen-sink');
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveText('1');
+  await expect(modeTab(page, 'changes').locator('.badge')).toHaveText('1');
   await expect.poll(threadMarks).toEqual({ open: 1, resolved: 0, pins: ['pin:t2'] });
   await page.getByTestId(TESTID.acceptRevisions).click();
   await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Accepted the revisions of v2 and 2 threads (t1, t2).' })).toBeVisible();
@@ -219,7 +224,7 @@ test('Accept all revisions against the real engine: the version is accepted, the
   await ui.ready();
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId(TESTID.acceptRevisions)).toHaveCount(0);
-  await expect(page.getByTestId(TESTID.showChanges).locator('.badge')).toHaveCount(0);
+  await expect(modeTab(page, 'changes').locator('.badge')).toHaveCount(0);
   await expect.poll(async () => (await ui.inspect()).targets.map((/** @type {any} */ t) => t.id)).toEqual(['t1', 't2']);
   expect(await threadMarks()).toEqual({ open: 0, resolved: 0, pins: [] });
   expect(ui.errors).toEqual([]);
@@ -230,7 +235,8 @@ test('section comment, Mark agreed and Apply now against the real engine', async
   const r = real;
   await ui.open('kitchen-sink');
 
-  // Comment on a section from the outline menu.
+  // Comment on a section from the outline menu (the outline is behind the ≡ button below 1600 px).
+  await ui.showOutline();
   await page.getByRole('button', { name: 'Actions for section 3 Tokens' }).click();
   await page.getByRole('menuitem', { name: 'Comment on section' }).click();
   const composer = page.getByTestId(TESTID.composer);
@@ -259,11 +265,13 @@ test('section comment, Mark agreed and Apply now against the real engine', async
   await page.keyboard.press('s');
   await page.getByTestId(TESTID.composerSuggestion).fill('Remove the legacy session store after the rollout.');
   await page.getByTestId(TESTID.composerSendNow).click();
-  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Sent to the agent' })).toBeVisible();
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Saved for Claude' })).toBeVisible();
   // Send now submits only this comment; the pending section draft stays a draft.
   const st = await r.state('kitchen-sink');
   expect(st.reviews).toMatchObject([{ verdict: 'comment', newThreads: ['t1'] }]);
   expect(st.drafts.items).toHaveLength(1);
+  // t1 waits for Claude (the panel shows Your turn, where the section draft is): All lists it
+  await page.locator('.filter[data-filter="all"]').click();
   const card = ui.card('t1');
   await expect(card.locator('.suggestion-block')).toContainText('Pending');
   await card.getByRole('button', { name: 'Apply now' }).click();
@@ -271,7 +279,7 @@ test('section comment, Mark agreed and Apply now against the real engine', async
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   expect(r.read('docs/kitchen-sink.md')).toContain('Remove the legacy session store after the rollout.');
   await page.locator('.filter[data-filter="all"]').click();
-  await expect(card.locator('.status-chip')).toHaveText('Resolved');
+  await expect(card.locator('.status-chip')).toHaveText('Done');
   await expect(card.locator('.suggestion-block')).toContainText('Applied in v2');
   expect(ui.errors).toEqual([]);
 });
@@ -281,6 +289,7 @@ test('an HTML spec: its own scripts run, the outline comes from the guest, a tab
   const r = real;
   await ui.open('app-spec');
   await expect(page).toHaveTitle(/Checkout Service/);
+  await ui.showOutline();
   await expect(page.locator('.outline-link').first()).toHaveText('Checkout Service');
   await expect(page.locator('.outline-link', { hasText: '3. Pricing rules' })).toBeVisible();
 
@@ -295,7 +304,7 @@ test('an HTML spec: its own scripts run, the outline comes from the guest, a tab
   await expect.poll(async () => !!(await ui.inspect()).chooser).toBe(true);
   await page.keyboard.press('Enter');
   const composer = page.getByTestId(TESTID.composer);
-  await expect(composer.locator('.agent-sees')).toContainText('Agent will see:');
+  await expect(composer.locator('.agent-sees')).toContainText('Claude will see:');
   await page.getByTestId(TESTID.composerTextarea).fill('Members only? What about trials?');
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toBeHidden();
@@ -348,7 +357,7 @@ test('a comment formatted with the toolbar reaches the agent as written, line by
   /** @type {Real} */
   const r = real;
   await ui.open('kitchen-sink');
-  await page.getByRole('button', { name: 'General comment' }).click();
+  await ui.generalComment();
   const composer = page.getByTestId(TESTID.composer);
   await expect(page.getByTestId(TESTID.composerTextarea)).toBeFocused();
   await page.keyboard.type('Before shipping:');

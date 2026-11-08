@@ -9,9 +9,9 @@
 //     (Codex adds its own tables inside the markers; see toml.js).
 //   - JSON: one named entry (e.g. mcpServers.suiko) or the hook commands that run suiko. The file is parsed,
 //     only that entry changes, and a file that is not valid JSON is refused (InstallRefusal), never overwritten.
-//   - Whole files we copy (skills, commands): ours when the content is what we install now, or what an earlier install
-//     wrote (sha256 in the install manifest, $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user
-//     edited and says so.
+//   - Whole files we copy (skills, commands): ours when the content is what we install now (the not-on-PATH note and
+//     the `installed by suiko <version>` mark aside), or what an earlier install wrote (sha256 in the install manifest,
+//     $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user edited and says so.
 // A file we modify that existed before gets a one-time backup, <file>.specreview-backup (applyPlan with backups); a
 // file of the user's that a copy replaces is backed up every time it differs from the last backup.
 // Files are written through symlinks (the link stays, its target changes), and uninstall deletes a config file only
@@ -202,7 +202,7 @@ export function writeAtomic(file, content) {
 
 /**
  * Whether `current` is a copy we wrote: the content we would write now, the template without (or with another)
- * invocation note, or a version recorded in the manifest.
+ * invocation note or install mark, or a version recorded in the manifest.
  * @param {string} file
  * @param {string} current
  * @param {string} content
@@ -211,7 +211,7 @@ export function writeAtomic(file, content) {
  */
 export function isOurCopy(file, current, content, o) {
   if (current === content) return true;
-  if (o.template !== undefined && (current === o.template || stripInvocationNote(current) === stripInvocationNote(content))) return true;
+  if (o.template !== undefined && (current === o.template || stripInstallMarks(current) === stripInstallMarks(content))) return true;
   return Boolean(o.manifest?.files[file]?.sha256.includes(sha256(current)));
 }
 
@@ -222,6 +222,28 @@ export function isOurCopy(file, current, content, o) {
  */
 export function stripInvocationNote(text) {
   return text.replace(/^> \*\*On this machine `suiko` is not on PATH\.\*\*[^\n]*\n> [^\n]*\n/m, '');
+}
+
+/** The install mark line (install.js installMark): `<!-- installed by suiko 0.4.0 -->` or `# installed by suiko 0.4.0`. */
+const INSTALL_MARK_RE = /^(?:<!-- installed by suiko (\S+) -->|# installed by suiko (\S+))[ \t]*(?:\r?\n|$)/m;
+
+/**
+ * The text without what install adds on this machine: the not-on-PATH note and the install mark (any version).
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripInstallMarks(text) {
+  return stripInvocationNote(text).replace(new RegExp(INSTALL_MARK_RE.source, 'gm'), '');
+}
+
+/**
+ * The Suiko version an install mark in `text` names, else null (written before install marks existed, or not ours).
+ * @param {string} text
+ * @returns {string | null}
+ */
+export function installedVersion(text) {
+  const m = INSTALL_MARK_RE.exec(text);
+  return m ? (m[1] ?? m[2] ?? null) : null;
 }
 
 /**

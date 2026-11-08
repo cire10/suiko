@@ -20,6 +20,7 @@ import { BIN_PATH, PACKAGE_ROOT } from '../daemon-client.js';
 import { applyPlan, cliInvocation, isOnPath, projectRoot } from '../install.js';
 import { AGENTS, Planner, UNVERIFIED, claudeDoubleInstall, claudePlugin } from './agents.js';
 import { loadManifest } from './files.js';
+import { freshnessLine, staleByAgent } from './freshness.js';
 
 /** @typedef {import('./agents.js').Ctx} Ctx */
 /** @typedef {import('../install.js').FileAction} FileAction */
@@ -478,11 +479,13 @@ function stillUsesShared(ctx, d, detected) {
  * Per agent: is Suiko configured (user scope), and is it up to date? Used by `suiko doctor`.
  * Agents that are neither detected nor configured are left out. An agent counts as configured by its own files; the
  * shared ones (~/.agents/skills) count only for a detected agent whose whole configuration is shared (Droid).
+ * `stale`: the freshness line (install/freshness.js) when its instruction files are older than this CLI.
  * @param {Ctx} ctx
- * @returns {Array<{ id: string, name: string, detected: boolean, configured: boolean, upToDate: boolean, plugin?: string, problem?: string }>}
+ * @returns {Array<{ id: string, name: string, detected: boolean, configured: boolean, upToDate: boolean, plugin?: string, problem?: string, stale?: string }>}
  */
 export function integrationStatus(ctx) {
   const out = [];
+  const stale = staleByAgent(ctx);
   for (const def of AGENTS) {
     const det = def.detect(ctx);
     const inst = new Planner();
@@ -497,6 +500,8 @@ export function integrationStatus(ctx) {
     if (!det.detected && !configured && !plugin) continue;
     const twice = pluginInfo ? claudeDoubleInstall(ctx, pluginInfo) : null;
     const problem = twice ? `Suiko plugin installed (${pluginInfo?.id}), and ${twice}` : [...inst.refusals, ...un.refusals][0]?.message;
+    const old = stale.get(def.id);
+    const staleLine = old ? freshnessLine(old) : null;
     out.push({
       id: def.id,
       name: def.name,
@@ -505,6 +510,7 @@ export function integrationStatus(ctx) {
       upToDate: !inst.skipped && inst.refusals.length === 0 && inst.files.every((f) => f.action === 'unchanged'),
       ...(plugin ? { plugin } : {}),
       ...(problem ? { problem } : {}),
+      ...(staleLine ? { stale: staleLine } : {}),
     });
   }
   return out;

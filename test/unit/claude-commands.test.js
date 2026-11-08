@@ -38,5 +38,5 @@ test('/review-code: installed, model cannot invoke it, and an error from suiko r
   assert.equal(fm['allowed-tools'], 'Bash(suiko *)');
   assert.match(text, /^!`suiko review \$ARGUMENTS 2>&1 \|\| true`$/m);
   assert.match(text, /run_in_background: true/);
-  assert.match(text, /section 9/);
+  assert.match(text, /section 8 \(Code review\)/);
 });

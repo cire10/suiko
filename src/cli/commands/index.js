@@ -8,13 +8,13 @@
 
 /** @type {Record<string, { load: () => Promise<any>, summary: string, group: string }>} */
 export const COMMANDS = {
-  open: { load: () => import('./open.js'), summary: 'Track a spec (a file, a folder, or - for stdin), start the server, print the URL', group: 'loop' },
+  open: { load: () => import('./open.js'), summary: 'Track a document (a file, a folder, or - for stdin), start the server, print the URL', group: 'loop' },
   review: { load: () => import('./review.js'), summary: 'Open a code review of your changes (since-base, uncommitted, staged, range, commit)', group: 'loop' },
   wait: { load: () => import('./wait.js'), summary: 'Block until the reviewer submits a review; print the feedback packet', group: 'loop' },
   feedback: { load: () => import('./feedback.js'), summary: 'Print the feedback packet now (marks it delivered unless --peek)', group: 'loop' },
   apply: { load: () => import('./apply.js'), summary: 'Apply suggestion threads verbatim to the working copy', group: 'loop' },
   edit: { load: () => import('./edit.js'), summary: 'Thread-tagged exact replace (or a JSON batch with --stdin)', group: 'loop' },
-  reply: { load: () => import('./reply.js'), summary: 'Reply on a thread without recording a version', group: 'loop' },
+  reply: { load: () => import('./reply.js'), summary: 'Reply on a thread without recording a version (files: --attach)', group: 'loop' },
   revise: { load: () => import('./revise.js'), summary: 'Record the working copy (or --source text) as a new version, with replies', group: 'loop' },
   revert: { load: () => import('./revert.js'), summary: 'Undo one unrecorded hunk, or restore a locked range', group: 'loop' },
   reanchor: { load: () => import('./reanchor.js'), summary: "Move a thread's anchor to other lines or text", group: 'loop' },
@@ -51,7 +51,7 @@ export function topLevelHelp(version) {
     admin: 'Server and integrations',
   });
   const out = [
-    `suiko ${version}: iterative, commentable, versioned review of HTML/Markdown specs`,
+    `suiko ${version}: iterative, commentable, versioned review of HTML and Markdown documents`,
     '',
     'Usage: suiko <command> [args] [--json] [--as <agent>] [--workspace <dir>]',
   ];

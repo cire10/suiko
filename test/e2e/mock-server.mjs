@@ -17,11 +17,14 @@
 //                                         at guestInsertAt (data-sr-ui = the UI origin)
 //                   /c/<docKey>/<ver>/<asset>         fixture files (or a version's replaced asset bytes)
 //                   /c/<docKey>/__att/<file>          stored attachments (DocState.attachmentBase), not to same-origin
-//                                                     requests (the doc's own script), like the daemon
+//                                                     requests (the doc's own script), like the daemon: images, an
+//                                                     agent's SVG (an inert-image CSP) and HTML previews (Track 2's
+//                                                     preview CSP: sandbox allow-scripts, inline scripts / styles only,
+//                                                     framed by the UI origin only), all with Referrer-Policy no-referrer
 //                   /__sr/<RV>/guest.js | static/* | vendor/*   guest, shell CSS / mermaid init, VENDOR_DOC
 //
 // Use in tests:   const mock = await startMockServer({ scenario: 'round2' }); ... mock.doc('kitchen-sink').revise(...)
-// Run by hand:    node test/e2e/mock-server.mjs [--scenario fresh|round2|code] [--port 5810]
+// Run by hand:    node test/e2e/mock-server.mjs [--scenario fresh|round2|rich|code] [--port 5810]
 //                 (prints the review URL with its ?k= token)
 // Ports default to 0 (random); never the real daemon ports.
 
@@ -35,6 +38,7 @@ import { VENDOR_DOC, VENDOR_UI, resolveVendor } from '../../src/shared/vendor.js
 import { finalizeHtml } from '../../src/core/render/index.js';
 import { buildGuestBundle } from '../../src/guest/build.js';
 import { UI_DIR, uiIndex } from '../../src/ui/csp.js';
+import { agentName, filterCounts } from '../../src/ui/model.js';
 import { setUiHeaders } from '../../src/daemon/security.js';
 import { isDocumentType } from '../../src/daemon/mime.js';
 import { FIXTURE_DIR, buildScenario, makePng } from './mock-data.mjs';
@@ -136,7 +140,7 @@ function safeJoin(root, rel) {
 
 /**
  * Starts the mock daemon.
- * @param {{ scenario?: 'fresh'|'round2'|'code', uiPort?: number, contentPort?: number, token?: string, quiet?: boolean }} [opts]
+ * @param {{ scenario?: 'fresh'|'round2'|'rich'|'code', uiPort?: number, contentPort?: number, token?: string, quiet?: boolean }} [opts]
  */
 export async function startMockServer(opts = {}) {
   const token = opts.token || randomBytes(16).toString('hex');
@@ -404,13 +408,19 @@ export async function startMockServer(opts = {}) {
       return;
     }
     if (method === 'GET' && url.pathname === '/api/docs') {
-      sendJson(res, 200, docs.map((d) => ({
-        ws: d.ws, root: FIXTURE_DIR, id: d.id, path: d.doc.path, title: d.doc.title, format: d.format, head: d.head,
-        kind: d.doc.kind || 'file', origin: d.doc.origin?.type ?? null,
-        state: d.doc.state, openThreads: d.threads.filter((t) => t.status !== 'resolved').length,
-        undelivered: d.reviews.filter((r) => !Object.keys(r.deliveredTo).length).length,
-        listening: d.waiters.length > 0, final: d.doc.final,
-      })));
+      sendJson(res, 200, docs.map((d) => {
+        // whose turn, like the engine's docs.js turnCounts (the doc's own turn pill rule, at the head)
+        const ds = d.docState();
+        const counts = filterCounts(ds, d.head);
+        return {
+          ws: d.ws, root: FIXTURE_DIR, id: d.id, path: d.doc.path, title: d.doc.title, format: d.format, head: d.head,
+          kind: d.doc.kind || 'file', origin: d.doc.origin?.type ?? null,
+          state: d.doc.state, openThreads: d.threads.filter((t) => t.status !== 'resolved').length,
+          yourTurn: counts.mine, withAgent: counts.agent, agent: agentName(ds),
+          undelivered: d.reviews.filter((r) => !Object.keys(r.deliveredTo).length).length,
+          listening: d.waiters.length > 0, final: d.doc.final,
+        };
+      }));
       return;
     }
     const m = /^\/api\/docs\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
@@ -509,17 +519,34 @@ export async function startMockServer(opts = {}) {
         return file ? sendFile(res, file) : sendJson(res, 404, { error: 'not found' });
       }
     }
-    const att = /^\/c\/([0-9a-f]+)\/__att\/([A-Za-z0-9][\w-]*\.(?:png|jpe?g))$/.exec(p);
+    const att = /^\/c\/([0-9a-f]+)\/__att\/([A-Za-z0-9][\w-]*\.(?:png|jpe?g|gif|webp|svg|html?))$/.exec(p);
     if (att) {
       const doc = byKey.get(att[1]);
       const dataUrl = doc?.attachments.get(`attachments/${att[2]}`);
-      const parsed = /^data:(image\/(?:png|jpeg));base64,(.+)$/.exec(dataUrl || '');
+      const parsed = /^data:((?:image\/(?:png|jpeg|gif|webp|svg\+xml))|text\/html);base64,(.+)$/.exec(dataUrl || '');
       if (!parsed || String(req.headers['sec-fetch-site'] || '') === 'same-origin') {
         res.writeHead(404, { 'content-type': 'text/plain' });
         res.end('not found');
         return;
       }
-      res.writeHead(200, { 'content-type': parsed[1], 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      const ancestors = `frame-ancestors http://127.0.0.1:${origins.uiPort} http://localhost:${origins.uiPort}`;
+      /** @type {Record<string, string>} */
+      const headers = { 'content-type': parsed[1], 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+      if (parsed[1] === 'image/svg+xml') {
+        // like the daemon's attachmentSvgCsp: an SVG is an image here, never a document that runs scripts
+        Object.assign(headers, { 'content-type': 'image/svg+xml; charset=utf-8', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; sandbox; ${ancestors}`,
+          'referrer-policy': 'no-referrer' });
+      } else if (parsed[1] === 'text/html') {
+        // like the daemon's attachmentPreviewCsp (network 'block'): an opaque origin that may only run its own inline code
+        Object.assign(headers, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'; ${ancestors}`,
+          'referrer-policy': 'no-referrer',
+        });
+      } else {
+        headers['referrer-policy'] = 'no-referrer';
+      }
+      res.writeHead(200, headers);
       res.end(Buffer.from(parsed[2], 'base64'));
       return;
     }
@@ -543,7 +570,7 @@ export async function startMockServer(opts = {}) {
     } catch {
       rel = '';
     }
-    const frameAncestors = `frame-ancestors http://127.0.0.1:${origins.uiPort} http://localhost:${origins.uiPort}`;
+    const frameAncestors = `frame-ancestors 'self' http://127.0.0.1:${origins.uiPort} http://localhost:${origins.uiPort}`;
     if (rel === d.doc.path) {
       let render;
       try {

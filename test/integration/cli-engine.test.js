@@ -128,7 +128,7 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     const lines = r.stdout.split('\n');
     assert.match(lines[0], /^suiko: tracking docs\/kitchen-sink\.md as "kitchen-sink" \(markdown, \d+ lines\) · recorded v1$/);
     assert.equal(lines[1], `review UI: http://127.0.0.1:5871/d/${ctx.wsId}/kitchen-sink?k=tok`);
-    assert.doesNotMatch(r.stdout, /external hosts/, 'a plain <a href> is not loaded live');
+    assert.doesNotMatch(r.stdout, /loads content from/, 'a plain <a href> is not loaded live');
     assert.match(r.stdout, /^next: run `suiko wait kitchen-sink` in the background$/m);
     const again = await cli(['open', 'docs/kitchen-sink.md', '--json']);
     assert.equal(again.code, 0, again.stderr);
@@ -225,8 +225,8 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.match(dup.stderr, /^suiko: /);
 
     const deny = await hook('pre-write', { tool_name: 'Write', cwd: ws.root, tool_input: { file_path: 'docs/kitchen-sink.md', content: '# A brand new spec\n' } });
-    assert.equal(deny.hookSpecificOutput.permissionDecision, 'deny');
-    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /^docs\/kitchen-sink\.md is under Suiko \(v1, 2 open threads\)/);
+    assert.equal(deny.hookSpecificOutput.permissionDecision, 'ask');
+    assert.match(deny.hookSpecificOutput.permissionDecisionReason, /^Suiko: this Write would replace \d+% of the text of docs\/kitchen-sink\.md, which is under review \(v1, 2 open threads\)/);
     const current = ws.read('docs/kitchen-sink.md');
     assert.equal(await hook('pre-write', { tool_name: 'Write', cwd: ws.root, tool_input: { file_path: 'docs/kitchen-sink.md', content: `${current}\nOne more line.\n` } }), null);
 
@@ -305,7 +305,9 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     const wait = await cli(['wait', DOC, '--timeout', '1s']);
     assert.equal(wait.code, 3, 'dirty working copy');
     assert.match(wait.stderr, /has unrecorded edits/);
-    const hunk = /fix: suiko revert kitchen-sink --hunk (h\d+)/.exec(r.stdout)?.[1] ?? 'h1';
+    // the fix leads with "undo it where you made it" (the sources of a built doc); `suiko revert` restores this file
+    assert.match(r.stdout, /^ {6}fix: undo it where you made it \(in the sources, then rebuild, for a document built from them; `suiko revert kitchen-sink --hunk h\d+` restores a file edited directly\)/m);
+    const hunk = /`suiko revert kitchen-sink --hunk (h\d+)`/.exec(r.stdout)?.[1] ?? 'h1';
     const rev = await cli(['revert', DOC, '--hunk', hunk]);
     assert.equal(rev.code, 0, rev.stderr);
     assert.equal(ws.read('docs/kitchen-sink.md'), before);
@@ -415,12 +417,13 @@ describe('CLI + hooks + MCP against the real engine', { skip: HAS_ENGINE ? false
     assert.match(w.stdout, /review session for kitchen-sink was closed; stop waiting/);
   });
 
-  test('open prints the external hosts a doc loads live, on the first open and on re-open', async () => {
+  test('open names the hosts a doc loads content from (a plain note, no fix to apply), on the first open and on re-open', async () => {
     ws.write('docs/ext.md', '# Ext\n\n![remote](https://cdn.example.org/a.png)\n\n[a link](https://example.com/)\n');
     for (const run of [1, 2]) {
       const r = await cli(['open', 'docs/ext.md', '--browser', 'none']);
       assert.equal(r.code, 0, `run ${run}: ${r.stderr}`);
-      assert.match(r.stdout, /^external hosts loaded live by the doc: cdn\.example\.org \(set render\.network to "block"/m);
+      assert.match(r.stdout, /^the doc loads content from cdn\.example\.org when viewed$/m);
+      assert.doesNotMatch(r.stdout, /render\.network|block them/, 'no remediation hint: a doc that loads web content is fine');
       assert.match(r.stdout, /^next: run `suiko wait ext` in the background$/m);
     }
   });

@@ -16,8 +16,8 @@ const SR_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-i
 process.env.SPECREVIEW_HOME = SR_HOME;
 
 const { runCli, tempDir } = await import('./helpers/cli-harness.js');
-const { BIN_PATH, PACKAGE_ROOT } = await import('../../src/cli/daemon-client.js');
-const { hookCommand, planGateCommand, PLAN_GATE_TIMEOUT, claudeCommandFiles } = await import('../../src/cli/install.js');
+const { BIN_PATH, PACKAGE_ROOT, packageVersion } = await import('../../src/cli/daemon-client.js');
+const { hookCommand, planGateCommand, PLAN_GATE_TIMEOUT, claudeCommandFiles, markBlock, withInstallMark } = await import('../../src/cli/install.js');
 
 const SNIPPET = fs.readFileSync(path.join(PACKAGE_ROOT, 'integrations', 'agents-md', 'AGENTS.snippet.md'), 'utf8').trimEnd();
 const SKILL_SRC = path.join(PACKAGE_ROOT, 'integrations', 'claude-code', 'skills', 'spec-review');
@@ -225,7 +225,8 @@ describe('suiko install --apply', () => {
     // Claude Code
     const skill = read(h.p('.claude/skills/spec-review/SKILL.md'));
     assert.match(skill, /^---\n[\s\S]*?\n---\n\n> \*\*On this machine `suiko` is not on PATH\.\*\*/, 'not-on-PATH note after the front matter');
-    assert.equal(read(h.p('.claude/skills/spec-review/reference.md')), read(path.join(SKILL_SRC, 'reference.md')));
+    assert.match(skill, /\n<!-- installed by suiko \d+\.\d+\.\d+\S* -->\n$/, 'the install mark ends every copy');
+    assert.equal(read(h.p('.claude/skills/spec-review/reference.md')), withInstallMark(read(path.join(SKILL_SRC, 'reference.md'))));
     assert.ok(claudeCommandFiles().length >= 1);
     for (const name of claudeCommandFiles()) assert.ok(fs.existsSync(h.p(`.claude/commands/${name}`)), name);
     const settings = readJson(h.p('.claude/settings.json'));
@@ -236,7 +237,7 @@ describe('suiko install --apply', () => {
     // Codex
     const agentsMd = read(h.p('.codex/AGENTS.md'));
     assert.ok(agentsMd.startsWith('<!-- specreview:begin'));
-    assert.ok(agentsMd.trimEnd().endsWith('<!-- specreview:end -->'));
+    assert.ok(agentsMd.trimEnd().endsWith(`<!-- installed by suiko ${packageVersion()} -->\n<!-- specreview:end -->`));
     assert.match(agentsMd, /^> \*\*On this machine `suiko` is not on PATH\.\*\*/m);
     const toml = read(h.p('.codex/config.toml'));
     assert.equal(
@@ -253,7 +254,7 @@ describe('suiko install --apply', () => {
     );
     const agentSkill = read(h.p('.agents/skills/suiko-review/SKILL.md'));
     assert.match(agentSkill, /^---\nname: suiko-review\ndescription: /);
-    assert.ok(agentSkill.includes('## Spec reviews (Suiko)'), 'the protocol is inlined');
+    assert.ok(agentSkill.includes('## Suiko reviews'), 'the protocol is inlined');
     assert.ok(!agentSkill.includes('<!-- specreview:protocol'), 'the placeholder is replaced');
     assert.ok(!agentSkill.includes('<!-- specreview:begin'), 'no marker lines in a file we own');
 
@@ -298,8 +299,8 @@ describe('suiko install --apply', () => {
     const h = makeHome({ dirs: ['.claude', '.codex/sessions'], bins: ['suiko'] });
     const r = await h.run(['install', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(read(h.p('.claude/skills/spec-review/SKILL.md')), read(path.join(SKILL_SRC, 'SKILL.md')));
-    assert.equal(read(h.p('.codex/AGENTS.md')), `${SNIPPET}\n`);
+    assert.equal(read(h.p('.claude/skills/spec-review/SKILL.md')), withInstallMark(read(path.join(SKILL_SRC, 'SKILL.md'))));
+    assert.equal(read(h.p('.codex/AGENTS.md')), `${markBlock(SNIPPET)}\n`);
     assert.ok(!read(h.p('.agents/skills/suiko-review/SKILL.md')).includes('not on PATH'));
     assert.doesNotMatch(r.stdout, /is not on PATH/);
   });

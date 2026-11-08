@@ -1,20 +1,20 @@
 # Suiko
 
-**Review AI-written specs the way you review pull requests.** Comment on any part of an HTML or Markdown spec in a local web UI, send precise, located feedback to your coding agent, get targeted edits instead of a regenerated document, and see exactly what changed, round after round, until you approve a final version.
+**Review the documents your AI agent writes, and iterate on them together.** Your agent writes a report, a spec or a plan the way it always would (HTML with charts and scripts, or Markdown); you comment on any part of it in a local web UI, your agent gets precise, located feedback and changes exactly what you commented on instead of regenerating the document, and you see what changed, round after round, until you approve a final version.
 
 The name is *suikō* (推敲), Japanese for polishing a text by weighing every word: what you and your agent do here.
 
 Suiko runs entirely on your machine, keeps every version and thread as plain files you can commit to git, and works with Claude Code (plugin, skill, slash command and hooks), any MCP client, and any CLI agent.
 
-Everything is one key away: select text and press `c` to comment, press `b` to snip any area of the doc, `B` to snip anything on your screen, and `Cmd+Shift+Enter` to send a comment to the agent right now. `Cmd+K` opens a command palette for everything else. See [Keyboard shortcuts](#keyboard-shortcuts) and [Snipping](#snipping).
+Select text and press `c` (or use the toolbar above the selection) to comment. The tool dock at the bottom of the document snips any area of it (the scissors, `b`) or anything on your screen (the monitor, `Shift+B`), and picks an image, a diagram or a table cell (the crosshair, `e`). Each comment goes to your agent when you press **Send**; one pill in the top bar says whose turn it is. `Cmd+K` opens a command palette for everything else. See [Keyboard shortcuts](#keyboard-shortcuts) and [Snipping](#snipping).
 
-![Review mode: the rendered spec with highlighted threads, pins and the thread panel](docs/img/review-mode.png)
+![Review: the turn pill says "Your turn", the thread panel is on Your turn, and Claude's answer on a thread carries a picture and a live HTML chart, each with Use in doc](docs/img/review-mode.png)
 
-![Changes mode after a revision: change bars, inserted words, a removed-line tab, thread badges, the change list and a redrawn image](docs/img/changes-mode.png)
+![Changes since your last review, inline: change bars, inserted words, a "1 line removed" tab and thread badges in the document; the change list with Accept all and Inline | Side by side, and a redrawn image as a before / after pair](docs/img/changes-mode.png)
 
-![Changes side by side: the older version on the left with removed text struck through, the newer one on the right, scrolled together](docs/img/side-by-side.png)
+![Changes side by side, stepped to change 1 of 3: v1 (your last review) with the removed text struck through beside v2 (latest) with the added words, scrolled together](docs/img/side-by-side.png)
 
-![The Verify queue: a blocking thread "Addressed in v2", with the mini-diff of the change that addressed it](docs/img/verify.png)
+![A thread Claude changed: "Changed in v2 — check it", the change it made as a word diff, and Looks good / Not yet](docs/img/verify.png)
 
 - [Why](#why)
 - [How it works](#how-it-works)
@@ -39,33 +39,36 @@ Everything is one key away: select text and press `c` to comment, press `b` to s
 
 ## Why
 
-Coding agents are good at writing specs and bad at revising them. Feedback in chat is vague ("the part about tokens"), the agent regenerates the whole document, things you already agreed on quietly disappear, and you cannot see what changed.
+Coding agents are good at writing documents and bad at revising them. Feedback in chat is vague ("the part about funding"), the agent regenerates the whole document, things you already agreed on quietly disappear, and you cannot see what changed.
 
 | The problem | What Suiko does |
 |---|---|
 | "I can't comment on specific parts" | Anchored threads on a phrase, a paragraph, a region of an image, a mermaid node, an SVG element, a table cell, code, a formula, a section, raw source lines, or the whole doc |
-| "The agent regenerates the entire spec" | Every comment reaches the agent with the exact source lines to edit. Suggestions are applied verbatim. A Write hook and a rewrite guard block whole-file rewrites |
+| "The agent regenerates the entire document" | Every comment reaches the agent with the exact source lines behind it, and the agent changes only what the threads ask for (in the file, or in the sources it builds the document from). Suggestions are applied verbatim. A rewrite guard refuses rewrites nobody asked for, and a Write hook asks you before Claude replaces most of the document |
 | "Things we agreed on get lost" | Mark text **agreed** and Suiko refuses any revision that changes it. Unexplained deletions are refused too. Every version is immutable |
-| "It's not iterative" | Review rounds with verdicts, threaded replies, questions back to you, reopen and accept |
-| "I want to see what changed" | Changes drawn over the live document since your last review, or the older version side by side with removed text struck through; per-thread mini-diffs, a source diff, and any-to-any version comparison (`[v1] → [v3]`) |
+| "It's not iterative" | Threads that say whose turn it is, replies and questions both ways, and **Looks good** / **Not yet** on every change, version after version until you approve |
+| "Comment by comment, the agent rewrites a long document again and again" | Each comment goes out when you send it. On a long document the agent answers each one at once and plans the edit, and you apply the planned changes together: one version, and less of the agent's context spent |
+| "I want to see what changed" | Changes drawn over the document since your last review, or the older version side by side with removed text struck through; the change behind each thread (**Show change**), a source diff, and any-to-any version comparison (`[v1] → [v3]`) |
 | "I just want to read the latest version" | **Read** mode: the latest version as its readers will see it, with no highlights, change marks or thread panel |
 | "Which version is final?" | Approve marks a final version and exports a decision log |
-| "My HTML spec has scripts, SVG and charts" | The document renders as authored, scripts included, on an isolated origin |
+| "My HTML report has scripts, charts and data" | The document renders as authored, scripts and libraries included, on an isolated origin. When the agent rebuilds it from a template and data, the guards look at the text you read, not the data blob |
+| "I want to see it, not read about it" | The agent can answer on a thread with an image or a small HTML mockup, iterate on it with you there, and put it into the document when you say so |
 
 ## How it works
 
 ```text
   agent (Claude Code, Codex, MCP client, ...)               you, in the browser
   ───────────────────────────────────────────               ───────────────────
-  writes docs/specs/x.md once
-  suiko open docs/specs/x.md  ───── records v1 ──────>  UI opens beside the chat
-  suiko wait x  (background, costs nothing)            select, comment, suggest, mark agreed
-                     <──── packet: one item per thread ────  Submit review (Request changes)
-  targeted edits (Edit tool, suiko apply)
-  suiko revise x --replies -  ── records v2, links ──>  "v2 ready": changes since your review,
-                                      hunks to threads,      the agent's replies, Verify queue
-                                      enforces guards        accept / reopen ... Approve -> FINAL v3
-  suiko final x --decisions
+  writes report.html as it always would
+  suiko open report.html  ───── records v1 ──────────>  UI opens beside the chat
+  suiko wait report  (background, costs nothing)       select, comment, suggest, mark agreed
+                     <──── packet: one item per thread ────  your comments, as you send them
+  changes what each thread asks for
+  (Edit tool, suiko apply, or its sources + a rebuild)
+  suiko revise report --replies -  ── records v2, ──>  "v2": what changed, the agent's
+                                      links hunks to       replies (and pictures) on each thread
+                                      threads, guards      Looks good / Not yet ... Approve -> final v3
+  suiko final report --decisions
 ```
 
 - The **CLI** is the core. It reads and writes `.specreview/` in your workspace under a per-doc lock; it never needs the server.
@@ -74,7 +77,7 @@ Coding agents are good at writing specs and bad at revising them. Feedback in ch
 
 ## Install
 
-Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`suiko review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`B`, `suiko snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
+Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`suiko review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`Shift+B`, `suiko snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
 ### Quick install
 
@@ -89,7 +92,7 @@ suiko install --apply     # writes that configuration (same as ./install.sh --ye
 
 Or install it from npm instead of a clone: `npm install -g @cire10/suiko` (the command is still `suiko`), then `suiko install --apply`.
 
-Then start a new session of each agent so it loads Suiko, and run `suiko doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `suiko install --apply`. To update later, run `git pull && npm ci` in the clone, then `suiko install --apply` again (it refreshes the copied skill and commands; the review server restarts on its own).
+Then start a new session of each agent so it loads Suiko, and run `suiko doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `suiko install --apply`. To update later, run `git pull && npm ci` in the clone (or `npm install -g @cire10/suiko@latest`), then `suiko install --apply` again: it refreshes the copied skill, commands and instruction blocks, which an upgrade alone leaves as they were. Every file it writes says which Suiko version wrote it, and `suiko open` and `suiko doctor` tell you when those copies are older than the CLI, with the command that updates just those files. The review server restarts on its own.
 
 `install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `suiko` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `suiko install`. Options after `--yes` go to `suiko install`, e.g. `./install.sh --yes --only claude,codex`.
 
@@ -171,11 +174,11 @@ Or from a shell: `claude plugin marketplace add /path/to/suiko` then `claude plu
 
 The plugin adds:
 
-- the **`spec-review` skill**: the review protocol Claude follows when it writes a spec for you, receives a feedback packet, or you mention a thread;
-- the **`/review-spec <path>`** command (also `/suiko:review-spec`): opens an existing file for review, shows the UI in your browser, and waits in the background;
+- the **`spec-review` skill**: the review protocol Claude follows once a document is open in Suiko: when you ask it to open or iterate on a document in Suiko, when your feedback arrives, or when you mention a thread. It says nothing about how to write the document;
+- the **`/review-spec <file>`** command (also `/suiko:review-spec`): opens an existing document for review, shows the UI in your browser, and waits in the background;
 - the **`/review-code [args]`** command: opens a code review of Claude's changes, or of a GitHub PR (see [Code review](#code-review)), and waits in the background;
 - the **`/suiko-last`** command: opens Claude's previous message for review (see [Reviewing the last message and piped text](#reviewing-the-last-message-and-piped-text));
-- two **hooks**: `suiko hook pre-write` (PreToolUse on `Write`) denies a Write that would rewrite most of a spec under review, and `suiko hook prompt` (UserPromptSubmit) reminds Claude of a submitted review that no background wait picked up.
+- two **hooks**: `suiko hook pre-write` (PreToolUse on `Write`) asks you before a Write that would replace most of the text of a document under review (allow it when you asked for a full rewrite; see [Configuration](#configuration) to deny such Writes instead), and `suiko hook prompt` (UserPromptSubmit) reminds Claude of feedback that no background wait picked up.
 
 The plugin leaves plan mode alone. The [plan-mode gate](#plan-mode-gate) is opt-in.
 
@@ -209,61 +212,61 @@ See [`integrations/agents-md/README.md`](integrations/agents-md/README.md) for G
 
 ## Quick start
 
-With the Claude Code plugin installed, ask Claude:
+With the Claude Code plugin installed, ask Claude for a document the way you always would, and say you want to review it in Suiko:
 
-> Write an implementation spec for the token service. I want to review it.
+> Write an HTML report on last quarter's funding stress, with charts for each finding and the investigation steps. Open it in Suiko when it's done.
 
-Claude writes `docs/specs/token-service.md`, runs `suiko open`, which opens the review UI in your default browser, starts a background `suiko wait`, and stops. Comment on anything, click **Submit review**, and Claude picks it up automatically.
+Claude builds the report exactly as it would without Suiko (its own HTML, CSS, scripts, chart libraries and data, often a template and a build script), then runs `suiko open reports/funding-study/report.html`, which opens the review UI in your default browser, starts a background `suiko wait`, and stops. Comment on anything; Claude picks each comment up, changes what you asked for (rebuilding the report from its sources when that is how it was made), answers on the thread, and waits for more.
 
-For a spec that already exists: `/review-spec docs/specs/token-service.md`.
+For a document that already exists: `/review-spec reports/funding-study/report.html` (any `.html` or `.md` file).
 
 To use the Claude desktop app's built-in browser pane next to the chat instead, set `SPECREVIEW_BROWSER=pane` in the environment Claude Code runs in (for example `"env": {"SPECREVIEW_BROWSER": "pane"}` in `~/.claude/settings.json`). `none` only prints the URL.
 
 Without an agent integration:
 
 ```bash
-suiko open docs/specs/token-service.md     # prints the review UI URL
-suiko feedback token-service               # after you submit: prints the feedback packet
+suiko open reports/funding-study/report.html   # prints the review UI URL
+suiko feedback report                          # after you send your comments: prints the feedback packet
 ```
 
 ## Keyboard shortcuts
 
-Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`.
+Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`. The two comment keys follow **Send comments** in Settings: the first key is for Right away (the default), the one in brackets for When I click Send.
 
 | | Key | Does |
 |---|---|---|
-| **Anywhere** | `Cmd+K` | **Command palette**: find and run any action by name |
-| | `Cmd+,` | Settings |
-| | `Cmd+/` or `?` | Keyboard shortcuts (this list) |
-| **Comment** | `c` / `s` / `q` | Comment on, suggest replacement text for, or ask a question about the selected text |
-| | `a` | Mark the selection agreed (locks it) |
-| | `b` | **Snip an area of the doc**: drag a box over anything (text, images, diagrams, a mix) |
-| | `B` (Shift+B) | **Snip anywhere on your screen** with the macOS picker |
-| | `e` | Pick an image, diagram node, table cell or code block (shift-drag marks a region of an image) |
-| | `Cmd+Enter` | In the comment box: **Add to review** (a draft, sent when you submit) |
-| | `Cmd+Shift+Enter` | In the comment box: **Send now** (this comment goes to the agent immediately) |
-| | `Cmd+B` / `Cmd+Shift+8` / `Cmd+Shift+7` | In the comment box: bold / bulleted list / numbered list (also the buttons above it) |
-| | `Esc` | Cancel the comment, the snip or pick mode |
-| **Review** | `f` or `Cmd+Shift+Enter` | Submit the whole review (outside the comment box) |
-| | `v` | Verify queue: the threads the agent addressed, answered or declined |
-| | `x` / `o` | Accept / reopen the focused thread |
-| | `X` (Shift+X) | **Accept all**: every addressed or answered thread in Verify (declined ones stay; Undo in the toast) |
-| | `y` | Accept a decline |
+| **Comment** | `c` `s` `q` `a` | Comment, suggest, question, or mark agreed on the selected text |
+| | `b` | Snip an area of the document: drag a box over text, images or diagrams, then comment (Esc cancels) |
+| | `Shift+B` | Snip anywhere on your screen (macOS picker), then comment on the screenshot |
+| | `e` | Pick an image, diagram, table or code block ([ ] parent / child, Shift-drag a region, Esc exits) |
+| | `Cmd+Shift+Enter` (`Cmd+Enter`) | Save the comment as a draft / Add to review (in the composer) |
+| | `Cmd+Enter` (`Cmd+Shift+Enter`) | Send the comment now, on its own (in the composer) |
+| | `Cmd+B` `Cmd+Shift+8` `Cmd+Shift+7` | Bold / bulleted list / numbered list (while writing) |
+| **Review** | `f` `Cmd+Shift+Enter` | Send dialog: your drafts and a verdict, or Approve (the second key while no comment is open) |
 | | `r` | Reply to the focused thread |
-| **Navigate** | `j` / `k` | Next / previous thread |
-| | `n` / `p` | Next / previous change |
-| | `[` / `]` | Previous / next version (in pick mode: parent / child element) |
-| | `0` `1` `2` `3` `4` | Read / Review / Changes / Source / History mode |
-| | `d` | Compare with your last review, or with the previous version |
-| **View** | `h` | Hide all highlights for a clean read |
-| | `\` | Show or hide the thread panel |
-| | `t` | Cycle the theme |
+| | `x` | Mark the focused thread done (Looks good / Done) |
+| | `o` | Reopen the focused thread |
+| | `y` | Agree when Claude didn't change it |
+| | `Shift+X` | Accept all: every thread Claude changed or answered (Undo in the toast) |
+| | `v` | Show your turn (what waits for you) |
+| **Navigate** | `j` `k` | Next / previous thread |
+| | `n` `p` | Next / previous change |
+| | `0` `1` `2` `3` `4` | Read / Review / Changes / Source / History |
+| | `[` `]` | Previous / next version |
+| | `d` | Toggle the base: your last review / previous version |
+| **View** | `h` | Hide all annotations (clean read) |
+| | `\` | Toggle the thread panel |
+| | `t` | Cycle theme (system, light, dark) |
+| **App** | `Cmd+K` | Command palette: run anything by name |
+| | `Cmd+,` | Settings |
+| | `Cmd+/` `?` | Keyboard shortcuts (this list) |
+| | `Esc` | Close or cancel |
 
-Most keys work while focus is in the document too. Keys that change a thread's state (`x`, `o`, `y`) act only when focus is in the Suiko UI, so scripts in a reviewed document cannot trigger them. `Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere, even while you type a comment (the draft is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` work too, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
+Keys typed in the document reach Suiko too, unless the document has keyboard shortcuts of its own: then it keeps its single-letter keys (Suiko says so once), and the tool dock and "select text, then `c`" still work. Keys that mark threads done or reopen them (`x`, `o`, `y`, `Shift+X`) and the keys that send or save a comment act only when focus is in the Suiko UI, so scripts in a reviewed document cannot trigger them. `Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere, even while you type a comment (it is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` work too, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
 
-**Command palette** (`Cmd+K`): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions, inline or side by side; filter the thread list; submit with a verdict; copy the review link or the agent prompt; open another doc; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
+**Command palette** (`Cmd+K`, or the search icon in the top bar): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions, inline or side by side; show the threads with Claude, done or all; send with a verdict; apply planned changes; accept all revisions; copy the review link or the prompt for Claude; open another document; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
 
-**Settings** (`Cmd+,`): theme, the outline rail, whether the thread panel starts open, single-letter shortcuts (turn them off if the doc has its own keyboard controls or you press keys by accident), what happens when the agent records a new version, a confirmation before **Send now**, and the default verdict. See [Settings](docs/user-guide.md#settings).
+**Settings** (`Cmd+,`, or **⋯** in the top bar): General (theme, single-letter shortcuts), Reading (what a document opens in, what happens when Claude records a new version, the outline rail, whether the thread panel starts open), Sending (each comment right away, the default, or when you click Send; Ask before sending; what the Send dialog starts on) and Claude & context (**Doc edits**: Auto, Right away or Batched). See [Settings](docs/user-guide.md#settings).
 
 ## Snipping
 
@@ -271,25 +274,25 @@ A snip is a comment with a picture. The agent receives the image's file path and
 
 | To comment on | Do | The agent gets |
 |---|---|---|
-| Any area of the doc | Press `b` (or the scissors button in the top bar) and drag a box | The picture, the source lines of every block under the box, and a label such as `snip (figure + 2 paragraphs)` |
-| Anything on your screen: the running app, a terminal, another document (macOS) | Press `B`, then drag with the macOS picker, as with `Cmd+Shift+4` | The picture, as a general comment, or on the text you had selected |
+| Any area of the doc | Click the scissors in the tool dock at the bottom of the document, or press `b`, and drag a box | The picture, the source lines of every block under the box, and a label such as `snip (figure + 2 paragraphs)` |
+| Anything on your screen: the running app, a terminal, another document (macOS) | Click the monitor in the tool dock, or press `Shift+B`, then drag with the macOS picker, as with `Cmd+Shift+4` | The picture, as a general comment, or on the text you had selected |
 | Anything, from a terminal or a global hotkey (macOS) | `suiko snip` | The picture as a draft comment in your review, or sent at once with `--send` |
-| A region of one image, SVG or canvas | Press `e`, then shift-drag on the image | The crop, the element's source and the region as percentages |
+| A region of one image, SVG or canvas | Click the crosshair in the tool dock, or press `e`, then shift-drag on the image | The crop, the element's source and the region as percentages |
 
-**Area snips (`b`).** The cursor becomes a crosshair. Drag a box over any part of the rendered doc; when you let go, the comment box opens with a thumbnail of the area. Type your comment, then `Cmd+Enter` to add it to your review or `Cmd+Shift+Enter` to send it now. `Esc` cancels. Each `b` takes one snip, then you are back to selecting text. It works whether focus is in the UI or in the document.
+**Area snips (`b`).** The cursor becomes a crosshair. Drag a box over any part of the rendered doc; when you let go, the composer opens with a thumbnail of the area. Type your comment, then **Send** (`Cmd+Enter`), or **Save as draft** (`Cmd+Shift+Enter`) to send it later with others. `Esc` cancels. Each snip takes one box, then you are back to selecting text. The key works whether focus is in the UI or in the document; a document with its own keyboard shortcuts keeps `b` for itself, and the dock's scissors still work.
 
-**Screen snips (`B`).** Suiko's local server runs macOS's own region picker (`screencapture -i`). Drag a box, or press Space and click a window; `Esc` cancels. The comment box opens with the screenshot attached. Select some text in the doc first to attach the screenshot to that text; otherwise it becomes a general comment. Large screenshots are scaled down to 2000 px on the longest side. This needs macOS and, on first use, the Screen Recording permission (see below).
+**Screen snips (`Shift+B`).** Suiko's local server runs macOS's own region picker (`screencapture -i`). Drag a box, or press Space and click a window; `Esc` cancels. The composer opens with the screenshot attached. Select some text in the doc first to attach the screenshot to that text; otherwise it becomes a general comment. Large screenshots are scaled down to 2000 px on the longest side. This needs macOS and, on first use, the Screen Recording permission (see below).
 
 **From the terminal: `suiko snip`.** Runs the same picker and adds the screenshot to the doc as a draft comment. An open review UI shows it at once with a toast, "Screenshot added from your Mac", and an **Edit** button to add text.
 
 ```bash
 suiko snip                                         # picker, then a draft on this workspace's doc
 suiko snip token-service -m "The header overlaps the logo"
-suiko snip --send -m "This is the login page today"      # submit it to the agent right away
+suiko snip --send -m "This is the login page today"      # send it to the agent right away
 suiko snip --file ~/Desktop/shot.png --question -m "Is this the flow you meant?"
 ```
 
-`-m` adds the comment text, `--question` makes it a question, `--send` submits it immediately as a one-item review (a waiting agent picks it up at once), `--file <png>` attaches an existing PNG or JPEG (up to 5 MB) instead of opening the picker, and `--json` prints the result as JSON. Without `<doc>`, it uses the only doc tracked in the current directory's workspace (or `--workspace <dir>`); when that workspace tracks several docs, or the current directory has none (a Shortcut starts in your home folder), it picks the most recently active doc and names it on stderr. Pass the doc id or its file path to choose. `Esc` in the picker cancels: nothing is added and the exit code is 0.
+`-m` adds the comment text, `--question` makes it a question, `--send` sends it immediately as a one-item review (a waiting agent picks it up at once), `--file <png>` attaches an existing PNG or JPEG (up to 5 MB) instead of opening the picker, and `--json` prints the result as JSON. Without `<doc>`, it uses the only doc tracked in the current directory's workspace (or `--workspace <dir>`); when that workspace tracks several docs, or the current directory has none (a Shortcut starts in your home folder), it picks the most recently active doc and names it on stderr. Pass the doc id or its file path to choose. `Esc` in the picker cancels: nothing is added and the exit code is 0.
 
 ### A global snip hotkey with the Shortcuts app (macOS)
 
@@ -322,60 +325,60 @@ Bind `suiko snip` to a key that works in every app, so you can snip a bug in the
 6. **Add the hotkey.** Click the **Shortcut Details** button (ⓘ) in the right sidebar, click **Add Keyboard Shortcut**, and press the keys you want, for example `Ctrl+Option+Cmd+S`. Choose a combination no app uses.
 7. **Test it.** Press the hotkey, or click Run (▶) in the shortcut's window. If Shortcuts asks whether the shortcut may run a script, allow it.
 
-**Screen Recording permission.** macOS asks for it the first time a snip runs. Grant it to **Shortcuts** for the hotkey, and to the app that started Suiko (your terminal, your editor, or Claude) for `B` and for `suiko snip` in a terminal: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For `B`, also run `suiko stop` and open the doc again so the server restarts under that app. A snip that shows only your wallpaper or empty windows means the permission is missing.
+**Screen Recording permission.** macOS asks for it the first time a snip runs. Grant it to **Shortcuts** for the hotkey, and to the app that started Suiko (your terminal, your editor, or Claude) for screen snips from the UI and for `suiko snip` in a terminal: **System Settings > Privacy & Security > Screen & System Audio Recording**, turn the app on, then quit and reopen it. For screen snips from the UI, also run `suiko stop` and open the doc again so the server restarts under that app. A snip that shows only your wallpaper or empty windows means the permission is missing.
 
 ## The review loop, step by step
 
-**1. The agent writes the spec once and opens it.**
+**1. The agent writes the document as it always would, then opens it.**
 
 ```text
-$ suiko open docs/specs/token-service.md
-suiko: tracking docs/specs/token-service.md as "token-service" (markdown, 212 lines) · recorded v1
-review UI: http://127.0.0.1:4777/d/3f9a1c2e/token-service?k=Zx81Qm0v7c
-next: the URL was opened in the system browser; run `suiko wait token-service` in the background
+$ suiko open reports/funding-study.html
+suiko: tracking reports/funding-study.html as "funding-study" (html, 1377 lines) · recorded v1
+review UI: http://127.0.0.1:4777/d/3f9a1c2e/funding-study?k=Zx81Qm0v7c
+next: the URL was opened in the system browser; run `suiko wait funding-study` in the background
 ```
 
-**2. You review.** Select a phrase and press `c` to comment, `s` to suggest exact replacement text, or `q` to ask a question. Press `b` and drag a box to snip any area (a figure with its caption, half a table, a whole section), or `B` to snip something outside the doc. Press `e` to pick an image, a mermaid node or a table cell, and shift-drag to mark a region of an image. Use the **⋯** menu of a section in the outline and choose **Mark agreed** to lock it. Then **Submit review** with a verdict: Comment, Request changes or Approve. A single urgent comment can skip the queue with **Send now** (`Cmd+Shift+Enter` in the comment box). See the [reviewer guide](docs/user-guide.md).
+**2. You review.** Select a phrase and press `c` to comment, `s` to suggest exact replacement text, or `q` to ask a question (or use the toolbar above the selection). The tool dock at the bottom of the document snips any area with its scissors (a figure with its caption, half a table, a whole section) or something outside the doc with its monitor icon, and picks an image, a mermaid node or a table cell with its crosshair (shift-drag marks a region of an image). Use the **⋯** menu of a section in the outline and choose **Mark agreed** to lock it. Each comment goes to the agent when you press **Send** (`Cmd+Enter`). To send several together, save them as drafts (**Save as draft**, `Cmd+Shift+Enter`), then press **Send 4** in the top bar and choose **Send feedback** or **Needs changes**, as here. See the [reviewer guide](docs/user-guide.md).
 
-**3. The agent gets a packet**, one item per thread, with the exact source lines to edit:
+**3. The agent gets a packet**, one item per thread, with the exact source lines behind each comment:
 
 ```text
-SPECREVIEW FEEDBACK · token-service (docs/specs/token-service.md) · review rv1 on v1 · CHANGES REQUESTED
+SPECREVIEW FEEDBACK · funding-study (reports/funding-study.html) · review rv1 on v1 · CHANGES REQUESTED
 Line numbers = current file on disk (identical to v1).
 4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
 
-[t1] blocking · comment · L42-43 · §3 Tokens > 3.2 Token refresh
-  on: "rotated on every use"
-  src> Refresh tokens are rotated on every use, and the previous token is
-  src> invalidated immediately.
-  Eric: Rotation on every use breaks multi-tab sessions. Use a 30 s reuse-detection grace window.
+[t1] blocking · comment · L212 · §3 Findings > 3.2 Funding stress
+  on: "spreads widened on 12 days"
+  src>     <p>Funding spreads widened on 12 days, all of them after the March rate decision.</p>
+  Eric: Count the days over the full two-year window, and say which threshold you used.
 
-[t3] suggestion · L120 · §5.1 Retries · apply verbatim: suiko apply token-service t3
-  - The client MUST retry 3 times.
-  + The client MUST retry up to 5 times with exponential backoff (base 200 ms, full jitter).
+[t3] suggestion · L120 · §2.1 Data · apply verbatim: suiko apply funding-study t3
+  -     <p>Sessions with fewer than 10 trades are dropped.</p>
+  +     <p>Sessions with fewer than 10 trades, or with a trading halt, are dropped.</p>
 ...
-LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
+LOCKED (agreed - do not modify): L1 §7 Caveats (L170-196)
 ```
 
-**4. The agent makes targeted edits** (the `src>` lines are an exact Edit `old_string`; suggestions go through `suiko apply`) **and records the revision** with one reply per thread:
+**4. The agent changes what you asked for** (the `src>` lines are an exact Edit `old_string`; for a report built from a template and data, it changes those and rebuilds; suggestions go through `suiko apply`, or into the sources of a built report) **and records the revision** with one reply per thread, a picture or mockup included when that says it better:
 
 ```text
-$ suiko revise token-service --replies - <<'JSON'
-{"summary": "rv1: grace window, retry policy", "threads": {
-  "t1": {"status": "addressed", "reply": "Replaced rotate-every-use with a 30 s grace window."},
+$ suiko revise funding-study --replies - <<'JSON'
+{"summary": "rv1: two-year window, halted sessions", "threads": {
+  "t1": {"status": "addressed", "reply": "Counted over two years (31 days, above 50 bp) and rebuilt the chart.", "at": "L212,L913"},
   "t3": {"status": "addressed", "reply": "Applied your suggestion."}}}
 JSON
-suiko: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
-  h1 L42-46  §3.2 Token refresh  -> t1 addressed  (overlap)
-  h3 L120    §5.1 Retries        -> t3 addressed  (tagged: apply)
-guards: ok · lock L1 untouched · no unexplained deletions · rewrite 4%
+suiko: recorded v2 for funding-study (+9 -3 lines, 3 hunks) · responds to rv1
+  h1 L120    §2.1 Data           -> t3 addressed  (tagged: apply)
+  h2 L212    §3.2 Funding stress -> t1 addressed  (overlap)
+  h3 L913    §3.2 Funding stress -> t1 addressed  (hint)
+guards: ok · lock L1 untouched · no unexplained deletions · rewrite 1%
 ```
 
-If the edit touched agreed text, deleted content no thread asked about, or rewrote most of the document, `revise` refuses (exit 3), records nothing, and prints the fix.
+If the change touched agreed text, deleted text no thread asked about, rewrote most of what you read without a thread asking for it, or dropped a suggestion an earlier version applied (a rebuild from sources that never got it), `revise` refuses (exit 3), records nothing, and prints the fix. A rebuilt chart or data blob is not text you read, so it never counts as a rewrite.
 
-**5. You verify.** The UI shows "v2 ready". **Review changes** draws everything that changed since your last review over the live document, or, with **Side by side**, shows the older version beside it with the removed text struck through in red; the `[v1 · last review] → [v2]` pickers compare any two versions. **Verify** walks through each addressed thread with the agent's reply and a mini-diff. Press `x` to accept (optionally recording a decision) or `o` to reopen, or **Accept all** (`Shift+X`) to accept every addressed and answered thread at once. **Accept all revisions**, beside the **Show changes** switch in the top bar, accepts the whole version: its changes stop showing as new and those threads are resolved. Turn **Show changes** off, or press `0` for **Read** mode, to read the new version clean (**Default view** in Settings can open every doc in Read). Submit again.
+**5. You check.** The turn pill in the top bar says **Your turn**, and the thread panel's **Your turn** lists what the agent answered, each card in plain words: "Changed in v2 — check it" (with **Looks good** / **Not yet**), "Claude answered", "Claude didn't change it", "Needs your answer". The **Changes** tab shows everything that changed since your last review, drawn over the newer version or side by side with the older one. Then comment again, or approve. The reviewer guide has the details: [Whose turn it is](docs/user-guide.md#whose-turn-it-is), [Threads](docs/user-guide.md#threads), [Reviewing what changed](docs/user-guide.md#reviewing-what-changed).
 
-**6. Approve.** Approving with "Mark v3 final" makes v3 the final version. The agent runs `suiko final token-service --decisions`, which checks the file on disk matches v3 and writes `token-service.decisions.md`.
+**6. Approve.** **Approve** in the top bar, with **Mark v3 final** ticked, makes v3 the final version; the dialog first lists anything still pending (planned changes not applied yet, threads that wait for you or for the agent, open Must fix threads). The agent runs `suiko final funding-study --decisions`, which checks the file on disk matches v3 and writes `funding-study.decisions.md` next to it.
 
 The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP tools) is in [docs/agent-protocol.md](docs/agent-protocol.md).
 
@@ -383,12 +386,12 @@ The full agent-side contract (packet grammar, revise JSON, guards, recovery, MCP
 
 This is optional, and off unless you install it. Suiko is meant for the reviews you ask for: run `/review-spec`, `/suiko-last` or `suiko open` when a plan, spec or doc is worth getting right, then iterate on it with Claude and implement from it. The gate is for people who want every Claude Code plan reviewed that way.
 
-With the gate installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in Suiko and Claude waits for your review. Comment on it as on any spec, then submit:
+With the gate installed, every time Claude finishes a plan in plan mode and calls ExitPlanMode, the plan opens in Suiko and Claude waits for your review. Comment on it as on any document. On a plan your comments always wait as drafts, whatever **Send comments** says: Claude is waiting in the gate and cannot answer threads, and the first review you send answers the gate. When you are done, send them together with **Send N** in the top bar:
 
 - **Approve**: Claude leaves plan mode and starts on the plan.
-- **Request changes** or **Comment**: Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Review changes** shows you exactly what changed, and the threads it changed are marked addressed for **Verify**.
+- **Send feedback** or **Needs changes** (or one comment sent on its own with **Send now**): Claude gets your threads, with the plan file's line numbers, and is told to make targeted edits to the plan file and call ExitPlanMode again. The new plan is recorded as the next version of the same doc, so **Changes** shows you exactly what changed, and the threads it changed come back as "Changed in v2 — check it".
 
-Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so request changes when they matter.
+Claude Code's own plan prompt stays in the terminal while the review is open. Answering it there wins: the gate then quietly steps aside. The gate also steps aside (and Claude Code asks as usual) when anything goes wrong, e.g. the review server cannot start. Comments you send with an approval are not passed on to Claude (Claude Code has no channel for them), so send them with **Needs changes** when they matter.
 
 Neither the plugin nor `suiko install` adds the gate by default. Add it with `suiko install --with-plan-gate --apply` (or `suiko install claude --with-plan-gate --apply`), which writes it into `settings.json` with absolute paths. Later installs keep it, and `suiko uninstall` removes it. To add it by hand, for example next to the plugin, put this in your Claude Code settings (with nvm and friends, use absolute paths: `"\"/path/to/node\" \"/path/to/suiko/bin/suiko.js\" plan-gate"`):
 
@@ -400,16 +403,16 @@ The gate always uses the system browser (a hook cannot open Claude's browser pan
 
 ## Reviewing the last message and piped text
 
-Not everything worth reviewing is a file. Suiko can review text as a **snapshot**: each version is recorded from the text itself, and threads, **Review changes** and **History** work as usual.
+Not everything worth reviewing is a file. Suiko can review text as a **snapshot**: each version is recorded from the text itself, and threads, **Changes** and **History** work as usual.
 
-- **Claude's last message:** type `/suiko-last` in Claude Code (or run `suiko last` in the session). The message opens in the review UI and Claude waits in the background. After you submit, Claude revises its answer and records it as the next version (`suiko revise <doc> --source <file>`), so you can review the changes.
+- **Claude's last message:** type `/suiko-last` in Claude Code (or run `suiko last` in the session). The message opens in the review UI and Claude waits in the background. After you send your comments, Claude revises its answer and records it as the next version (`suiko revise <doc> --source <file>`), so you can review the changes.
 - **Piped text:** `pbpaste | suiko open -` reviews whatever you pipe in (Markdown, up to 5 MB). Give it a name to keep iterating on one doc: `some-command | suiko open - --name notes` records a new version each time you pipe to the same name.
 
 When you run these from your home directory (which can never be a workspace), the doc goes to a scratch workspace under `~/.specreview/scratch/`, and every command Suiko prints includes the `--workspace` flag it needs. Running `/suiko-last` again for the same message reopens its doc without touching Claude's revisions. Only Claude Code transcripts are supported by `last` for now.
 
 ## Folders
 
-`suiko open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the review UI's home page, which lists them all; `suiko wait --all` waits for a review of any of them.
+`suiko open docs/specs` opens every `.md`, `.markdown`, `.html` and `.htm` file below the folder, recursively, skipping dot-directories, `node_modules` and symlinks whose target is outside the folder or in a skipped path, up to 200 files (it says what it skipped). Outside a git repository the folder gets one `.specreview/` store for all its files (a subfolder that already has a store keeps it). It prints one line per doc and the URL of the review UI's doc list, which lists them all; `suiko wait --all` waits for a review of any of them.
 
 ## Code review
 
@@ -428,7 +431,7 @@ suiko review --pr 123           # a GitHub PR, through gh
 - **The page** lists the changed files and shows one diff card per file, unified or split.
   - Click a line number, on either side, to select it, and shift-click to extend. Press `c` to comment, or `s` to suggest replacement lines (new side only).
   - **Comment on file** covers a whole file. `j`/`k` move between files and `n`/`p` between changes.
-  - Threads appear inline under their lines. **Changes** shows what changed between rounds, and **Verify** lists what the agent says it addressed.
+  - Threads appear inline under their lines. **Changes** shows what changed between rounds, and **Your turn** lists what the agent changed or answered, with **Looks good** / **Not yet**.
 - **What the agent gets:**
   - Each comment cites `path:L42-44` relative to the repository root, with the exact current lines to replace. A comment on deleted lines carries those lines instead.
   - The agent edits the real files and applies your suggestions with `suiko apply`. It records the next round with `suiko revise <doc> --replies -`.
@@ -445,7 +448,7 @@ suiko review --pr 123           # a GitHub PR, through gh
 
 ## Snapshot a web page
 
-`suiko snapshot <url>` fetches a web page once, now, and opens it for review like any other doc: threads, **Review changes** and **History** work as usual. It uses the network only when you run it (like `suiko review --pr`, the only other command that does); the review UI never fetches the page.
+`suiko snapshot <url>` fetches a web page once, now, and opens it for review like any other doc: threads, **Changes** and **History** work as usual. It uses the network only when you run it (like `suiko review --pr`, the only other command that does); the review UI never fetches the page.
 
 ```bash
 suiko snapshot https://docs.example.com/spec
@@ -463,12 +466,12 @@ The MCP tool `suiko_snapshot` does the same for public pages only.
 
 ## Command reference
 
-`<doc>` is a doc id (`token-service`) or a file path. Line numbers are always lines of the current file on disk.
+`<doc>` is a doc id (`funding-study`) or a file path. Line numbers are always lines of the current file on disk.
 
 | Command | What it does |
 |---|---|
-| `suiko open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track a spec, record v1, start the server, print the UI URL |
-| `suiko open <dir>` | Open every spec file below a folder (at most 200); print the home URL listing them |
+| `suiko open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track a document, record v1, start the server, print the UI URL (and say when your installed Suiko instructions are older than the CLI) |
+| `suiko open <dir>` | Open every `.html` and `.md` file below a folder (at most 200); print the home URL listing them |
 | `suiko open - [--name N] [--title T]` | Review piped Markdown; the same `--name` records a new version |
 | `suiko last [--session <id>] [--transcript <path>] [--title T]` | Review the agent's last message (Claude Code transcript); returns at once |
 | `suiko snapshot <url> [--title T] [--reader auto\|direct\|jina] [--as-html] [--allow-private] [--allow-remote-assets] [--replies <file\|->]` | Review a web page (uses the network); run it again to record the next version. See [Snapshot a web page](#snapshot-a-web-page) |
@@ -477,20 +480,20 @@ The MCP tool `suiko_snapshot` does the same for public pages only.
 | `suiko feedback <doc> [--peek] [--include-drafts] [--all-open] [--json]` | Print the packet without blocking |
 | `suiko apply <doc> <tid...> [--dry-run]` | Apply suggestions verbatim |
 | `suiko edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Exact replace tagged to threads (`--stdin` for a JSON batch) |
-| `suiko reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without recording a version |
+| `suiko reply <doc> <tid> -m <md> [--status answered\|planned\|declined\|needs_input\|addressed] [--at L42-46] [--attach <file>]... [--decision "text"]` | Reply without recording a version; `--attach` shows an image or an HTML mockup on the thread |
 | `suiko revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record a version with replies; enforce guards |
 | `suiko revise <doc> --source <file\|-> [--replies <file\|->]` | Record a new version of a snapshot doc (a message or piped text) from a file |
-| `suiko revert <doc> (--hunk hN \| --lock L1)` | Undo one unrecorded hunk, or restore agreed text |
+| `suiko revert <doc> (--hunk hN \| --lock L1)` | Undo one unrecorded hunk, or restore agreed text, in the document's file (for a document built from sources, the agent undoes the change there and rebuilds) |
 | `suiko reanchor <doc> <tid> (--lines A-B \| --quote TEXT) [--file <path>]` | Move a thread's anchor (code reviews: `--file`) |
 | `suiko ask <doc> (--quote TEXT \| --lines A-B \| --file <path> [--lines A-B]) -m <question>` | The agent asks the reviewer a question |
 | `suiko threads <doc> [--status open\|addressed\|needs_input\|resolved\|outdated\|all] [--json]` | List threads |
 | `suiko show <doc> [<tid>] [--version N] [--lines A-B] [--file <path> [--side new\|old]]` | Show a thread's timeline, or old source (code reviews: one file of a round) |
-| `suiko diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Show changes (default: your last review to head) |
+| `suiko diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Show changes (default: your last review to head; `head..live`: the unrecorded changes) |
 | `suiko log <doc> [--json]` | Timeline of versions and reviews |
 | `suiko status [<doc>] [--json]` | Docs, threads, undelivered reviews, listeners, working-copy state |
 | `suiko final <doc> [--decisions] [--out <dir>]` | Check the final version; export the decision log |
 | `suiko close <doc>` | End the review session (a PR review also loses its fetched ref) |
-| `suiko snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: snip anywhere on screen with the macOS picker (or attach an image with `--file`) as a draft comment, or submit it at once with `--send`. See [Snipping](#snipping) |
+| `suiko snip [<doc>] [-m <text>] [--question] [--send] [--file <png>] [--json]` | Reviewer tool: snip anywhere on screen with the macOS picker (or attach an image with `--file`) as a draft comment, or send it at once with `--send`. See [Snipping](#snipping) |
 | `suiko serve [--foreground] [--port N]` · `suiko stop [--rotate]` · `suiko doctor [--fix]` | Server control and health checks |
 | `suiko mcp` | stdio MCP server |
 | `suiko hook pre-write` · `suiko hook prompt` | Claude Code hook entry points |
@@ -505,16 +508,16 @@ Exit codes: `0` ok or delivered · `1` error · `2` wait timed out · `3` refuse
 
 ## Storage layout and git
 
-Durable review data lives **in your repository**, next to the spec, and is meant to be committed:
+Durable review data lives **in your repository**, next to the document, and is meant to be committed:
 
 ```text
 <workspace>/
-  docs/specs/token-service.md               the live spec (the agent edits this file)
+  reports/funding-study.html                the live document (the agent edits it, or rebuilds it from its sources)
   .specreview/
     config.json                             settings (committed)
     .gitignore                              ignores temporary files (*.tmp-*)
     assets/sha256/44/44ab…e1.png            content-addressed snapshots of images and other local assets
-    docs/token-service/
+    docs/funding-study/
       doc.json                              doc metadata: head, state, final version
       versions/0001.md  0001.json           exact source bytes + manifest, one pair per version
       threads/t1.json …                     one file per thread
@@ -531,9 +534,9 @@ Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `
   ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/
 ```
 
-That includes your unsubmitted drafts, presence heartbeats, the change feed, render caches and staged edits.
+That includes your unsent drafts, presence heartbeats, the change feed, render caches and staged edits.
 
-- **Workspace root:** the nearest ancestor of the spec that contains `.specreview/`, else the git top level, else the spec's directory. `open --workspace <dir>` overrides it.
+- **Workspace root:** the nearest ancestor of the document that contains `.specreview/`, else the git top level, else the document's directory. `open --workspace <dir>` overrides it.
 - **Git:** the files are small, sorted JSON and plain source copies with sequential names, so they diff and merge well. Recommended `.gitattributes` (printed by `open` the first time; it does not write them):
 
   ```text
@@ -551,7 +554,7 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 {"schema": 1,
  "reviewer": {"name": "Eric"},
  "guards": {"enforceLocks": true, "maxRewriteRatio": 0.5, "unexplainedWords": 20, "unexplainedDeletionLines": 3,
-            "unexplainedDeletion": "refuse", "writeHook": "deny", "writeHookRatio": 0.4},
+            "unexplainedDeletion": "refuse", "writeHook": "warn", "writeHookRatio": 0.4},
  "anchoring": {"minScore": 0.65, "minQuoteSim": 0.6, "contextChars": 32},
  "render": {"network": "allow", "mermaid": true, "math": true, "highlight": true},
  "git": {"autoCommit": false},
@@ -561,10 +564,10 @@ That includes your unsubmitted drafts, presence heartbeats, the change feed, ren
 | Key | Meaning |
 |---|---|
 | `reviewer.name` | Your display name in threads and packets (defaults to `git config user.name`, then your OS user name) |
-| `guards.maxRewriteRatio` | Refuse a revision that removes or replaces more than this share of the old text (docs of 40+ lines) |
-| `guards.unexplainedWords`, `guards.unexplainedDeletionLines` | Refuse an unexplained hunk that removes or replaces at least this many words or whole lines |
+| `guards.maxRewriteRatio` | Refuse a revision that removes or replaces more than this share of the text you read where no thread asked for a change (docs of 40+ lines or 300+ words). For HTML that is the visible text: scripts, styles, data blobs and `data:` URIs do not count, so a report rebuilt from new data is not a rewrite |
+| `guards.unexplainedWords`, `guards.unexplainedDeletionLines` | Refuse an unexplained hunk that removes or replaces at least this many words or whole lines of that text |
 | `guards.unexplainedDeletion` | `refuse`, `warn` or `off` |
-| `guards.writeHook`, `guards.writeHookRatio` | Claude Code Write hook: `deny`, `warn` (ask the user) or `off`; the share of changed lines that triggers it |
+| `guards.writeHook`, `guards.writeHookRatio` | Claude Code Write hook: `warn` (the default; `ask` means the same) asks you in a permission prompt, `deny` refuses such Writes without asking, `off` turns the hook off; the share of the document's text (visible text, for HTML) a Write may replace before it triggers. A workspace created by Suiko 0.3.1 or earlier has `"writeHook": "deny"` in its config.json: change it to `"warn"` (or delete the key) to be asked instead. To keep denying in a new workspace, set `"deny"` |
 | `anchoring.*` | Fuzzy re-anchoring thresholds |
 | `render.network` | `allow` lets documents load their own remote resources; `block` adds a CSP that restricts them to local files. A web page recorded by `suiko snapshot <url>` carries its own setting (`block` unless `--allow-remote-assets`), which wins over this one |
 | `git.autoCommit` | Commit each recorded version |
@@ -586,8 +589,8 @@ Two settings belong to you rather than to a project, so they live in `~/.specrev
 - **Local only.** Both servers bind to `127.0.0.1`. A `Host` allowlist blocks DNS rebinding. The UI API requires a random 128-bit token (from `~/.specreview/daemon.json`, mode 0600, or the `?k=` in the URL), state-changing requests must come from the UI's own origin, and no CORS headers are ever sent.
 - **Isolated documents.** Specs, including their scripts, run on a separate origin (port 4778) in a sandboxed iframe without top-navigation rights. That origin has no API and no state-changing routes, and each document is served under an unguessable per-document path, so other websites cannot probe your files.
 - **Path safety.** Only files inside the workspace are served, or copied into `.specreview/assets/` when a version is recorded; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and key files (`*.pem`, `*.key`, `*.p12`, `id_rsa*`) are refused, even when a spec links to them.
-- **Observe-only overlay.** Messages from the document can at most open a comment box; nothing is submitted, resolved or written without a click in the UI. Comment bodies are sanitised before rendering.
-- **Screen snips are interactive.** `B` and `suiko snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.
+- **Observe-only overlay.** Messages from the document can at most open the composer; nothing is sent, marked done or written without a click in the UI. Comment bodies are sanitised before rendering.
+- **Screen snips are interactive.** A screen snip from the UI (`Shift+B`) and `suiko snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.
 - **No egress.** Suiko makes no network requests: no telemetry, no update checks, every UI asset is vendored. Documents may load their own remote resources unless `render.network` is `block`. The two exceptions run only when you run them, and are refused when `SPECREVIEW_OFFLINE=1` or `network.allow` is `false`. `suiko snapshot <url>` fetches the page you name: public hosts only unless `--allow-private`, and every redirect is re-checked. `suiko review --pr <n>` asks `gh` about the PR and fetches its head once with git (https, ssh or git transports only).
 - **Snapshots run nothing.** A fetched page is cleaned with an allowlist before it is stored. Snapshot docs (web pages, plans, messages, piped text) are served with a strict policy (`script-src 'self'`, no form submission, no `<base>`, no plugins) in a sandbox without forms or downloads, and a web page's remote images and styles stay blocked unless it was recorded with `--allow-remote-assets`.
 - **Hooks and install are conservative.** Hooks never block a prompt on error and always exit 0. `install` prints what it would change and writes nothing without `--apply`.
@@ -604,15 +607,17 @@ The access token appears in the browser's address bar; it is not sent as a refer
 | The old URL returns 401 | The token was rotated. Get a fresh URL from `suiko open <file>`. |
 | Ports 4777/4778 are taken | The server tries the next free pair up to 4799, then random ports, and remembers its choice. Or set `SPECREVIEW_PORT`. |
 | A screen snip shows only the wallpaper or empty windows | macOS has not granted Screen Recording. Turn it on for the app that started Suiko (or Shortcuts) in System Settings > Privacy & Security > Screen & System Audio Recording, quit and reopen that app, then `suiko stop` and open the doc again. |
-| `B` or `suiko snip` says screen snips are unsupported | They need macOS (`/usr/sbin/screencapture`). Use `b` to snip inside the doc, or paste an image into the comment box. |
-| An area snip has no picture | The browser could not draw that area (for example a cross-origin image or a video frame). The comment still carries the source lines; use `B` to attach a real screenshot. |
-| `wait` exits 3 immediately | Either the spec has unrecorded edits (the agent should run `suiko revise`; if the edits are yours, click **Record as my revision**; `--allow-dirty` skips the check), or a thread the agent received has no reply yet: the message names it, and the agent answers on it with `suiko revise --replies -` or `suiko reply` (`--allow-unanswered` skips the check). |
-| `revise` says REFUSED | Read each `ERR` line and its `fix:`. Typical fixes: `suiko revert <doc> --hunk hN`, an `other` explanation, or asking the reviewer to unlock text. |
-| Claude says a Write was denied "under Suiko" | Working as intended: the doc is under review, so Claude must use targeted edits. Set `guards.writeHook` to `warn` or `off` to change this. |
-| You submitted but the agent did nothing | Its background wait is not running (for example the session restarted). Tell it "done", or paste the **Copy prompt** text from the Submit dialog. In Claude Code the prompt hook also reminds it on your next message. |
+| A screen snip or `suiko snip` says screen snips are unsupported | They need macOS (`/usr/sbin/screencapture`). Snip inside the doc with the dock's scissors (`b`), or paste an image into the composer. |
+| An area snip has no picture | The browser could not draw that area (for example a cross-origin image or a video frame). The comment still carries the source lines; snip the screen (`Shift+B`) to attach a real screenshot. |
+| `wait` exits 3 immediately | Either the document has unrecorded edits (the agent should run `suiko revise`; if the edits are yours, click **Record as my revision**; `--allow-dirty` skips the check), or a thread the agent received has no reply yet: the message names it, and the agent answers on it with `suiko revise --replies -` or `suiko reply` (`--allow-unanswered` skips the check). |
+| `revise` says REFUSED | Read each `ERR` line and its `fix:`. Typical fixes: naming the changed lines in the `at` of the thread that asked for the change, undoing a change no thread asked for where it was made (in the sources, then a rebuild, for a built document; `suiko revert <doc> --hunk hN` for a file edited directly), an `other` explanation, putting an applied suggestion into the sources of a built document (`reverted`), or asking the reviewer to unlock text. |
+| Claude Code asks whether to allow a Write "which is under review" | The Write would replace most of the text of a document under review. Allow it if you asked for a full rewrite (Claude then records it with `suiko revise <doc> --allow-rewrite`); otherwise deny it, and Claude changes only what the threads ask for (with Edit, or in the document's sources and a rebuild, which the hook does not see). `revise` still refuses an unexplained rewrite either way. To refuse such Writes without asking, set `guards.writeHook` to `deny`; `off` turns the hook off. |
+| Claude says a Write was denied "under review" | The workspace's config says `"writeHook": "deny"` (every workspace created by Suiko 0.3.1 or earlier does). Claude changes only what the threads ask for; set it to `"warn"` to be asked instead. |
+| `suiko open` says "Your Suiko skill for Claude Code is from …" | The skill, commands or instruction blocks `suiko install` copied for your agents are older than the CLI (`npm install -g` and `git pull` do not refresh them). Run the command the line names: it updates exactly those files, e.g. `suiko install --only claude --apply`, `suiko install --project --only codex --apply` for a project install, or `suiko install agents-md --apply` for an AGENTS.md block. `suiko doctor` lists them per agent. |
+| You sent your comments but the agent did nothing | Its background wait is not running (for example the session restarted); the turn pill says "Claude isn't connected". Tell it "done", or click the turn pill, **Copy the prompt for Claude** and paste it into its chat. In Claude Code the prompt hook also reminds it on your next message. |
 | A `wait` printed "superseded … ignore this" (exit 6) | A newer `wait` took over. Harmless. |
-| "Annotations are blocked by this document's Content-Security-Policy" | The document's own CSP meta tag blocks the overlay. Review in Source mode, or remove the tag. |
-| "2 external resources failed (offline?)" | The document loads files from the internet (scripts, fonts, images) and some did not load. Check your connection, then reload the document from the command palette. |
+| Nothing is drawn over an HTML document, and the tools say "The document is still loading." | The document's own Content-Security-Policy `<meta>` tag may keep Suiko's script out. Review in **Source** (**⋯** in the top bar), or comment with a screen snip (`Shift+B`) or a general comment (**+** in the thread panel). |
+| A **⚠** chip in the top bar: "2 resources did not load" | The document loads files (scripts, fonts, images, often from the internet) and some did not load. Check your connection, then reload the document (**Reload the document** in the command palette). |
 | Starting over | `suiko stop`, then delete `~/.specreview`. Your versions and threads in `.specreview/` are untouched. |
 
 ## FAQ
@@ -620,24 +625,26 @@ The access token appears in the browser's address bar; it is not sent as a refer
 **Why not use Claude Artifacts or comments in Claude Docs?**
 
 - **Offline and local.** Everything runs on `127.0.0.1`; nothing is uploaded.
-- **Your files, in git.** The spec stays a normal file in your repository, and every version, thread and decision is a plain file you can commit, diff and review in a pull request.
+- **Your files, in git.** The document stays a normal file in your repository, and every version, thread and decision is a plain file you can commit and diff.
 - **Raw HTML fidelity.** Your HTML renders byte for byte as you wrote it, scripts and all; nothing is sanitised, re-serialised or restyled.
 - **Any agent.** The interface is a CLI with text and JSON output, plus MCP. Claude Code gets a plugin, but Codex, Gemini CLI or a shell script work too.
-- **Guards against regeneration.** Agreed text is locked, unexplained deletions and whole-document rewrites are refused, and every change is linked to the comment it addresses.
+- **Guards against regeneration.** Agreed text is locked, unexplained deletions and rewrites no thread asked for are refused, and every change is linked to the comment it addresses.
 
-**Does Suiko call an LLM or send my spec anywhere?** No. It is deterministic and offline: the same input always gives the same packet.
+**Does Suiko call an LLM or send my document anywhere?** No. It is deterministic and offline: the same input always gives the same packet.
 
-**Which formats are supported?** Markdown (`.md`, `.markdown`, GitHub-flavoured, with math, mermaid, footnotes and front matter) and HTML (`.html`, `.htm`).
+**Which formats are supported?** HTML (`.html`, `.htm`, with any CSS, JavaScript and libraries) and Markdown (`.md`, `.markdown`, GitHub-flavoured, with math, mermaid, footnotes and front matter).
 
-**Can I edit the spec myself?** Yes. Edit the file, then click **Record as my revision** in the UI. If the agent finds edits it did not make, it explains them instead of reverting them.
+**Can I edit the document myself?** Yes. Edit the file, then click **Record as my revision** in the UI. If the agent finds edits it did not make, it explains them instead of reverting them.
 
-**Can several people review?** v1 has a single reviewer per workspace. Comments carry the reviewer name from the config.
+**Can several people review?** Suiko has one reviewer per workspace. Comments carry the reviewer name from the config.
 
 **Can I review several files at once?** Each doc has its own rounds. `suiko wait --all` waits on every doc in the workspace.
 
 **How do I get an old version back?** `suiko show <doc> --version N` prints any recorded version's source, and History mode renders it. Ask the agent to restore the part you want, or comment on the change.
 
-**Does a spec have to be written a certain way for Suiko?** No. The agent should write the best document for its readers: Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included. Suiko renders it as written, and whatever you can see you can comment on, snip (`b`) or screenshot (`B`). See [writing the doc](integrations/claude-code/skills/spec-review/reference.md#writing-the-doc).
+**Does a document have to be written a certain way for Suiko?** No, and the agent is never told how to write it: Suiko's instructions start at `suiko open`. A report built from a template, data files and a build script, with inlined libraries and megabytes of data, works as well as a hand-written Markdown file. Suiko renders it as written, and whatever you can see you can comment on, snip (`b`) or screenshot (`Shift+B`). When you comment, the agent changes what you asked for, in the file or in its sources followed by a rebuild.
+
+**Can the agent answer with a picture?** Yes. On any thread it can attach an image or a small self-contained HTML file (a chart, a mockup), you iterate on it there, and **Use in doc** asks the agent to put it into the document at that place.
 
 ## Development
 
@@ -648,7 +655,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 
 ## Documentation
 
-- [Reviewer guide](docs/user-guide.md): the UI, gestures, snipping, keyboard shortcuts, the command palette, settings, Verify, locks and final versions.
+- [Reviewer guide](docs/user-guide.md): the screen, commenting and snipping, sending, whose turn it is, threads, the agent's pictures and mockups, batched edits, new versions and what changed, locks, approving, keyboard shortcuts, the command palette and settings.
 - [Agent protocol](docs/agent-protocol.md): the full contract for agents: commands, packet format, revise JSON, guards, MCP tools.
 - [Claude Code skill](integrations/claude-code/skills/spec-review/SKILL.md) and its [reference](integrations/claude-code/skills/spec-review/reference.md).
 - [AGENTS.md snippet](integrations/agents-md/AGENTS.snippet.md) for other agents.

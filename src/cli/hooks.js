@@ -2,16 +2,28 @@
 // Claude Code hook entry points (design 9.9, amendments 2.4 + 5): `suiko hook pre-write` (PreToolUse, matcher
 // Write) and `suiko hook prompt` (UserPromptSubmit).
 //
-// Hard constraints: this module imports only node:* builtins (bin/suiko.js loads it before anything else),
-// reads JSON files only (no store library, no recovery, no locks), never throws, prints nothing on error, always
-// exits 0 and finishes well under 150 ms. It walks up from the file (pre-write) or the session cwd (prompt) with
-// statSync looking for a `.specreview` directory and returns at once when there is none.
+// Hard constraints: this module imports only node:* builtins and src/shared/visible-text.js, which imports nothing
+// (bin/suiko.js loads it before anything else), reads JSON files only (no store library, no recovery, no locks),
+// never throws, prints nothing on error, always exits 0 and finishes well under 150 ms. It walks up from the file
+// (pre-write) or the session cwd (prompt) with statSync looking for a `.specreview` directory and returns at once
+// when there is none.
 //
 // pre-write: if the Write targets a tracked doc that has at least one review, is not closed, and
-//   guards.writeHook != 'off', compare the new content with the file on disk. When more than guards.writeHookRatio
-//   (0.4) of the file's non-blank lines would disappear, answer permissionDecision 'deny' ('ask' in 'warn' mode).
-//   Changed-line heuristic (no LCS): count the non-blank old lines (trailing whitespace ignored) that are not
-//   present in the multiset of new lines.
+//   guards.writeHook != 'off', compare the new content with the file on disk by what the reviewer reads, the measure
+//   of the revision guards (shared/visible-text.js visibleChangeRatio: an HTML doc's visible text, so a Write that
+//   only changes a script, a style, a data blob or a data: URI changes nothing read, while prose an inline script
+//   renders from its string literals is read; a Markdown doc's lines, inline data: images aside). When the new
+//   content no longer has more than guards.writeHookRatio (0.4) of the old visible characters (blocks, i.e. Markdown
+//   lines and HTML text between block-level tags and line breaks, matched as a multiset so moves are free; a changed
+//   block costs the words it lost; no LCS), answer permissionDecision 'ask' by default (guards.writeHook 'warn', or
+//   its synonym 'ask'), or 'deny' when guards.writeHook is 'deny'. Why 'ask' by default: Claude Code shows the USER a
+//   permission prompt with the reason (default and auto mode; the auto classifier does not decide it), while a
+//   headless `-p` run denies it and gives the reason to Claude. So a full rewrite the user asked for costs one click
+//   instead of forcing giant Edits, and an accidental regeneration is still stopped by the user; `suiko revise`
+//   remains the real gate (it refuses an unexplained rewrite unless --allow-rewrite). The reason reads for both
+//   audiences: what the Write would replace, when to allow it, how to change only what the threads ask for (Edit, or
+//   the doc's sources and a rebuild), and how an approved full rewrite is recorded (`suiko revise <doc>
+//   --allow-rewrite`).
 // prompt: for each doc of the workspace (not closed), add context when (a) a submitted review was not delivered
 //   to this agent and no live `wait` of this agent listens on that doc (or on `_all`), or (b) a review was
 //   delivered to this agent more than 5 minutes ago and never acknowledged. Agent = $SPECREVIEW_AGENT, else
@@ -32,8 +44,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { visibleChangeRatio } from '../shared/visible-text.js';
 
-/** shared/protocol.js DOC_KINDS, copied: this module imports only node:* builtins (a test keeps the two equal). */
+/** shared/protocol.js DOC_KINDS, copied: this module imports no shared module but visible-text.js (a test keeps the two equal). */
 export const HOOK_DOC_KINDS = Object.freeze(['file', 'snapshot', 'code']);
 
 const STORE_DIR = '.specreview';
@@ -46,7 +59,12 @@ const MAX_STDIN_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 const STDIN_TIMEOUT_MS = 3000;
 const DEFAULT_RATIO = 0.4;
-/** Doc ids as the store accepts them (src/core/store/store.js DOC_ID_RE; this module imports node builtins only). */
+/**
+ * guards.writeHook -> what the pre-write hook does ('warn' is the older name of 'ask'); any other value: the default,
+ * 'ask' (src/core/store/config.js defaults to 'warn').
+ */
+const WRITE_HOOK_MODES = new Map([['ask', 'ask'], ['warn', 'ask'], ['deny', 'deny'], ['off', 'off']]);
+/** Doc ids as the store accepts them (src/core/store/store.js DOC_ID_RE; this module does not import the store). */
 const DOC_ID_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 const THREAD_ID_RE = /^t\d+$/;
 
@@ -127,12 +145,13 @@ export function preWrite(input, o) {
   if (!reviewIds.length) return null;
 
   const guards = readJsonFile(path.join(store.storeDir, 'config.json'))?.guards ?? {};
-  const mode = ['deny', 'warn', 'off'].includes(guards.writeHook) ? guards.writeHook : 'deny';
+  const mode = WRITE_HOOK_MODES.get(guards.writeHook) ?? 'ask';
   if (mode === 'off') return null;
   const threshold = typeof guards.writeHookRatio === 'number' && guards.writeHookRatio >= 0 ? guards.writeHookRatio : DEFAULT_RATIO;
 
   const current = fs.readFileSync(file, 'utf8');
-  const ratio = changedLineRatio(current, ti.content);
+  const format = doc.format === 'html' || doc.format === 'markdown' ? doc.format : /\.html?$/i.test(rel) ? 'html' : 'markdown';
+  const ratio = visibleChangeRatio(format, current, ti.content);
   if (ratio <= threshold) return null;
 
   const docDir = path.join(store.storeDir, 'docs', doc.id);
@@ -147,43 +166,20 @@ export function preWrite(input, o) {
   const locks = listIds(path.join(docDir, 'locks'), 'L').filter((id) => readJsonFile(path.join(docDir, 'locks', `${id}.json`))?.active !== false);
   const facts = [`v${doc.head}`, `${openThreads} open thread${openThreads === 1 ? '' : 's'}`];
   if (locks.length) facts.push(`${locks.join(', ')} locked`);
-  const reason =
-    `${rel} is under Suiko (${facts.join(', ')}); this Write would replace ${Math.round(ratio * 100)}% of its lines. ` +
-    'Use Edit for targeted changes (or suiko apply/edit). If the user explicitly asked for a full rewrite, use ' +
-    '`suiko revise --allow-rewrite` after writing with Edit.';
+  // read by the user in a permission prompt ('ask') and by Claude (a denial, or 'ask' in a headless -p run)
+  const what = `Suiko: this Write would replace ${Math.round(ratio * 100)}% of the ${format === 'html' ? 'visible ' : ''}text of ${rel}, which is under review (${facts.join(', ')})`;
+  const onlyAsked = 'change only what the review threads ask for (Edit the file, or change its sources and rebuild)';
+  const record = `\`suiko revise ${doc.id} --allow-rewrite\``;
+  const reason = mode === 'deny'
+    ? `${what}; this workspace denies such Writes (guards.writeHook "deny"). Instead, ${onlyAsked}. If the user asked for a full rewrite, make it with Edit, then record it with ${record}.`
+    : `${what}. Allow it only if a full rewrite was asked for; otherwise ${onlyAsked}. After an approved full rewrite, record it with ${record}.`;
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: mode === 'warn' ? 'ask' : 'deny',
+      permissionDecision: mode,
       permissionDecisionReason: reason,
     },
   };
-}
-
-/**
- * Share of the old text's non-blank lines (trailing whitespace ignored) missing from the new text's line multiset.
- * @param {string} oldText
- * @param {string} newText
- * @returns {number} 0..1
- */
-export function changedLineRatio(oldText, newText) {
-  /** @type {Map<string, number>} */
-  const pool = new Map();
-  for (const line of newText.split('\n')) {
-    const k = line.trimEnd();
-    if (k) pool.set(k, (pool.get(k) ?? 0) + 1);
-  }
-  let total = 0;
-  let missing = 0;
-  for (const line of oldText.split('\n')) {
-    const k = line.trimEnd();
-    if (!k) continue;
-    total++;
-    const n = pool.get(k);
-    if (n) pool.set(k, n - 1);
-    else missing++;
-  }
-  return missing / Math.max(1, total);
 }
 
 // ------------------------------------------------------------------------------------------------ prompt

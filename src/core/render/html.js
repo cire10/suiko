@@ -11,7 +11,9 @@
 // guestInsertAt: after the <head> start tag, else after <html>, else after the doctype, else 0 (after a BOM).
 // The srcmap uses each element's full outer range (startOffset..endOffset); the text stream covers <body> only
 // and applies TEXT_EXCLUDE. pre.mermaid/div.mermaid elements are kind 'mermaid' (text excluded); when the doc
-// has them and no script mentions mermaid, features.mermaid is set so the vendored mermaid gets appended.
+// has them, loads no mermaid of its own (no script or link mentions mermaid) and has no module scripts (a module
+// can import mermaid without naming it in the page, e.g. `./diagram.js`), features.mermaid is set so the vendored
+// mermaid gets appended. A doc that renders its diagrams itself is never given a second mermaid racing its own.
 
 import { parse } from 'parse5';
 import { RefCollector } from './assets.js';
@@ -126,7 +128,10 @@ export function renderHtml(source, { docPath, stamp = true } = {}) {
   const inserts = [];
   let titleText = '';
   let hasMermaidEls = false;
-  let scriptMentionsMermaid = false;
+  /** The doc loads mermaid itself: a script (inline text or src) or a link (modulepreload, ...) mentions it. */
+  let loadsMermaid = false;
+  /** A <script type="module">: it may import mermaid without the page naming it. */
+  let hasModuleScript = false;
   let hasCode = false;
 
   /**
@@ -148,7 +153,11 @@ export function renderHtml(source, { docPath, stamp = true } = {}) {
       refs.addElement(lower, get);
       if (lower === 'style') refs.addCss(textContent(child));
       if (lower === 'title' && ctx.inHead && !titleText) titleText = textContent(child);
-      if (lower === 'script' && /mermaid/i.test(`${get('src') ?? ''} ${textContent(child)}`)) scriptMentionsMermaid = true;
+      if (lower === 'script') {
+        if (/mermaid/i.test(`${get('src') ?? ''} ${textContent(child)}`)) loadsMermaid = true;
+        if ((get('type') ?? '').trim().toLowerCase() === 'module') hasModuleScript = true;
+      }
+      if (lower === 'link' && /mermaid/i.test(get('href') ?? '')) loadsMermaid = true;
 
       const isMermaid = (lower === 'pre' || lower === 'div') && classes.includes('mermaid');
       if (isMermaid) hasMermaidEls = true;
@@ -197,7 +206,7 @@ export function renderHtml(source, { docPath, stamp = true } = {}) {
     assets: refs.assets,
     externals: refs.externals,
     title,
-    features: { mermaid: hasMermaidEls && !scriptMentionsMermaid, math: false, code: hasCode },
+    features: { mermaid: hasMermaidEls && !loadsMermaid && !hasModuleScript, math: false, code: hasCode },
   };
 }
 

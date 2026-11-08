@@ -7,12 +7,14 @@
 
 import { test as base, expect } from '@playwright/test';
 import { TESTID } from '../../src/shared/protocol.js';
-import { Ui } from './fixtures.mjs';
+import { pinnedPage, Ui } from './fixtures.mjs';
 import { startRealDaemon } from './real-daemon.mjs';
 
 /** @typedef {Awaited<ReturnType<typeof startRealDaemon>>} Real */
 
 const test = base.extend(/** @type {any} */ ({
+  // the preferences these specs were written for (fixtures.mjs LEGACY_PREFS)
+  page: pinnedPage,
   // eslint-disable-next-line no-empty-pattern -- Playwright requires a destructuring pattern here
   real: async ({}, /** @type {(r: Real) => Promise<void>} */ use) => {
     const real = await startRealDaemon({ files: [], open: [] });
@@ -73,14 +75,14 @@ test('a snapshot doc renders without the Record banner and shows Changes, Source
   });
   expect(res.refused).toBe(false);
   expect(res.version).toBe(2);
-  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'v2 ready' });
-  await expect(toast).toContainText('from claude');
+  const toast = page.getByTestId(TESTID.toast).filter({ hasText: 'Updated to v2' });
+  await expect(toast).toBeVisible();
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   await expect(page.getByRole('button', { name: 'Record as my revision' })).toHaveCount(0);
   await expect(page.locator('.banner-warn')).toHaveCount(0);
 
   // Changes
-  await toast.getByRole('button', { name: 'Review changes' }).click();
+  await toast.getByRole('button', { name: 'Show changes' }).click();
   await expect(modeTab(page, 'changes')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#sr-base')).toHaveValue('1');
   const change = page.getByTestId(TESTID.changeItem);
@@ -88,21 +90,21 @@ test('a snapshot doc renders without the Record banner and shows Changes, Source
   await expect(change).toContainText('configurable grace window');
   await expect(change.getByRole('button', { name: 't1' })).toBeVisible();
 
-  // Verify (round results): accept t1
+  // Round results: Looks good on t1
   const r1 = page.locator('.round-results .result[data-thread-id="t1"]');
   await expect(r1).toContainText('configurable');
   await r1.getByTestId(TESTID.verifyAccept).click();
-  await expect(r1).toContainText('Resolved');
+  await expect(r1).toContainText('Done');
   expect((await r.state(doc.id)).threads.find((/** @type {any} */ t) => t.id === 't1').status).toBe('resolved');
 
-  // Source
-  await modeTab(page, 'source').click();
+  // Source (the More menu)
+  await ui.menu('source');
   const view = page.locator('.source-view');
   await expect(view.locator('.diff-hunk')).toHaveCount(1);
   await expect(view.locator('.diff-hunk').first().locator('tr.op-ins')).toContainText('Keep a configurable grace window (default 30 s)');
 
-  // History
-  await modeTab(page, 'history').click();
+  // History (the More menu)
+  await ui.menu('history');
   const rows = page.getByTestId(TESTID.historyRow);
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toHaveAttribute('data-version', '2');
@@ -142,4 +144,34 @@ test('web page and piped-text snapshots: strict sandbox, no inline script, the H
 
   await page.goto(r.url());
   await expect(page.locator('.doc-row', { hasText: 'Token Service' }).locator('.doc-path')).toHaveText('web page · docs.example.com');
+});
+
+const PLAN = ['# Plan: token rotation', '', 'Rotate refresh tokens on every use.', '', 'Add a 30 s grace window for concurrent clients.', ''].join('\n');
+
+test('a plan from plan mode collects comments until Send, even with Send comments: Right away; Settings says why', async (/** @type {any} */ { page, ui, real }) => {
+  /** @type {Real} */
+  const r = real;
+  // Right away (the default): a plan overrides it, as the plan gate answers ExitPlanMode with the first review
+  await page.addInitScript(() => { if (window.top === window) localStorage.setItem('suiko.sendMode', 'now'); });
+  const { doc } = await r.ops.openSnapshot(r.ctx, { source: PLAN, origin: { type: 'plan', key: 'claude-plan:s1:inline', session: 's1' } });
+  await ui.open(doc.id);
+  await ui.selectText('Add a 30 s grace window');
+  await page.evaluate(() => /** @type {HTMLElement|null} */ (document.activeElement)?.blur?.());
+  await page.keyboard.press('c');
+  // the composer of "When I click Send": Add to review is the main button, Send now the deliberate one
+  await expect(page.getByTestId(TESTID.composerAdd)).toHaveText(/^Add to review/);
+  await expect(page.getByTestId(TESTID.composerAdd)).toHaveClass(/btn-primary/);
+  await expect(page.getByTestId(TESTID.composerSendNow)).toHaveText(/^Send now/);
+  await page.getByTestId(TESTID.composerTextarea).fill('Why 30 s?');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+  await expect(page.getByTestId(TESTID.composer)).toHaveCount(0);
+  // a draft, not a review: the plan gate is still waiting; the top bar sends it with the others
+  await expect(page.getByTestId(TESTID.submitReviewOpen)).toContainText('Send');
+  await expect(page.getByTestId(TESTID.submitReviewOpen).locator('.drafts-count')).toHaveText('1');
+  expect(await r.ctx.store.listReviews(doc.id)).toHaveLength(0);
+  expect((await r.ctx.store.getDrafts(doc.id)).items).toHaveLength(1);
+  // Settings > Sending says why the setting does not apply here
+  await ui.settings('sending');
+  await expect(page.getByTestId(TESTID.settingsDialog)).toContainText('This document is a plan from Claude\'s plan mode');
+  expect(ui.errors).toEqual([]);
 });

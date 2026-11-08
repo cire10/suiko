@@ -4,24 +4,28 @@
 // View / App. Keys are shown the way this platform writes them (⌘⇧↵ on a Mac, Ctrl+Shift+Enter elsewhere); rows
 // carry data-key-row (the command or help-row id) so tests and docs can point at them.
 // A filter box narrows the rows (typing a letter while the overlay has focus starts filtering). When single-letter
-// shortcuts are off (Settings), their keys show as "off (Settings)".
+// shortcuts are off (Settings), their keys show as "off (Settings)". Rows that name the agent use its name
+// ("Agree when Claude didn't change it").
 
 import { html, useMemo, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { closeDialog, openDialog } from '../actions.js';
 import { helpGroups } from '../commands.js';
 import { shortcut } from '../keys.js';
-import { docKindOf, isSingleKeyCombo, matchRow } from '../model.js';
+import { agentName, agentTitle, docKindOf, isSingleKeyCombo, matchRow, sendModeOf } from '../model.js';
 import { useStore } from '../state.js';
 import { IS_MAC, isEditable } from '../util.js';
 import { Modal } from './common.js';
 
 export function HelpOverlay() {
   const singleKeys = useStore((s) => s.prefs.singleKeys);
+  // the keys as they work on the doc shown (a plan collects comments whatever the setting); the setting on the doc list
+  const sendMode = useStore((s) => sendModeOf({ prefs: s.prefs, ds: s.route.view === 'doc' ? s.ds : null }));
   const kind = useStore((s) => (s.route.view === 'doc' && s.ds ? docKindOf(s.ds) : 'file'));
+  const agent = useStore((s) => agentTitle(agentName(s.route.view === 'doc' ? s.ds : null)));
   const [query, setQuery] = useState('');
   const filterRef = useRef(/** @type {HTMLInputElement|null} */ (null));
-  const groups = useMemo(() => helpGroups(kind), [kind]);
+  const groups = useMemo(() => helpGroups(kind, { sendMode }, agent), [kind, sendMode, agent]);
   const q = query.trim();
   const shown = groups.map((g) => ({
     group: g.group,
@@ -60,9 +64,10 @@ export function HelpOverlay() {
         })}
       </tbody>`)}
     </table>` : html`<p class="muted small">No shortcut matches “${q}”.</p>`}
-    <p class="small muted">Keys typed inside the document are forwarded here; resolve / reopen keys (x o y), Add to review and
-      Send now only work with focus in this panel. In the composer: <kbd>1</kbd>-<kbd>3</kbd> set the severity. Paste an
-      image into a comment to attach it.${IS_MAC ? html` On a Mac, <kbd>⌃K</kbd>, <kbd>⌃,</kbd> and <kbd>⌃/</kbd> work too.` : null}</p>
+    <p class="small muted">Keys typed inside the document are forwarded here; the keys that mark threads done or reopen them (x,
+      ${shortcut('shift+X')}, o, y) and the ones that send or save a comment only work with focus in this panel. In the composer: <kbd>1</kbd> Must fix,
+      <kbd>2</kbd> normal, <kbd>3</kbd> nit. Paste an image into a comment to attach it.${IS_MAC
+        ? html` On a Mac, <kbd>⌃K</kbd>, <kbd>⌃,</kbd> and <kbd>⌃/</kbd> work too.` : null}</p>
     <p class="small help-foot">Everything is also in the command palette (<kbd>${shortcut('mod+k')}</kbd>). Settings: <kbd>${shortcut('mod+,')}</kbd></p>
   <//>`;
 }

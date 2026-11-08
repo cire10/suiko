@@ -1,15 +1,27 @@
 // @ts-check
-// Small shared building blocks: inline SVG icons (no icon font, no external requests), chips, a word-diff view and
-// an accessible modal (focus moved in on open, Tab kept inside, focus restored on close, Esc / backdrop close). The
-// focus handling is a hook (useDialogFocus) the command palette shares; it runs as a layout effect, so keys typed
-// right after the key that opened a dialog land in it.
+// Small shared building blocks: inline SVG icons (no icon font, no external requests; 1.75 px strokes on a 24 px
+// grid, drawn at 16 px), the Suiko mark, chips, a word-diff view and an accessible modal (focus moved in on open,
+// Tab kept inside, focus restored on close, Esc / backdrop close). The focus handling is a hook (useDialogFocus) the
+// command palette shares; it runs as a layout effect, so keys typed right after the key that opened a dialog land in
+// it. Menus and popovers are in Menu.js.
 
 import { html, useLayoutEffect, useRef } from 'preact-htm';
 import { wordParts } from '../util.js';
 
 const ICONS = /** @type {Record<string, string>} */ ({
-  menu: 'M3 6h18M3 12h18M3 18h18',
+  menu: 'M4 6h16M4 12h16M4 18h16',
   close: 'M6 6l12 12M18 6L6 18',
+  more: 'M5 13a1 1 0 100-2 1 1 0 000 2zM12 13a1 1 0 100-2 1 1 0 000 2zM19 13a1 1 0 100-2 1 1 0 000 2z',
+  history: 'M3.5 12a8.5 8.5 0 102.5-6L3.5 8.5M3.5 3.5v5h5M12 7.5V12l3 2',
+  source: 'M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15',
+  keyboard: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
+  info: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 16.5V11M12 7.5h.01',
+  warning: 'M10.3 4.2L2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 4.2a2 2 0 00-3.4 0zM12 9.5v4M12 17h.01',
+  chevronDown: 'M6 9l6 6 6-6',
+  chevronLeft: 'M15 6l-6 6 6 6',
+  copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  columns: 'M3 4h18v16H3zM12 4v16',
+  arrowRight: 'M5 12h14M13 6l6 6-6 6',
   pick: 'M12 2v4M12 18v4M2 12h4M18 12h4M12 8a4 4 0 100 8 4 4 0 000-8z',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z',
   eyeOff: 'M3 3l18 18M10.6 5.1A10.6 10.6 0 0112 5c6.5 0 10 7 10 7a17.6 17.6 0 01-3.2 4.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.8 9.8 0 005.4-1.6M9.9 9.9a3 3 0 004.2 4.2',
@@ -20,6 +32,10 @@ const ICONS = /** @type {Record<string, string>} */ ({
   threads: 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z',
   lock: 'M6 11h12v10H6zM8 11V7a4 4 0 018 0v4',
   check: 'M5 12l5 5L20 7',
+  plus: 'M12 5v14M5 12h14',
+  expand: 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7',
+  insert: 'M13 3H6v18h12V8zM13 3v5h5M12 11v6M9 14h6',
+  window: 'M3 5h18v14H3zM3 9h18M6.5 7h.01M9 7h.01',
   chevron: 'M9 6l6 6-6 6',
   image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9h.01',
   comment: 'M4 5h16v11H8l-4 4z',
@@ -39,11 +55,24 @@ const ICONS = /** @type {Record<string, string>} */ ({
 /**
  * @param {{ name: string, size?: number, label?: string, weight?: number }} props weight: the stroke width
  */
-export function Icon({ name, size = 16, label, weight = 2 }) {
+export function Icon({ name, size = 16, label, weight = 1.75 }) {
   const d = ICONS[name] || ICONS.comment;
   return html`<svg class="icon" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width=${weight} stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? undefined : 'true'}
     role=${label ? 'img' : undefined} aria-label=${label}><path d=${d} /></svg>`;
+}
+
+/**
+ * The Suiko mark: a speech bubble over lines of text (comments on a document), on a soft accent tile.
+ * @param {{ size?: number }} props
+ */
+export function Logo({ size = 24 }) {
+  return html`<span class="logo-mark" style=${{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
+    <svg width=${Math.round(size * 0.66)} height=${Math.round(size * 0.66)} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 4h14a2 2 0 012 2v9a2 2 0 01-2 2h-7l-5 4v-4H5a2 2 0 01-2-2V6a2 2 0 012-2zM7.5 9h9M7.5 12.5h5.5" />
+    </svg>
+  </span>`;
 }
 
 /**

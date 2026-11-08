@@ -1,15 +1,16 @@
 // @ts-check
-// The code review's Changes list (KindSide, changes mode): what changed between the base round and the shown round,
+// The code review's Changes list (KindSide, changes mode): what changed between the base version and the shown one,
 // grouped by file, from the ChangeSet the app keeps in s.changes (GET D/diff, hunk ids '<path>#h<n>'). Each change
-// has a "seen" checkbox (per comparison, like the spec Changes list), its lines, and the threads the agent linked to
-// it; a click (or n / p) scrolls the centre to that hunk. Below: "Round results", the agent's replies in this range
-// with Accept / Reopen for the threads to verify.
+// has a "seen" checkbox (per comparison, like the spec Changes list), its lines, the threads the agent linked to it
+// and its word on a change no thread asked for ("Also changed: ..."); a click (or n / p) scrolls the centre to that
+// hunk. Below: "Results", the agent's replies in this range with Looks good / Not yet for the threads to check (Reply
+// for its questions).
 
 import { html, useEffect, useMemo, useRef } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { focusItem, goToHunk, navChange, readSeen, resolveThread, seenStorageKey, setChangesSeen, startReply } from '../../actions.js';
 import { Markdown } from '../../markdown.js';
-import { agentName, anchorAt, isVerifiable, numericVersion, roundResults, statusInfo, targetLabel } from '../../model.js';
+import { agentName, agentTitle, anchorAt, isVerifiable, numericVersion, roundResults, statusInfo, targetLabel } from '../../model.js';
 import { store, useStore } from '../../state.js';
 import { scrollIntoViewSoft } from '../../util.js';
 import { Chip } from '../common.js';
@@ -69,8 +70,8 @@ export function CodeSide({ ds }) {
 
   if (base == null) {
     return html`<section class="changes-view" aria-label="Changes"><div class="empty">
-      <p><strong>This is the first round.</strong></p>
-      <p>After the agent records a new round, you'll see what changed in each file.</p>
+      <p><strong>This is the first version.</strong></p>
+      <p>After ${agentTitle(agentName(ds))} records a new version, you'll see what changed in each file.</p>
     </div></section>`;
   }
   const total = hunks.length;
@@ -129,8 +130,7 @@ export function CodeSide({ ds }) {
                 <span class="change-links">
                   ${(h.threads || []).map((/** @type {string} */ t) => html`<button type="button" class="chip tone-accent chip-btn" key=${t}
                     onClick=${() => showThread(t)}>${t}</button>`)}
-                  ${h.other ? html`<${Chip} tone="attn" title=${h.other}>other: ${h.other}<//>` : null}
-                  ${!(h.threads || []).length && !h.other && h.linkedBy === null ? html`<${Chip} tone="muted" title="Not linked to a thread">unlinked<//>` : null}
+                  ${h.other ? html`<span class="change-other small" title=${`${agentTitle(agent)} changed this without a thread asking for it`}>Also changed: ${h.other}</span>` : null}
                 </span>
               </li>`;
             })}
@@ -138,23 +138,25 @@ export function CodeSide({ ds }) {
         </section>`;
       })}
     </div>
-    ${results.length ? html`<section class="round-results" aria-label="Round results">
-      <h3 class="group-title">Round results</h3>
+    ${results.length ? html`<section class="round-results" aria-label="Results">
+      <h3 class="group-title" title=${`What ${agentTitle(agent)} answered between v${base} and v${v}`}>Results</h3>
       ${results.map(({ thread: t, comment: c }) => {
-        const st = statusInfo(t, agent);
+        const st = statusInfo(t, agent, { drafts: ds.drafts, version: v });
         const verifiable = isVerifiable(t, ds.drafts);
         return html`<div class="result" key=${t.id} data-thread-id=${t.id}>
           <div class="result-head">
             <button type="button" class="link-btn tid" onClick=${() => showThread(t.id)}>${t.id}</button>
-            <${Chip} tone=${st.tone}>${st.label}<//>
+            <${Chip} tone=${st.tone} title=${st.title}>${st.label}<//>
             <span class="small muted">${targetLabel(anchorAt(t, v))}</span>
           </div>
           <${Markdown} text=${c.body} class="comment-body" />
           ${verifiable ? html`<div class="card-actions">
-            <button type="button" class="btn btn-sm btn-ok" data-testid=${TESTID.verifyAccept} onClick=${() => resolveThread(t.id)}>Accept</button>
-            <button type="button" class="btn btn-sm" data-testid=${TESTID.verifyReopen} onClick=${() => { store.set({ sidePane: 'threads' }); startReply(t.id, { reopen: true }); }}>Reopen</button>
+            <button type="button" class="btn btn-sm" data-testid=${TESTID.verifyAccept} onClick=${() => resolveThread(t.id)}
+              title="Accept it: the thread is done (x)">${t.status === 'addressed' ? 'Looks good' : 'Done'}</button>
+            <button type="button" class="btn btn-sm" data-testid=${TESTID.verifyReopen} title="Reopen with a reply: what still needs to change (o)"
+              onClick=${() => { store.set({ sidePane: 'threads' }); startReply(t.id, { reopen: true }); }}>Not yet</button>
           </div>` : t.status === 'needs_input' ? html`<div class="card-actions">
-            <button type="button" class="btn btn-sm btn-primary" onClick=${() => { store.set({ sidePane: 'threads' }); startReply(t.id); }}>Answer ${agent}</button>
+            <button type="button" class="btn btn-sm" onClick=${() => { store.set({ sidePane: 'threads' }); startReply(t.id); }}>Reply</button>
           </div>` : null}
         </div>`;
       })}

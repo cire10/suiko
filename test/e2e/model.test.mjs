@@ -12,6 +12,10 @@ import {
   isVerifiable, keyLabel, linesLabel, matchRow, panelItems, panelWidthRange, plainBody, presenceInfo, reviewProgress, roundResults, roundSummary,
   singleH1, staleApproveText, statusInfo, suggestionMode, targetLabel, threadMatches, threadRowTitle, timeline,
   trimDiffContext, baseTag, openingMode, plainMode, reviewedThrough, revisionsToAccept,
+  agentTitle, approveReady, lostThreads, myTurn, newChangesCount, openThreadCount, problemList, turnInfo,
+  agentAttachments, composerKeyAction, defaultFilter, docSize, filterCounts, filterLabel, FILTERS, isLongDoc, normalizeFilter,
+  plannedThreads, replyKeyAction, reviewEdits, systemLine, threadAttachmentName, turnReason,
+  agentSees, applicablePlanned, approveWarnings,
 } from '../../src/ui/model.js';
 import { contentUrl, docUrl, wordParts } from '../../src/ui/util.js';
 
@@ -117,12 +121,188 @@ test('Verify queue: agent-answered threads without a newer reviewer comment or p
   assert.equal(isVerifiable(answeredAgain, { items: [] }), false);
   assert.equal(isVerifiable(open, { items: [] }), false);
   assert.equal(isVerifiable(addressed, { items: [{ kind: 'reply', thread: 't1', body: 'x' }] }), false);
+  // the old Verify filter key still finds them (now Your turn)
   assert.equal(threadMatches(addressed, 'verify', { drafts: { items: [] }, version: 2 }), true);
-  assert.equal(statusInfo(addressed).label, 'Addressed in v2');
-  assert.equal(statusInfo(thread('t9', 'needs_input', []), 'codex').banner, 'codex asked you');
+  assert.equal(statusInfo(addressed).label, 'Changed in v2 — check it');
+  assert.equal(statusInfo(thread('t9', 'needs_input', []), 'codex').banner, 'Codex asked you');
 });
 
-test('panelItems: document order, new-thread drafts with Open / Drafts / All, outdated filter', () => {
+test('statusInfo: one chip per thread in plain words, with the agent\'s name, and "Lost its place" for a lost anchor', () => {
+  const ctx = { drafts: { items: [] }, version: 2 };
+  const said = (/** @type {string} */ status) => [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'b', version: 2, status }];
+  /** @param {string} status @param {any[]} [comments] @param {any} [c] */
+  const chip = (status, comments = said(status), c = ctx) => {
+    const st = statusInfo(thread('t1', status, comments), 'claude', c);
+    return [st.key, st.label, st.tone];
+  };
+  assert.deepEqual(chip('open', [{ by: human, body: 'a' }]), ['open', 'With Claude', 'accent']);
+  assert.deepEqual(chip('planned'), ['planned', 'Will change', 'info']);
+  assert.match(String(statusInfo(thread('t1', 'planned', said('planned')), 'claude', ctx).title), /agreed and will make this change when you apply/);
+  assert.deepEqual(chip('answered'), ['answered', 'Claude answered', 'ok']);
+  assert.deepEqual(chip('addressed'), ['addressed', 'Changed in v2 — check it', 'ok']);
+  // not to check any more (a reply of the reviewer is pending): no "check it"
+  assert.deepEqual(chip('addressed', said('addressed'), { drafts: { items: [{ kind: 'reply', thread: 't1', body: 'x' }] }, version: 2 }),
+    ['addressed', 'Changed in v2', 'ok']);
+  assert.deepEqual(chip('declined'), ['declined', 'Claude didn\'t change it', 'warn']);
+  assert.deepEqual(chip('needs_input', [{ by: agent, body: 'q', version: 2, status: 'needs_input' }]), ['needs_input', 'Needs your answer', 'attn']);
+  assert.deepEqual(chip('resolved', [{ by: human, body: 'a' }]), ['resolved', 'Done', 'muted']);
+  assert.equal(statusInfo(thread('t1', 'open', []), 'gpt-5').label, 'With gpt-5');
+  // the reviewer replied after the agent's answer: with the agent again (the status stays)
+  const replied = statusInfo(thread('t1', 'answered', [...said('answered'), { by: human, body: 'and the TTL?', version: 2 }]), 'claude', ctx);
+  assert.deepEqual([replied.key, replied.label, replied.tone], ['answered', 'With Claude', 'accent']);
+  const asked = thread('t2', 'needs_input', [{ by: agent, body: 'q', status: 'needs_input' }, { by: human, body: 'yes' }]);
+  assert.equal(statusInfo(asked, 'claude', ctx).label, 'With Claude');
+  assert.equal(turnReason(asked, ctx), null, 'answered: not the reviewer\'s turn any more');
+  // lost: unresolved, its anchor changed or orphaned in the version shown, nothing else waiting for the reviewer
+  const lost = thread('t4', 'open', [{ by: human, body: 'a', version: 1 }], { 2: anchor(2, 10, { state: 'changed' }) });
+  assert.deepEqual(chip('open', [], ctx).slice(0, 2), ['open', 'With Claude']);
+  const st = statusInfo(lost, 'claude', ctx);
+  assert.deepEqual([st.key, st.label, st.tone], ['lost', 'Lost its place', 'warn']);
+  assert.equal(statusInfo(lost, 'claude').key, 'open', 'without the context (version shown) it is not judged lost');
+  const resolvedLost = thread('t6', 'resolved', [], { 2: anchor(2, 10, { state: 'orphaned' }) });
+  assert.equal(statusInfo(resolvedLost, 'claude', ctx).key, 'resolved', 'a thread that is done never shows as lost');
+});
+
+test('turnReason: pending > answer > check > lost, and null for what waits for the agent', () => {
+  const ctx = (/** @type {any[]} */ items = []) => ({ drafts: { items }, version: 2 });
+  const answered = thread('t1', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'a', version: 2, status: 'answered' }]);
+  const orphan = { 2: anchor(2, 10, { state: 'orphaned' }) };
+  assert.equal(turnReason(answered, ctx()), 'check');
+  assert.equal(turnReason(answered, ctx([{ kind: 'reply', thread: 't1', body: 'x' }])), 'pending');
+  assert.equal(turnReason(answered, ctx([{ kind: 'resolve', thread: 't1' }])), 'pending');
+  assert.equal(turnReason(thread('t2', 'needs_input', [{ by: agent, body: 'q', status: 'needs_input' }], orphan), ctx()), 'answer');
+  assert.equal(turnReason({ ...answered, anchors: orphan }, ctx()), 'check', 'answered and lost: to check first');
+  assert.equal(turnReason(thread('t3', 'open', [{ by: human, body: 'a' }], orphan), ctx()), 'lost');
+  assert.equal(turnReason(thread('t3', 'planned', [{ by: agent, body: 'will do', status: 'planned' }], orphan), ctx()), 'lost');
+  assert.equal(turnReason(thread('t3', 'open', [{ by: human, body: 'a' }]), ctx()), null);
+  assert.equal(turnReason(thread('t3', 'planned', [{ by: human, body: 'a' }, { by: agent, body: 'will do', status: 'planned' }]), ctx()), null);
+  assert.equal(turnReason(thread('t3', 'resolved', [], orphan), ctx()), null);
+});
+
+test('filters: Your turn, the agent\'s, Done, All; every unresolved thread in exactly one of the first two', () => {
+  assert.deepEqual(FILTERS.map((f) => f.key), ['mine', 'agent', 'done', 'all']);
+  assert.equal(filterLabel('mine', 'claude'), 'Your turn');
+  assert.equal(filterLabel('agent', 'claude'), 'Claude');
+  assert.equal(filterLabel('agent', 'codex'), 'Codex');
+  assert.equal(filterLabel('done'), 'Done');
+  // earlier keys (palette commands, keys, saved state) map to the new ones; anything else is the doc's default
+  assert.deepEqual(['needs', 'verify', 'drafts', 'outdated', 'open', 'resolved', 'all', 'mine'].map((k) => normalizeFilter(k)),
+    ['mine', 'mine', 'mine', 'mine', 'agent', 'done', 'all', 'mine']);
+  assert.equal(normalizeFilter('nonsense'), 'all');
+  const ds = docState({
+    doc: { ...docState().doc, head: 2 },
+    threads: [
+      thread('t1', 'addressed', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'done', version: 2, status: 'addressed' }]),
+      thread('t2', 'needs_input', [{ by: agent, body: 'which?', version: 2, status: 'needs_input' }]),
+      thread('t3', 'open', [{ by: human, body: 'a', version: 1 }]),
+      thread('t4', 'open', [{ by: human, body: 'a', version: 1 }], { 2: anchor(2, 10, { state: 'orphaned' }) }),
+      thread('t5', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'yes', version: 2, status: 'answered' }]),
+      thread('t6', 'resolved', [{ by: human, body: 'a', version: 1 }], { 2: anchor(2, 10, { state: 'orphaned' }) }),
+      thread('t7', 'planned', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'will', version: 2, status: 'planned' }]),
+      thread('t8', 'open', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'b', version: 2, status: 'answered' }, { by: human, body: 'c', version: 2 }]),
+    ],
+    drafts: { schema: 1, items: [{ id: 'd1', kind: 'thread', body: 'new', anchor: anchor(2, 30) }, { id: 'd2', kind: 'reply', thread: 't5', body: 'more' }] },
+  });
+  const ids = (/** @type {string} */ f) => panelItems(ds, f, 2).map((x) => x.id).sort();
+  assert.deepEqual(ids('mine'), ['d1', 't1', 't2', 't4', 't5']);
+  assert.deepEqual(ids('agent'), ['t3', 't7', 't8']);
+  assert.deepEqual(ids('done'), ['t6']);
+  assert.deepEqual(ids('all'), ['d1', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8']);
+  for (const t of ds.threads.filter((x) => x.status !== 'resolved')) {
+    assert.equal(Number(threadMatches(t, 'mine', { drafts: ds.drafts, version: 2 })) + Number(threadMatches(t, 'agent', { drafts: ds.drafts, version: 2 })), 1, t.id);
+  }
+  const counts = filterCounts(ds, 2);
+  assert.deepEqual(counts, { mine: 5, agent: 3, done: 1, all: 9 });
+  assert.equal(counts.mine, myTurn(ds, 2).count, 'the panel counts what the turn pill counts');
+  // legacy keys from old call sites
+  assert.deepEqual(panelItems(ds, 'resolved', 2).map((x) => x.id), ['t6']);
+  assert.deepEqual(plannedThreads(ds).map((t) => t.id), ['t7']);
+});
+
+test('defaultFilter: Your turn when something waits for the reviewer, else the agent\'s, else All', () => {
+  const answered = thread('t1', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'a', version: 2, status: 'answered' }]);
+  const open = thread('t2', 'open', [{ by: human, body: 'q', version: 1 }]);
+  const done = thread('t3', 'resolved', [{ by: human, body: 'q', version: 1 }]);
+  assert.equal(defaultFilter(docState({ threads: [answered, open, done] }), 3), 'mine');
+  assert.equal(defaultFilter(docState({ threads: [open, done] }), 3), 'agent');
+  assert.equal(defaultFilter(docState({ threads: [done] }), 3), 'all');
+  assert.equal(defaultFilter(docState(), 3), 'all');
+  assert.equal(defaultFilter(docState({ threads: [open], drafts: { items: [{ id: 'd1', kind: 'thread', body: 'x' }] } }), 3), 'mine');
+  assert.equal(normalizeFilter('bogus', docState({ threads: [open] }), 3), 'agent', 'unknown keys get the default');
+});
+
+test('docSize / isLongDoc / reviewEdits: over 20,000 characters of text (or 800 lines without the count) batches with Auto', () => {
+  /** @param {any} meta */
+  const at = (meta) => docState({ doc: { ...docState().doc, head: 1 }, versions: [{ v: 1, author: agent, ...meta }] });
+  assert.deepEqual(docSize(at({ lines: 100, textChars: 34120 })), { long: true, chars: 34120, lines: 100 });
+  assert.deepEqual(docSize(at({ lines: 2000, textChars: 1500 })), { long: false, chars: 1500, lines: 2000 }, 'the characters decide when counted');
+  assert.deepEqual(docSize(at({ lines: 801 })), { long: true, chars: null, lines: 801 });
+  assert.deepEqual(docSize(at({ lines: 800 })), { long: false, chars: null, lines: 800 });
+  assert.equal(isLongDoc(at({ lines: 10, textChars: 20001 })), true);
+  assert.equal(isLongDoc(at({ lines: 10, textChars: 20000 })), false);
+  assert.equal(isLongDoc(at({})), false);
+  assert.equal(isLongDoc(null), false);
+  const long = at({ lines: 10, textChars: 30000 });
+  const short = at({ lines: 10, textChars: 3000 });
+  assert.equal(reviewEdits(long, { editMode: 'auto' }), 'batch');
+  assert.equal(reviewEdits(short, { editMode: 'auto' }), 'now');
+  assert.equal(reviewEdits(long, { editMode: 'now' }), 'now');
+  assert.equal(reviewEdits(short, { editMode: 'batch' }), 'batch');
+  assert.equal(reviewEdits(long, {}), 'batch', 'no setting: Auto');
+});
+
+test('composer and reply keys follow Send comments: right away Enter sends, else Enter adds to the review', () => {
+  const comment = { draftId: null, type: 'comment' };
+  assert.equal(composerKeyAction(comment, false, 'now'), 'send');
+  assert.equal(composerKeyAction(comment, true, 'now'), 'save');
+  assert.equal(composerKeyAction(comment, false, 'batch'), 'save');
+  assert.equal(composerKeyAction(comment, true, 'batch'), 'send');
+  // a draft being edited and "Mark agreed" are never sent alone: Enter saves, Shift is the whole review's Send dialog
+  for (const c of [{ draftId: 'd1', type: 'comment' }, { draftId: null, type: 'agree' }]) {
+    for (const mode of ['now', 'batch']) {
+      assert.equal(composerKeyAction(c, false, mode), 'save');
+      assert.equal(composerKeyAction(c, true, mode), 'review');
+    }
+  }
+  assert.equal(replyKeyAction(false, 'now'), 'send');
+  assert.equal(replyKeyAction(true, 'now'), 'save');
+  assert.equal(replyKeyAction(false, 'batch'), 'save');
+  assert.equal(replyKeyAction(true, 'batch'), 'send');
+});
+
+test('agent attachments, attachment names and the compact lines of an Apply or a Use in doc', () => {
+  const c = {
+    by: agent,
+    attachments: [
+      { path: 'attachments/a7.png', name: 'lifetimes.png', kind: 'image' },
+      { path: 'attachments/a8.html', name: 'chart.html', kind: 'html' },
+      { path: 'attachments/a9.htm' },
+      { path: '../etc/passwd', name: 'x', kind: 'image' },
+      'attachments/a10.svg',
+      null,
+    ],
+  };
+  assert.deepEqual(agentAttachments(c), [
+    { path: 'attachments/a7.png', name: 'lifetimes.png', kind: 'image' },
+    { path: 'attachments/a8.html', name: 'chart.html', kind: 'html' },
+    { path: 'attachments/a9.htm', name: 'a9.htm', kind: 'html' },
+    { path: 'attachments/a10.svg', name: 'a10.svg', kind: 'image' },
+  ]);
+  assert.deepEqual(agentAttachments({ by: agent }), []);
+  const t = thread('t7', 'answered', [{ by: human, body: 'chart?' }, c]);
+  assert.equal(threadAttachmentName(t, 'attachments/a8.html'), 'chart.html');
+  assert.equal(threadAttachmentName(t, 'attachments/a99.png'), 'a99.png');
+  assert.deepEqual(systemLine(t, { by: human, body: 'Apply this change.', apply: true }, 'claude'),
+    { kind: 'apply', text: 'You asked Claude to make this change', body: '' });
+  assert.deepEqual(systemLine(t, { by: human, body: 'Put this in the doc.', use: ['attachments/a8.html'] }, 'claude'),
+    { kind: 'use', text: 'You asked Claude to put chart.html in the document', body: '' });
+  assert.deepEqual(systemLine(t, { by: human, body: 'Under section 3, please.', use: ['attachments/a7.png', 'attachments/a8.html'] }, 'claude'),
+    { kind: 'use', text: 'You asked Claude to put lifetimes.png and chart.html in the document', body: 'Under section 3, please.' });
+  assert.equal(systemLine(t, { by: human, body: 'An ordinary reply' }), null);
+  assert.equal(systemLine(t, { by: agent, body: 'Apply this change.', apply: true }), null, 'only the reviewer\'s requests');
+});
+
+test('panelItems: document order, new-thread drafts with Your turn / All, earlier filter keys mapped', () => {
   const ds = docState({
     threads: [
       thread('t1', 'open', [], { 1: anchor(1, 50) }),
@@ -132,31 +312,132 @@ test('panelItems: document order, new-thread drafts with Open / Drafts / All, ou
     ],
     drafts: { schema: 1, items: [{ id: 'd1', kind: 'thread', anchor: anchor(1, 40), body: 'x' }, { id: 'd2', kind: 'reply', thread: 't1', body: 'y' }] },
   });
-  assert.deepEqual(panelItems(ds, 'open', 1).map((x) => x.id), ['t4', 't3', 'd1', 't1']);
+  // Your turn: the lost t3, the draft d1 and t1 (its reply is pending), in document order; the agent's: t4
+  assert.deepEqual(panelItems(ds, 'mine', 1).map((x) => x.id), ['t3', 'd1', 't1']);
+  assert.deepEqual(panelItems(ds, 'agent', 1).map((x) => x.id), ['t4']);
   assert.deepEqual(panelItems(ds, 'all', 1).map((x) => x.id), ['t4', 't2', 't3', 'd1', 't1']);
+  assert.deepEqual(panelItems(ds, 'done', 1).map((x) => x.id), ['t2']);
+  // earlier keys: outdated / drafts are Your turn now, open the agent's, resolved Done
+  assert.deepEqual(panelItems(ds, 'outdated', 1).map((x) => x.id), ['t3', 'd1', 't1']);
+  assert.deepEqual(panelItems(ds, 'open', 1).map((x) => x.id), ['t4']);
   assert.deepEqual(panelItems(ds, 'resolved', 1).map((x) => x.id), ['t2']);
-  assert.deepEqual(panelItems(ds, 'outdated', 1).map((x) => x.id), ['t3']);
-  assert.deepEqual(panelItems(ds, 'drafts', 1).map((x) => x.id), ['d1', 't1']);
   // the thread whose reply box is open stays listed whatever the filter (resolved in another tab, say)
-  assert.deepEqual(panelItems(ds, 'resolved', 1, 't1').map((x) => x.id), ['t2', 't1']);
+  assert.deepEqual(panelItems(ds, 'done', 1, 't1').map((x) => x.id), ['t2', 't1']);
 });
 
 test('presence and review progress follow waiters, delivery, the working copy and the answering version', () => {
   const submitted = { id: 'rv2', submittedAt: '2026-10-10T12:30:00.000Z', deliveredTo: {} };
   let ds = docState({ reviews: [submitted] });
-  assert.equal(presenceInfo(ds).kind, 'none');
+  assert.deepEqual(presenceInfo(ds), { kind: 'none', label: 'Claude isn\'t connected', short: 'Not connected', tone: 'muted' });
   assert.equal(reviewProgress(ds)?.stage, 'submitted');
+  assert.match(String(reviewProgress(ds)?.label), /^Sent \d\d:\d\d$/, '"Sent 12:30", not "Submitted"');
   ds = docState({ reviews: [submitted], waiters: [{ agent: 'codex', since: 'x', pid: 1 }] });
-  assert.deepEqual(presenceInfo(ds), { kind: 'listening', label: 'codex is listening', tone: 'ok' });
+  assert.deepEqual(presenceInfo(ds), { kind: 'listening', label: 'Codex is listening', short: 'Listening', tone: 'ok' });
   const delivered = { ...submitted, deliveredTo: { claude: '2026-10-10T12:31:00.000Z' } };
   ds = docState({ reviews: [delivered] });
-  assert.equal(presenceInfo(ds).label, 'claude is revising...');
+  assert.equal(presenceInfo(ds).label, 'Claude is working…');
+  assert.equal(presenceInfo(ds).kind, 'revising');
   assert.equal(reviewProgress(ds)?.stage, 'delivered');
+  assert.match(String(reviewProgress(ds)?.label), /^Claude has it · \d\d:\d\d$/, 'plain words, the agent\'s name capitalised');
   ds = docState({ reviews: [delivered], working: { dirty: true } });
-  assert.equal(presenceInfo(ds).label, 'claude is editing (unrecorded)');
+  assert.equal(presenceInfo(ds).label, 'Claude is editing');
+  assert.equal(reviewProgress(ds)?.label, 'Claude is editing…');
   ds = docState({ reviews: [delivered], versions: [...docState().versions, { v: 4, author: agent, createdAt: 'z', respondsTo: 'rv2' }] });
   assert.deepEqual(reviewProgress(ds), { label: 'v4 ready', tone: 'ok', stage: 'ready' });
   assert.equal(presenceInfo(ds).kind, 'none');
+});
+
+test('agentTitle capitalises a plain lowercase agent name only', () => {
+  assert.equal(agentTitle('claude'), 'Claude');
+  assert.equal(agentTitle('codex'), 'Codex');
+  assert.equal(agentTitle('gpt-5'), 'gpt-5');
+  assert.equal(agentTitle('MyBot'), 'MyBot');
+  assert.equal(agentTitle(''), '');
+});
+
+test('myTurn: drafts, pending replies, answers to check, questions and lost threads, each thread once', () => {
+  const ds = docState({
+    doc: { ...docState().doc, head: 2 },
+    threads: [
+      thread('t1', 'addressed', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'done', version: 2, status: 'addressed' }]),
+      thread('t2', 'needs_input', [{ by: agent, body: 'which?', version: 2, status: 'needs_input' }]),
+      thread('t3', 'open', [{ by: human, body: 'a', version: 1 }]),
+      thread('t4', 'open', [{ by: human, body: 'a', version: 1 }], { 2: anchor(2, 10, { state: 'orphaned' }) }),
+      // answered, but the reviewer already wrote a reply: pending, not "to check"
+      thread('t5', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'yes', version: 2, status: 'answered' }]),
+      thread('t6', 'resolved', [{ by: human, body: 'a', version: 1 }], { 2: anchor(2, 10, { state: 'orphaned' }) }),
+    ],
+    drafts: { schema: 1, items: [{ id: 'd1', kind: 'thread', body: 'new' }, { id: 'd2', kind: 'reply', thread: 't5', body: 'more' }] },
+  });
+  const m = myTurn(ds, 2);
+  assert.deepEqual({ ...m, ids: [...m.ids].sort() }, { count: 5, drafts: 1, pending: 1, check: 1, answer: 1, lost: 1, ids: ['t1', 't2', 't4', 't5'] });
+  assert.equal(openThreadCount(ds), 6);
+  assert.deepEqual(lostThreads(ds, 2).map((t) => t.id), ['t4']);
+  assert.deepEqual(myTurn(docState(), 3), { count: 0, drafts: 0, pending: 0, check: 0, answer: 0, lost: 0, ids: [] });
+});
+
+test('turnInfo: your turn first, then closed / approved, else where the agent is; the dot is always the presence', () => {
+  const answered = thread('t1', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'a', version: 2, status: 'answered' }]);
+  let t = turnInfo(docState({ threads: [answered], waiters: [{ agent: 'claude' }] }), 3);
+  assert.deepEqual([t.kind, t.label, t.short, t.presence.kind], ['yours', 'Your turn · 1', 'Your turn · 1', 'listening']);
+  t = turnInfo(docState({ waiters: [{ agent: 'claude' }] }), 3);
+  assert.deepEqual([t.kind, t.label, t.short, t.tone], ['listening', 'Claude is listening', 'Listening', 'ok']);
+  t = turnInfo(docState(), 3);
+  assert.deepEqual([t.kind, t.label, t.short], ['none', 'Claude isn\'t connected', 'Not connected']);
+  t = turnInfo(docState({ doc: { ...docState().doc, state: 'approved', final: { version: 3 } } }), 3);
+  assert.deepEqual([t.kind, t.label, t.short, t.tone], ['approved', 'Approved v3', 'Approved', 'ok']);
+  // approved at v2, but v3 is newer: not "Approved"
+  t = turnInfo(docState({ doc: { ...docState().doc, state: 'approved', final: { version: 2 } } }), 3);
+  assert.equal(t.kind, 'none');
+  t = turnInfo(docState({ doc: { ...docState().doc, state: 'closed' } }), 3);
+  assert.deepEqual([t.kind, t.label], ['closed', 'Review closed']);
+});
+
+test('approveReady: the agent answered the newest review and nothing waits for either side', () => {
+  const review = { id: 'rv2', submittedAt: '2026-10-10T12:30:00.000Z', deliveredTo: { claude: 'x' } };
+  const answeredBy4 = [...docState().versions, { v: 4, author: agent, createdAt: 'z', respondsTo: 'rv2' }];
+  const resolved = thread('t1', 'resolved', [{ by: human, body: 'a', version: 1 }]);
+  assert.equal(approveReady(docState({ reviews: [review], versions: answeredBy4, threads: [resolved] }), 4), true);
+  // not answered yet
+  assert.equal(approveReady(docState({ reviews: [review], threads: [resolved] }), 3), false);
+  // a thread still waits for the agent
+  assert.equal(approveReady(docState({ reviews: [review], versions: answeredBy4, threads: [thread('t2', 'open', [])] }), 4), false);
+  // a draft waits for the reviewer
+  assert.equal(approveReady(docState({ reviews: [review], versions: answeredBy4, drafts: { items: [{ id: 'd1', kind: 'thread' }] } }), 4), false);
+  // no review at all
+  assert.equal(approveReady(docState(), 3), false);
+});
+
+test('newChangesCount: the changes of the latest version while it is new to the reviewer and shown', () => {
+  const changes = { hunks: [{ id: 'h1' }, { id: 'h2' }] };
+  assert.equal(newChangesCount(docState(), 3, changes), 2);
+  assert.equal(newChangesCount(docState(), 2, changes), 0);
+  assert.equal(newChangesCount(docState({ doc: { ...docState().doc, lastReviewedVersion: 3 } }), 3, changes), 0);
+  assert.equal(newChangesCount(docState(), 3, null), 0);
+});
+
+test('problemList: script errors, failed resources and a missing file; nothing when all is well; a lost thread is not a problem', () => {
+  const lost = thread('t4', 'open', [], { 3: anchor(3, 10, { state: 'changed' }) });
+  const ds = docState({ threads: [lost, thread('t5', 'resolved', [], { 3: anchor(3, 10, { state: 'orphaned' }) })] });
+  assert.deepEqual(problemList(docState(), { version: 3, pageErrors: { count: 0, last: null, resourcesFailed: [] }, externalsFailed: [] }), []);
+  const list = problemList({ ...ds, working: { missing: true } }, {
+    version: 3,
+    pageErrors: { count: 2, last: 'TypeError: x is undefined', resourcesFailed: ['http://c/v3/img/a.png'] },
+    externalsFailed: ['https://cdn.example/lib.js'],
+  });
+  assert.deepEqual(list.map((p) => [p.key, p.count, p.label]), [
+    ['errors', 2, '2 script errors in the page'],
+    ['resources', 2, '2 resources did not load'],
+    ['missing', 1, 'The file is missing on disk'],
+  ]);
+  assert.equal(list[0].detail, 'TypeError: x is undefined');
+  assert.deepEqual(list[1].items, ['https://cdn.example/lib.js', 'http://c/v3/img/a.png']);
+  // the thread that lost its place is in Your turn (its card offers Move here): not a problem (V15)
+  assert.deepEqual(problemList(ds, { version: 3 }), []);
+  assert.deepEqual(myTurn(ds, 3).ids, ['t4']);
+  // a code review has no rendered page: nothing of it is a problem
+  const code = { ...ds, doc: { ...ds.doc, kind: 'code' } };
+  assert.deepEqual(problemList(code, { version: 3, pageErrors: { count: 5 }, externalsFailed: ['x'] }).map((p) => p.key), []);
 });
 
 test('round summary and round results count the agent replies of the range', () => {
@@ -168,7 +449,7 @@ test('round summary and round results count the agent replies of the range', () 
       thread('t3', 'open', [{ by: human, body: 'a', version: 1 }]),
     ],
   });
-  assert.equal(roundSummary(ds)?.text, 'v2 ready - 1 to verify, 1 needs you');
+  assert.equal(roundSummary(ds)?.text, 'v2 ready: 1 to check, 1 needs your answer');
   assert.deepEqual(roundResults(ds, 1, 2).map((r) => r.thread.id), ['t1', 't2']);
   assert.deepEqual(roundResults(ds, 2, 2), []);
 });
@@ -256,7 +537,7 @@ test('defaultVerdict: Request changes with a blocking new thread or a reopen of 
   assert.equal(defaultVerdict(ds, 'changes_requested'), 'changes_requested');
   assert.equal(defaultVerdict(ds, 'comment'), 'comment');
   assert.equal(defaultVerdict(withDrafts([{ id: 'd1', kind: 'thread', severity: 'blocking' }]), 'comment'), 'changes_requested');
-  assert.equal(agentPrompt(ds), 'Run `suiko feedback spec` and address it.');
+  assert.equal(agentPrompt(ds), 'Run suiko feedback spec and address it.', 'what the UI shows is what is copied: no Markdown');
 });
 
 test('changes: the only H1 leaves the group titles; hunk source text; readable word diffs', () => {
@@ -368,7 +649,7 @@ test('applyErrorText: only a dirty working copy gets the "record first" advice (
   assert.equal(applyErrorText('t3', { status: 500, message: 'boom' }), 'Could not apply t3: boom');
 });
 
-test('attachmentUrl: attachmentBase + the file name, only on the content origin and only for image names', () => {
+test('attachmentUrl: attachmentBase + the file name, only on the content origin and only for attachment names', () => {
   const ds = { contentBase: 'http://127.0.0.1:4778/c/abc123', attachmentBase: 'http://127.0.0.1:4778/c/abc123/__att/' };
   assert.equal(attachmentUrl(ds, 'attachments/a3.png'), 'http://127.0.0.1:4778/c/abc123/__att/a3.png');
   assert.equal(attachmentUrl(ds, 'a4.jpg'), 'http://127.0.0.1:4778/c/abc123/__att/a4.jpg');
@@ -376,7 +657,10 @@ test('attachmentUrl: attachmentBase + the file name, only on the content origin 
     'http://127.0.0.1:4778/c/abc123/__att/a1.png', 'a base without the trailing slash');
   assert.equal(attachmentUrl({ contentBase: ds.contentBase }, 'attachments/a1.png'), null, 'no attachmentBase (older daemon)');
   assert.equal(attachmentUrl(ds, 'attachments/notes.txt'), null);
-  assert.equal(attachmentUrl(ds, 'attachments/evil.svg'), null);
+  // an agent's SVG and HTML preview (served with their own restrictive CSPs on the content origin)
+  assert.equal(attachmentUrl(ds, 'attachments/a7.svg'), 'http://127.0.0.1:4778/c/abc123/__att/a7.svg');
+  assert.equal(attachmentUrl(ds, 'attachments/a8.html'), 'http://127.0.0.1:4778/c/abc123/__att/a8.html');
+  assert.equal(attachmentUrl(ds, 'attachments/a8.js'), null);
   assert.equal(attachmentUrl(ds, 'attachments/..'), null);
   assert.equal(attachmentUrl(ds, 'attachments/.hidden.png'), null);
   assert.equal(attachmentUrl(ds, 'a1.png?x=1'), null);
@@ -571,4 +855,110 @@ test('plainBody: bold and list markers come off, other text stays', () => {
   assert.equal(plainBody('2 * 3 - 1 and -5'), '2 * 3 - 1 and -5');
   assert.equal(plainBody('** not bold ** 1.5'), '** not bold ** 1.5');
   assert.equal(plainBody(undefined), '');
+});
+
+// ------------------------------------------------------------------------------------- UI fix round (UA)
+
+test('L7: applicablePlanned is every planned thread; one that also waits for the reviewer is in Your turn and the agent\'s list', () => {
+  const planned = (/** @type {string} */ id) => thread(id, 'planned', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'will', version: 2, status: 'planned' }]);
+  const ds = docState({
+    doc: { ...docState().doc, head: 2 },
+    // t8 first: the ids come out in id order whatever the order of the threads
+    threads: [planned('t8'), planned('t3'), thread('t2', 'open', [{ by: human, body: 'a', version: 1 }])],
+    // a reply not sent yet on t3: it waits for the reviewer too
+    drafts: { schema: 1, items: [{ id: 'd1', kind: 'reply', thread: 't3', body: 'one more thing' }] },
+  });
+  assert.deepEqual(applicablePlanned(ds).map((t) => t.id), ['t3', 't8']);
+  assert.deepEqual(plannedThreads(ds).map((t) => t.id), ['t3', 't8'], 'the earlier name: the same set');
+  const ctx = { drafts: ds.drafts, version: 2 };
+  const t3 = ds.threads[1];
+  assert.equal(turnReason(t3, ctx), 'pending');
+  assert.equal(threadMatches(t3, 'mine', ctx), true);
+  assert.equal(threadMatches(t3, 'agent', ctx), true, 'Planned changes lists what Apply sends');
+  assert.deepEqual(panelItems(ds, 'agent', 2).map((x) => x.id).sort(), ['t2', 't3', 't8']);
+  assert.deepEqual(panelItems(ds, 'mine', 2).map((x) => x.id), ['t3']);
+  // the counts are what each filter lists; Your turn is still the turn pill's count
+  assert.deepEqual(filterCounts(ds, 2), { mine: 1, agent: 3, done: 0, all: 3 });
+  assert.equal(filterCounts(ds, 2).mine, myTurn(ds, 2).count);
+  // a resolved thread is never the agent's
+  assert.equal(threadMatches(thread('t9', 'resolved', []), 'agent', ctx), false);
+});
+
+test('L9: panelItems keeps every thread with input open on its card (a reply box, a decision being typed)', () => {
+  const ds = docState({
+    threads: [thread('t1', 'open', [], { 1: anchor(1, 50) }), thread('t2', 'resolved', [], { 1: anchor(1, 5) }), thread('t3', 'open', [], { 1: anchor(1, 30) })],
+  });
+  assert.deepEqual(panelItems(ds, 'done', 1).map((x) => x.id), ['t2']);
+  assert.deepEqual(panelItems(ds, 'done', 1, ['t1', 't3']).map((x) => x.id), ['t2', 't3', 't1']);
+  assert.deepEqual(panelItems(ds, 'done', 1, [null, 't3', undefined, '']).map((x) => x.id), ['t2', 't3']);
+  assert.deepEqual(panelItems(ds, 'done', 1, 't1').map((x) => x.id), ['t2', 't1'], 'one id still works');
+});
+
+test('V3: turnInfo reads "Apply N planned" when only planned changes wait; your turn still comes first', () => {
+  const planned = thread('t3', 'planned', [{ by: human, body: 'a', version: 1 }, { by: agent, body: 'will', version: 2, status: 'planned' }]);
+  const answered = thread('t1', 'answered', [{ by: human, body: 'q', version: 1 }, { by: agent, body: 'a', version: 2, status: 'answered' }]);
+  let t = turnInfo(docState({ threads: [planned, { ...planned, id: 't8' }] }), 3);
+  assert.deepEqual([t.kind, t.label, t.short, t.tone, t.planned], ['apply', 'Apply 2 planned', 'Apply 2', 'accent', 2]);
+  assert.equal(t.presence.kind, 'none', 'the dot is still the presence');
+  t = turnInfo(docState({ threads: [planned, answered] }), 3);
+  assert.deepEqual([t.kind, t.label, t.planned], ['yours', 'Your turn · 1', 1]);
+  t = turnInfo(docState({ threads: [answered] }), 3);
+  assert.equal(t.planned, 0);
+});
+
+test('V2: approveWarnings says what an approval would leave pending: planned changes, threads for you, threads with the agent', () => {
+  const asked = { by: human, body: 'a', version: 1 };
+  const ds = docState({
+    doc: { ...docState().doc, head: 2 },
+    threads: [
+      thread('t1', 'planned', [asked, { by: agent, body: 'will', version: 2, status: 'planned' }]),
+      thread('t2', 'planned', [asked, { by: agent, body: 'will', version: 2, status: 'planned' }]),
+      thread('t3', 'needs_input', [{ by: agent, body: 'which?', version: 2, status: 'needs_input' }]),
+      thread('t4', 'addressed', [asked, { by: agent, body: 'done', version: 2, status: 'addressed' }]),
+      thread('t5', 'declined', [asked, { by: agent, body: 'no', version: 2, status: 'declined' }]),
+      thread('t6', 'open', [asked]),
+      thread('t7', 'resolved', [asked]),
+    ],
+  });
+  const keys = (/** @type {any[]} */ w) => w.map((x) => [x.key, x.count, x.label, x.ids]);
+  // with "Mark answered threads done" (the default) the addressed t4 is not left waiting; the declined t5 is
+  assert.deepEqual(keys(approveWarnings(ds, 2)), [
+    ['planned', 2, "2 planned changes aren't in v2 yet", ['t1', 't2']],
+    ['yours', 2, '2 threads still wait for you', ['t3', 't5']],
+    ['agent', 1, '1 thread is still with Claude', ['t6']],
+  ]);
+  assert.deepEqual(keys(approveWarnings(ds, 2, { resolveAddressed: false }))[1], ['yours', 3, '3 threads still wait for you', ['t3', 't4', 't5']]);
+  // singular wording; a reply in the review is not left waiting (it goes out with the approval)
+  const one = docState({
+    doc: { ...docState().doc, head: 2 },
+    threads: [thread('t1', 'planned', [asked, { by: agent, body: 'will', version: 2, status: 'planned' }]), thread('t3', 'needs_input', [{ by: agent, body: 'q', version: 2, status: 'needs_input' }])],
+    drafts: { schema: 1, items: [{ id: 'd1', kind: 'reply', thread: 't3', body: 'this one' }] },
+  });
+  assert.deepEqual(keys(approveWarnings(one, 2)), [['planned', 1, "1 planned change isn't in v2 yet", ['t1']]]);
+  // nothing pending: no warning
+  assert.deepEqual(approveWarnings(docState({ threads: [thread('t7', 'resolved', [asked])] }), 3), []);
+  assert.deepEqual(approveWarnings(null, 3), []);
+});
+
+test('V9: agentSees says what the agent will see in plain words; the lines only in the tooltip', () => {
+  const a = anchor(1, 10, { quote: { exact: 'Remove the legacy session store.', prefix: '', suffix: '' }, section: ['Spec', '1.1 Milestones'] });
+  const preview = { label: 'text', lines: [25, 25], section: ['Spec', '1.1 Milestones'], text: 'Agent will see: L25 §1.1 Milestones "Remove the legacy session store."' };
+  assert.deepEqual(agentSees(preview, a, 'claude'), {
+    what: '“Remove the legacy session store.”', section: '§1.1 Milestones', title: 'Claude will see: L25 §1.1 Milestones “Remove the legacy session store.”',
+  });
+  // a picked table row: the engine's label; a section: no second §
+  const row = { v: 1, kind: 'cell', scope: 'row', state: 'exact', src: { startLine: 30, endLine: 30 }, cell: { rowKey: 'refresh_token' }, section: ['Spec', '2 Tokens'] };
+  assert.deepEqual(agentSees({ label: 'table row "refresh_token"', lines: [30, 30], section: ['Spec', '2 Tokens'] }, row, 'codex'),
+    { what: 'table row "refresh_token"', section: '§2 Tokens', title: 'Codex will see: L30 §2 Tokens table row "refresh_token"' });
+  const sec = { v: 1, kind: 'section', state: 'exact', src: { startLine: 5, endLine: 9 }, section: ['Spec', '3 Rollout'] };
+  assert.equal(agentSees({ label: '§3 Rollout', lines: [5, 9] }, sec).section, '');
+  assert.equal(agentSees({ label: '§3 Rollout', lines: [5, 9] }, sec).what, '§3 Rollout');
+  // lines picked in Source: the lines are what it is about
+  const src = { v: 1, kind: 'source', state: 'exact', src: { startLine: 51, endLine: 52 }, section: ['Spec', '1 Goals'] };
+  assert.deepEqual(agentSees({ label: 'source lines', lines: [51, 52], section: ['Spec', '1 Goals'] }, src),
+    { what: 'lines 51-52', section: '§1 Goals', title: 'Claude will see: L51-52 §1 Goals lines 51-52' });
+  // a general comment, and a code review's file label (its lines are part of the label)
+  assert.equal(agentSees({ label: 'GENERAL', text: 'Agent will see: GENERAL' }, { v: 1, kind: 'doc', state: 'exact' }).what, 'General comment');
+  const code = { v: 1, kind: 'source', state: 'exact', src: { startLine: 3, endLine: 4 }, file: { path: 'src/a.js', side: 'new' } };
+  assert.deepEqual(agentSees({ label: 'src/a.js:L3-4' }, code), { what: 'src/a.js:L3-4', section: '', title: 'Claude will see: src/a.js:L3-4' });
 });

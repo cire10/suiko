@@ -55,9 +55,28 @@ export const ID_PREFIX = Object.freeze({
 
 export const THREAD_TYPES = Object.freeze(['comment', 'question', 'suggestion', 'agent-question']);
 export const SEVERITIES = Object.freeze(['blocking', 'normal', 'nit']);
-export const THREAD_STATUS = Object.freeze(['open', 'addressed', 'answered', 'declined', 'needs_input', 'resolved']);
-export const AGENT_REPLY_STATUS = Object.freeze(['addressed', 'answered', 'declined', 'needs_input']);
+/**
+ * Thread statuses. `planned` (batched edits): the agent agreed to make a change and said exactly what it will change,
+ * but has not edited the doc yet; it is not actionable for the agent until the reviewer applies it (a review with
+ * `apply`, which reopens the thread with an "Apply this change." comment).
+ */
+export const THREAD_STATUS = Object.freeze(['open', 'addressed', 'answered', 'declined', 'needs_input', 'planned', 'resolved']);
+export const AGENT_REPLY_STATUS = Object.freeze(['addressed', 'answered', 'declined', 'needs_input', 'planned']);
 export const VERDICTS = Object.freeze(['comment', 'changes_requested', 'approved']);
+/**
+ * Review.edits: when the agent edits the doc for this review's threads. 'now': edit, then record a version (the
+ * default); 'batch': answer every thread now, reply `planned` for a change it agrees to make, and edit later in one
+ * APPLY round (saves the agent's context on long docs). Approvals ignore it.
+ */
+export const REVIEW_EDITS = Object.freeze(['now', 'batch']);
+/**
+ * Files an agent may attach to a reply (`suiko reply --attach`, revise JSON threads.tN.attachments, MCP), by
+ * extension: what Comment.attachments[].kind they get. Stored as attachments/aN.<ext> ('jpeg' -> 'jpg', 'htm' ->
+ * 'html'); served on the content origin under __att/ (SVG and HTML with their own restrictive CSPs).
+ */
+export const AGENT_ATTACHMENT_KINDS = Object.freeze({
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', html: 'html', htm: 'html',
+});
 export const ANCHOR_KINDS = Object.freeze(['text', 'element', 'cell', 'code', 'section', 'source', 'doc', 'snip']);
 export const ANCHOR_STATES = Object.freeze(['exact', 'moved', 'edited', 'changed', 'orphaned']);
 
@@ -94,27 +113,38 @@ export const MSG = Object.freeze({
   READY: 'ready',             // {outline:[{srid,level,text,line?,id}], features:{mermaid,math,code}, externalsFailed:[url]}
   SELECTION: 'selection',     // {capture|null, rect|null}
   ACTION: 'action',           // {action:'comment'|'suggest'|'question'|'agree', capture, rect, crop?: dataUrl}
-  POSITIONS: 'positions',     // {targets:{[id]:{top,height,state:'ok'|'block'|'hidden'|'missing'}}, hunks:{[id]:top}, scrollY, viewportH, docH}
+  POSITIONS: 'positions',     // {targets:{[id]:{top,height,state:'ok'|'block'|'hidden'|'missing'}}, hunks:{[id]:top},
+                              // hunkEnds:{[id]:bottom}, headings?:{[srid]:top} (with prefs.scrollSync), scrollY,
+                              // viewportH, docH, pointerLow}  (document coordinates; side by side lines the versions up
+                              // on them; pointerLow: the pointer is near the frame's bottom edge, where the tool dock is)
   ACTIVATE: 'activate',       // {id}  (user clicked a highlight / pin / change bar)
   KEY: 'key',                 // {key, meta, ctrl, shift, alt}  (only non-editable focus, not defaultPrevented;
                               // Mod+K / Mod+, / Mod+/ are also forwarded from editable focus and default-prevented)
-  SCROLL: 'scroll',           // {topSrid, offset, heading, next, docTop, docEnd}  heading / next: {srid, top}|null, the
-                              // headings around the reading line; with docTop / docEnd they line two versions up
+  SCROLL: 'scroll',           // {topSrid, offset, heading, next, docTop, docEnd, y, vh, docH, byUi}  heading / next:
+                              // {srid, top}|null, the headings around the reading line; y: scrollY; byUi: this scroll
+                              // was asked for by scrollTo {top} / {hunk} (a follow or a change step), not the reader
   PAGE_ERROR: 'pageError',    // {count, last}
   TOOL_CHANGED: 'toolChanged',// {tool}  (guest changed tool itself: Esc / a finished pick or snip -> 'select'; 'b' in the doc -> 'snip')
+  KEY_KEPT: 'keyKept',        // {key}  a single key pressed in a document that handles keys itself stayed with the
+                              // document (07-page.js PageKeys); sent once per page load so the UI can say why once
   // UI -> guest
   CONNECT: 'connect',         // carries the MessagePort (window message, not port)
-  INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId, hidden, prefs?}
+  INIT: 'init',               // {mode:'review'|'changes'|'readonly', theme, targets:DomTarget[], changes:Changes|null, activeId,
+                              // activeHunk?, hidden, prefs?}
   SET_TARGETS: 'setTargets',  // {targets:DomTarget[]}
   SET_CHANGES: 'setChanges',  // {changes:Changes|null}  (changes.side 'old': the older version of a side-by-side
-                              // comparison, painted from hunks[].oldSide)
+                              // comparison, painted from hunks[].oldSide; changes.layout 'split': the newer one beside it)
+  SET_ACTIVE_HUNK: 'setActiveHunk', // {id:string|null}  the change the reviewer stepped to: drawn stronger (both sides)
   FOCUS: 'focus',             // {id}   highlight as active + scroll into view + pulse
-  SCROLL_TO: 'scrollTo',      // {srid?, offset?|id?|hunk?|sync?: {a, b, f}}  sync: the point a fraction f of the way
-                              // from heading a to heading b (null: the document's top / end) to the reading line
+  SCROLL_TO: 'scrollTo',      // {srid?, offset?|id?|hunk?|top?|sync?: {a, b, f}}  top: scrollY (a side-by-side follow);
+                              // sync: the point a fraction f of the way from heading a to heading b (null: the document's
+                              // top / end) to the reading line
   SET_TOOL: 'setTool',        // {tool:'select'|'pick'|'snip'}  (snip: drag a box over ANY area of the doc, see SNIP below)
   SET_THEME: 'setTheme',      // {theme:'light'|'dark'|'system'}
   REVEAL: 'reveal',           // {id}   open <details>/tabs hiding the target
   CLEAR_SELECTION: 'clearSelection',
+  DISMISS_TOOLBAR: 'dismissToolbar', // hide the selection toolbar for the current selection, which stays (a composer
+                              // was opened for it); a new selection shows the toolbar again
   SET_HIDDEN: 'setHidden',    // {hidden:boolean}  hide all annotations (clean read)
   SET_PREFS: 'setPrefs',      // {singleKeys?:boolean, scrollSync?:boolean}  singleKeys false: the guest neither acts on
                               // nor captures single-letter keys (c s q a b ...); it forwards them like any other key.
@@ -132,21 +162,28 @@ export const TESTID = Object.freeze({
   composerAdd: 'composer-add',         // "Add to review"
   composerSendNow: 'composer-send-now',
   composerSuggestion: 'composer-suggestion',
-  submitReviewOpen: 'submit-review-open',
+  submitReviewOpen: 'submit-review-open', // top bar: the primary button, "Send N" (with .drafts-count) or "Approve"
   submitReviewDialog: 'submit-review-dialog',
   submitVerdict: 'submit-verdict',     // radio group; inputs have value=comment|changes_requested|approved
   submitConfirm: 'submit-confirm',
-  modeTab: 'mode-tab',                 // plus data-mode="review|changes|source|history"
+  modeTab: 'mode-tab',                 // plus data-mode="read|review|changes" (Source / History only while shown)
   versionPicker: 'version-picker',
-  presence: 'presence',
-  verifyAccept: 'verify-accept',
-  verifyReopen: 'verify-reopen',
-  verifyAcceptAll: 'verify-accept-all', // Accept all (the Verify queue's addressed / answered threads)
-  acceptRevisions: 'accept-revisions', // top bar: Accept all revisions (the latest version's, and the Verify queue)
-  showChanges: 'show-changes',         // top bar: the "Show changes" switch (Changes on / off)
+  presence: 'presence',                // inside the turn pill, plus data-presence="editing|listening|revising|none"
+  turnPill: 'turn-pill',               // top bar: whose turn it is; holds TESTID.presence and .review-progress
+  problems: 'problems',                // top bar: the problems chip, mounted only when something is wrong
+  moreMenu: 'more-menu',               // top bar: ⋯ More; items carry role="menuitem" data-menu-item="source|history|hide|theme|help|settings|info"
+  toolDock: 'tool-dock',               // over the doc: [data-selection-comment], pick, snip and screen snip
+  verifyAccept: 'verify-accept',       // a thread card: Looks good / Done (accept what the agent changed or answered)
+  verifyReopen: 'verify-reopen',       // a thread card: Not yet / Reopen (with a reply: what still needs to change)
+  verifyAcceptAll: 'verify-accept-all', // thread panel, Your turn: Accept all (every thread the agent changed or answered)
+  applyPlanned: 'apply-planned',       // thread panel, the agent's filter: "Apply N" (its planned changes, batched edits)
+  useAttachment: 'use-attachment',     // an agent's attachment on a reply: "Use in doc" (a reply asking to put it in the doc)
+  acceptRevisions: 'accept-revisions', // Changes panel: Accept all (the latest version's revisions, and the Verify queue)
   compareFrom: 'compare-from',         // Changes / Source: the older version of the comparison (#sr-base)
   compareLayout: 'compare-layout',     // Changes: Inline / Side by side (buttons carry data-layout="inline|split")
   compareBaseFrame: 'compare-base-frame', // Changes side by side: the older version's doc frame
+  compareBar: 'compare-bar',           // Changes side by side: the bar over both frames (stepper, layout, Done comparing)
+  compareStep: 'compare-step',         // ...its change stepper "‹ 3 of 12 ›" (buttons "Previous change" / "Next change")
   replyTextarea: 'reply-textarea',
   replyAdd: 'reply-add',
   toast: 'toast',
@@ -159,9 +196,9 @@ export const TESTID = Object.freeze({
   commandPaletteOpen: 'command-palette-open',  // top-bar button
   commandItem: 'command-item',                 // plus data-command-id
   settingsDialog: 'settings-dialog',           // Cmd/Ctrl+, dialog
-  settingsOpen: 'settings-open',               // top-bar gear button
+  settingsOpen: 'settings-open',               // More menu item (a gear button on the doc list)
   helpOverlay: 'help-overlay',                 // Cmd/Ctrl+/ or ? dialog
-  helpOpen: 'help-open',
+  helpOpen: 'help-open',                       // More menu item (a button on the doc list)
   changeItem: 'change-item',           // plus data-hunk-id
   historyRow: 'history-row',           // plus data-version
   docList: 'doc-list',
@@ -170,7 +207,9 @@ export const TESTID = Object.freeze({
 export const LIMITS = Object.freeze({
   packetChars: 10000,
   threadSrcChars: 1200,
-  maxAttachmentBytes: 5 * 1024 * 1024,
+  maxAttachmentBytes: 5 * 1024 * 1024,   // one attachment (reviewer screenshot, agent image or HTML preview)
+  maxReplyAttachments: 6,                // files on one agent reply
+  maxUseAttachments: 6,                  // attachments one reviewer reply asks the agent to put into the doc (`use`)
   maxServeBytes: 200 * 1024 * 1024,
   // Code reviews (doc kind 'code'). Soft limits are config-tunable defaults; the *Hard ones are never exceeded.
   codeFileMaxBytes: 5 * 1024 * 1024,      // a changed file above this (either side) is listed as a tooLarge stub

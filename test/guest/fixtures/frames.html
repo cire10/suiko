@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ops report</title>
+<meta http-equiv="Content-Security-Policy" content="script-src 'self'">
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 30px 60px; max-width: 700px; color: #222; background: #fff; }
+  iframe { width: 300px; height: 80px; border: 1px solid #ccc; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Ops report</h1>
+<p data-srid="3">A widget page that refuses to be framed, one that loads, and an inline script the page's own policy blocks.</p>
+<iframe src="/frame/blocked.html" title="Status (refuses to be framed)" data-srid="4"></iframe>
+<iframe src="/frame/ok.html" title="Status" data-srid="5"></iframe>
+<script>window.__inlineRan = true;</script>
+</body>
+</html>

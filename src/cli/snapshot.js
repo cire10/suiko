@@ -106,12 +106,14 @@ export function hostsOf(urls) {
 }
 
 /**
- * The warning about hosts a doc loads live ([] when none).
+ * The note naming the hosts a doc loads content from when it is viewed ([] when none). A plain fact, not a warning:
+ * a doc built on CDN libraries or web fonts is fine as it is (render.network "block" in .specreview/config.json is
+ * the user's choice, documented in the README, not something to act on here).
  * @param {string[]} hosts
  * @returns {string[]}
  */
 export function externalsLines(hosts) {
-  return hosts.length ? [`external hosts loaded live by the doc: ${hosts.join(', ')} (set render.network to "block" in .specreview/config.json to block them)`] : [];
+  return hosts.length ? [`the doc loads content from ${hosts.join(', ')} when viewed`] : [];
 }
 
 /**
