@@ -297,6 +297,12 @@ shortest unique window around the anchor (still a valid Edit `old_string` substr
 - Channel: see `MSG` in `src/shared/protocol.js` (MessagePort handshake). Messages from the guest can never mutate
   state: `action` only opens a composer (user must click Add/Send); forwarded `key` events may only trigger
   non-mutating UI actions (navigation, open composer, toggle panels). `x`/`o`/`y`/`a` act only when focus is in the UI.
+- Handshake (2026-11, guest version 2; design 10.5): the doc's scripts must never get the port. The UI loads each doc
+  frame with a fresh nonce in its query (`sr-nonce`) and answers only the hello carrying it, once
+  (`src/ui/frame.js`). The guest is inserted right after the doctype, so it runs first. It removes the nonce from the
+  URL and says hello synchronously while its bundle runs. It reads the channel's events and ports only through
+  built-ins it captured at start, and it swallows and adopts every valid `connect`. It says `bye` on pagehide. The
+  content origin refuses service-worker scripts (403).
 - Guest is a set of plain classic-script files concatenated in the order listed in `src/guest/parts.json` into one
   IIFE (`'use strict'`). It must not use ES module syntax. It inlines the constants it needs from protocol.js.
 - Highlights: CSS Custom Highlight API (`sr-open`, `sr-resolved`, `sr-active`, `sr-draft`, `sr-ins`, `sr-lock`,

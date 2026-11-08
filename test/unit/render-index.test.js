@@ -86,7 +86,8 @@ test('finalizeHtml (markdown): guest after <head>, asset base replaced everywher
 test('finalizeHtml (html): vendored mermaid appended before </body> only when needed; stripCsp', async () => {
   const r = await renderSource({ format: 'html', source: appSpec, docPath: 'docs/app-spec.html' });
   const html = finalizeHtml(r, { assetBase: 'http://127.0.0.1:5801/__sr/r1', guestTag: '<script data-sr-ignore src="g.js"></script>' });
-  assert.match(html, /<head><script data-sr-ignore src="g\.js"><\/script>\n<meta charset="utf-8">/);
+  // the guest comes right after the doctype, before anything the author wrote
+  assert.ok(html.startsWith('<!DOCTYPE html><script data-sr-ignore src="g.js"></script>\n<html lang="en">\n<head>\n<meta charset="utf-8">'));
   assert.match(html, /<script src="http:\/\/127\.0\.0\.1:5801\/__sr\/r1\/vendor\/mermaid\/mermaid\.min\.js"><\/script><script src="http:\/\/127\.0\.0\.1:5801\/__sr\/r1\/static\/mermaid-init\.js"><\/script><\/body>/);
 
   const own = appSpec.replace('</body>', '<script src="https://cdn.example.com/mermaid.min.js"></script>\n</body>');

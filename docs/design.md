@@ -855,7 +855,7 @@ unified()
      - Otherwise insert just before the final `>`.
    - Splices are applied from the highest offset down, so earlier offsets stay valid.
    - Removing every inserted ` data-srid="n"` must give back the original string. A test asserts this.
-4. **Guest insertion point** (`guestInsertAt`): just after the `<head…>` start tag. If there is none, just after `<html…>`. If there is none, just after the doctype. Otherwise at 0 (after any BOM). It is never placed before the doctype, so quirks/standards mode is preserved.
+4. **Guest insertion point** (`guestInsertAt`): just after the doctype; without one, at 0 (after any BOM). Nothing the author wrote comes before the guest, so no `<script>`, `<img onerror>` or CSP `<meta>` placed ahead of `<head>` runs or applies first (10.5). The browser then creates `<html>` and `<head>` itself: the author's `<html>` attributes still apply, and only attributes on the author's `<head>` tag are dropped. It is never placed before the doctype, so quirks/standards mode is preserved. (Until 2026-11 it went just after the `<head…>` start tag.)
 5. **Asset references:** `img[src|srcset]`, `source[src|srcset]`, `video[src|poster]`, `audio[src]`, `link[href]`, `script[src]`, `object[data]`, `embed[src]`, `iframe[src]`, and CSS `url()` in style attributes, `<style>` blocks and linked local CSS (one level). Local and root-absolute paths that resolve inside the workspace go into `assets`. `http(s)` URLs go into `externals`.
 6. **`stamp:false`** (pristine mode, `?pristine=1`) skips step 3. Anchoring then falls back to quote search (see 6.6).
 
@@ -907,7 +907,7 @@ Special cases:
   ```html
   <script src="http://127.0.0.1:4778/c/<secret>/__sr/guest.js" data-sr-ui="http://127.0.0.1:4777 http://localhost:4777" data-sr-target="<ws>/<doc>/<ver>" data-sr-ignore></script>
   ```
-  The URL is absolute so a doc's own `<base href>` cannot redirect it. It is a classic synchronous script that only installs listeners and does its work on `DOMContentLoaded`.
+  The URL is absolute so a doc's own `<base href>` cannot redirect it. It is a classic synchronous script: while it runs, before anything of the page, it captures the built-ins its channel uses, installs its listeners and says `hello` (10.5); the rest of its work waits for `DOMContentLoaded`.
 - Content-origin `/c/<secret>/__sr/` routes:
   - `guest.js` (the concatenated bundle);
   - `static/*` from `src/core/render/static/`;
@@ -1500,15 +1500,20 @@ The content origin has no API and no state-changing routes. It checks `Host` (12
 
 ### 10.5 postMessage protocol (`MSG` in `protocol.js`)
 - **Envelope:** `{sr: 1, type, ...}`.
-- **Guest side:**
-  - It reads its allowlist from `data-sr-ui` and posts `hello` to `window.parent` once for each allowed origin.
-  - It accepts parent messages only when `event.source === window.parent` and `event.origin` is in the allowlist. It pins that origin after `init`.
-- **UI side:** it accepts messages only when `event.source === iframe.contentWindow` and `event.origin === contentOrigin`.
+- **Handshake (guest version 2):** the doc's own scripts share the frame with the guest, so the channel is built for them not to take it over.
+  - The UI loads every doc frame at `<doc URL>?sr-nonce=<nonce>`, with a fresh 128-bit nonce per load.
+  - The guest tag comes first in the page, right after the doctype (`html.js`), so the guest runs before anything the author wrote. While its bundle runs, it captures the built-ins its channel uses, takes the nonce out of the URL (`history.replaceState`) and posts `hello` with the nonce to `window.parent`, once for each allowed origin in `data-sr-ui`.
+  - The UI answers only a hello from `iframe.contentWindow`, from `contentOrigin`, carrying the nonce of the frame's latest load, and only once per nonce: it posts `connect` with a `MessagePort`. A page script cannot know a nonce the guest has not used already, so no hello it posts gets a port. The same holds for a page that loads without the guest (a `javascript:` URL, a page next to the doc, a page the frame reloaded by itself).
+  - A hello without a valid nonce while no page is connected and no load is under way means the frame loaded a page by itself. The UI then loads the version it shows again, at most every 10 s. A page that never says hello gets the "navigated away" banner.
+  - The guest's first `message` listener takes every valid `connect` (a trusted event from `window.parent` at an allowed origin, with a port) and stops it, so the page's listeners never see one. The newest connect is the UI's current channel. From then on all traffic uses the port, and window messages are never read.
+  - On `pagehide` (not into the back/forward cache) the guest posts `bye` on the port; the UI closes it.
+  - No service worker can be registered on the content origin (403 to `Service-Worker: script`): it could answer the frame's loads itself.
 - **No guest message can mutate state** without a user gesture in the UI. A forged message can at most open a composer.
 
 Guest to UI:
-- `hello {target, title, href, highlightApi: bool}`
-- `ready {outline:[{srid, level, text, line}], externalsFailed:[url]}`
+- `hello {target, href, highlightApi: bool, guestVersion, nonce}` (a window message)
+- `ready {title, outline:[{srid, level, text, line}], externalsFailed:[url]}`
+- `bye {}` (the page is going away)
 - `action {action:'comment'|'suggest'|'question'|'agree', capture, rect, crop?}` (from the mini-toolbar, shortcuts or the picker)
 - `selection {capture|null, rect}` (to enable UI buttons)
 - `positions {targets:{[id]:{top, state:'ok'|'hidden'|'missing'}}, hunks:{[id]:top}, scrollY, viewportH, docH}`

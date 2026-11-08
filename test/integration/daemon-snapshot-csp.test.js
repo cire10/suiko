@@ -3,7 +3,8 @@
 // text, a fetched web page) gets the strict profile (script-src 'self', form-action 'none', base-uri 'none',
 // object-src 'none'); a web page's doc.render.network "block" adds the default-src rule even though the workspace
 // allows the network, and "allow" lifts it even where the workspace blocks; a file doc's policy is unchanged. The doc
-// list carries a web page's URL (source) for the Home view.
+// list carries a web page's URL (source) for the Home view. No doc can register a service worker: every request for
+// a worker script (Service-Worker: script) gets 403, while the same files load normally otherwise.
 
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -46,6 +47,8 @@ before(async () => {
   fs.mkdirSync(path.join(ws, 'docs'), { recursive: true });
   fs.mkdirSync(ws2, { recursive: true });
   fs.writeFileSync(path.join(ws, 'docs', 'spec.md'), '# Spec\n\nText.\n');
+  // a script next to the doc that a doc page could try to register as its service worker
+  fs.writeFileSync(path.join(ws, 'docs', 'sw.js'), 'self.addEventListener("fetch", (e) => e.respondWith(new Response("no guest")));\n');
   store = await Store.open(ws, { create: true });
   const file = await store.createDoc({ path: 'docs/spec.md' });
   await store.commitVersion(file, { source: fs.readFileSync(path.join(ws, 'docs', 'spec.md')), manifest: { author: AGENT, summary: 'v1', capturedBy: 'open' } });
@@ -120,5 +123,23 @@ describe('content-origin policy of snapshot docs', () => {
     const page = list.find((/** @type {any} */ x) => x.id === 'page');
     assert.deepEqual([page.kind, page.origin, page.source], ['snapshot', 'url', 'https://docs.example.com/spec']);
     assert.equal(list.find((/** @type {any} */ x) => x.id === 'piped').source, undefined);
+  });
+});
+
+describe('service workers', () => {
+  test('a worker script request gets 403 on every route; the same file still loads as a script', async () => {
+    const base = `/c/${docKey(store.wsId, 'spec')}/live`;
+    const plain = /** @type {any} */ (await get(d.contentPort, `${base}/docs/sw.js`));
+    assert.equal(plain.status, 200, plain.text);
+    for (const p of [`${base}/docs/sw.js`, `${base}/docs/spec.md`, `/c/${docKey(store.wsId, 'spec')}/v1/docs/sw.js`, '/sw.js']) {
+      for (const value of ['script', 'Script ']) {
+        const r = /** @type {any} */ (await get(d.contentPort, p, { 'service-worker': value }));
+        assert.equal(r.status, 403, `${p} (${value})`);
+        assert.ok(!r.text.includes('no guest'), 'the script itself is never sent');
+      }
+    }
+    // a guest bundle request is refused as a worker too (nothing under the content origin can become one)
+    const guest = /** @type {any} */ (await get(d.contentPort, `/__sr/r1/guest.js`, { 'service-worker': 'script' }));
+    assert.equal(guest.status, 403);
   });
 });

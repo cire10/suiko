@@ -2,7 +2,9 @@
 // Full-page shell around rendered Markdown (design 6.2 "Shell"). Asset URLs use the literal placeholder
 // __SR_ASSET_BASE__, which finalizeHtml() replaces with the content origin's /__sr/<RENDERER_VERSION> base.
 // Light/dark stylesheets are selected by media queries and tagged data-sr-theme so the guest can force a theme.
-// guestInsertAt is the offset just after <head>.
+// guestInsertAt is the offset just after <head>: everything before it is Suiko's own (the doctype, <html lang>),
+// so the guest still runs before anything the Markdown brings in (html.js puts an HTML doc's guest right after its
+// doctype for the same reason).
 
 export const ASSET_BASE_PLACEHOLDER = '__SR_ASSET_BASE__';
 

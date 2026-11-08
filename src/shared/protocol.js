@@ -100,17 +100,35 @@ export const SSE = Object.freeze({
 });
 
 /**
+ * Query parameter of the handshake nonce on a doc frame's URL (`?sr-nonce=<32 hex>`, see MSG). The UI picks a fresh
+ * nonce for every load of a doc frame; the guest takes it out of the URL before any script of the page runs and
+ * sends it back in its `hello`. It is in the query (not the fragment) so that loading the same doc again with a new
+ * nonce is a real navigation.
+ */
+export const HELLO_NONCE_PARAM = 'sr-nonce';
+
+/**
  * postMessage / MessagePort protocol between the UI (parent, UI origin) and the guest (inside the doc iframe,
  * content origin). Envelope: { sr: 1, type, ...payload }.
- * Handshake: guest -> window.parent.postMessage({sr:1,type:'hello',...}, uiOrigin) for each allowed UI origin.
- * UI -> iframe.contentWindow.postMessage({sr:1,type:'connect'}, contentOrigin, [port2]).
- * The guest's capture-phase window 'message' listener (installed before any page script) takes the port and calls
- * stopImmediatePropagation(). All further traffic in both directions uses the MessagePort only.
+ * Handshake (GUEST_VERSION 2; design 10.5, amendments 7):
+ *   1. The UI loads the frame at <doc URL>?sr-nonce=<nonce> (HELLO_NONCE_PARAM), a fresh 128-bit nonce per load.
+ *   2. The guest, inserted before anything the author wrote, runs first: it captures the built-ins its channel uses,
+ *      removes the nonce from the URL (history.replaceState) and posts {sr:1,type:'hello',nonce,...} to
+ *      window.parent (uiOrigin), all synchronously, before any script of the page.
+ *   3. The UI answers only a hello from the frame's window, from the content origin, carrying the nonce of the
+ *      frame's latest load, and only once per nonce:
+ *      iframe.contentWindow.postMessage({sr:1,type:'connect'}, contentOrigin, [port2]).
+ *      A hello without that nonce (the page's own scripts, a page with no guest, a page the frame loaded by itself)
+ *      never gets a port.
+ *   4. The guest's capture-phase window 'message' listener takes the port and calls stopImmediatePropagation() for
+ *      every valid connect (trusted, from window.parent, an allowed origin): the page's own listeners never see one.
+ *      All further traffic in both directions uses the MessagePort only; on pagehide the guest says `bye` on it.
  */
 export const MSG = Object.freeze({
   // guest -> UI
-  HELLO: 'hello',             // {target, title, href, highlightApi}
-  READY: 'ready',             // {outline:[{srid,level,text,line?,id}], features:{mermaid,math,code}, externalsFailed:[url]}
+  HELLO: 'hello',             // {target, href, highlightApi, guestVersion, nonce}  (window message, not port)
+  READY: 'ready',             // {title, outline:[{srid,level,text,line?,id}], features:{mermaid,math,code}, externalsFailed:[url]}
+  BYE: 'bye',                 // {}  the page is going away (pagehide, not into the back/forward cache): the port is dead
   SELECTION: 'selection',     // {capture|null, rect|null}
   ACTION: 'action',           // {action:'comment'|'suggest'|'question'|'agree', capture, rect, crop?: dataUrl}
   POSITIONS: 'positions',     // {targets:{[id]:{top,height,state:'ok'|'block'|'hidden'|'missing'}}, hunks:{[id]:top},

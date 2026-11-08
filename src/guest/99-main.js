@@ -1,8 +1,9 @@
 // Suiko guest, part 99: wiring and startup.
 //
-// On DOMContentLoaded (or immediately when the bundle runs later) the guest mounts the overlay, registers the layout
-// and DOM-change hooks in a fixed order, starts listening, opens the channel and posts `hello` to the allowed UI
-// origins. After the UI connects, it posts `ready {outline, features, externalsFailed}` and then reacts to UI
+// The `hello` goes out at once, while the bundle runs (so before any script of the page, with the nonce of the frame's
+// URL: 20-channel.js). On DOMContentLoaded (or immediately when the bundle runs later) the guest mounts the overlay,
+// registers the layout and DOM-change hooks in a fixed order, starts listening and opens the channel. After the UI
+// connects, it posts `ready {title, outline, features, externalsFailed}` and then reacts to UI
 // messages (init, setTargets, setChanges, setActiveHunk, focus, scrollTo, setTool, setTheme, reveal, clearSelection,
 // dismissToolbar, setHidden, setPrefs). setTool switches between the exclusive tools: 'select', 'pick' (60-picker.js) and 'snip' (65-snip.js).
 // setPrefs {singleKeys} (also init.prefs) switches the guest's own single-key shortcuts on or off (85-keys.js).
@@ -382,7 +383,8 @@ const Main = (() => {
     lastStructural = '';
     const headings = outline();
     outlineSrids = headings.map((h) => h.srid);
-    Channel.send(MSG.READY, { outline: headings, features: features(), externalsFailed: PageErrors.externalsFailed });
+    // the title is read here, not in the hello: the hello goes out before the parser reached <title>
+    Channel.send(MSG.READY, { title: document.title, outline: headings, features: features(), externalsFailed: PageErrors.externalsFailed });
     PageErrors.resend();
     SelectionCapture.resend();
     Scheduler.requestLayout();
@@ -468,13 +470,6 @@ const Main = (() => {
     }, 'pointer-out'), { capture: true, passive: true });
     Channel.onConnect(guard(onConnect, 'onConnect'));
     Channel.open();
-    Channel.hello({
-      target: ENV.target,
-      title: document.title,
-      href: location.href,
-      highlightApi: Highlights.supported,
-      guestVersion: GUEST_VERSION,
-    });
   }
 
   const debugApi = Object.freeze({
@@ -520,6 +515,15 @@ const Main = (() => {
   } catch (err) {
     recordGuestError('debug-global', err);
   }
+
+  // Now, while the bundle runs: the UI answers only the hello with the nonce of this load (see 20-channel.js), and
+  // this one is sent before any script of the page can run. The page's title is not parsed yet: it goes with `ready`.
+  guard(() => Channel.hello({
+    target: ENV.target,
+    href: location.href,
+    highlightApi: Highlights.supported,
+    guestVersion: GUEST_VERSION,
+  }), 'hello')();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', guard(start, 'start'), { once: true });

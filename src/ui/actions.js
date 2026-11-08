@@ -312,9 +312,17 @@ export const refresh = debounce(() => {
   refreshNow();
 }, 120);
 
+/**
+ * Bumped by every stream event that patches the doc state in place (presence: waiters; working.changed: working).
+ * A refresh whose request went out before such an event answers with the older values (e.g. the catch-up refresh
+ * when the stream opens, while Claude starts listening): refreshNow keeps the event's.
+ */
+let streamPatches = 0;
+
 export async function refreshNow() {
   const c = client;
   if (!c) return;
+  const patchesAtStart = streamPatches;
   /** @type {any} */
   let ds;
   try {
@@ -325,6 +333,7 @@ export async function refreshNow() {
   }
   if (client !== c) return;
   const s = get();
+  if (streamPatches !== patchesAtStart && s.ds && ds) ds = { ...ds, waiters: s.ds.waiters, working: s.ds.working };
   const prevHead = Number(s.ds?.doc?.head) || 0;
   const head = Number(ds?.doc?.head) || 1;
   /** @type {Partial<UiState>} */
@@ -501,12 +510,14 @@ function onDocEvent(name, data) {
       return;
     case SSE.PRESENCE:
       if (Array.isArray(data?.waiters)) {
+        streamPatches++;
         set((s) => (s.ds ? { ds: { ...s.ds, waiters: data.waiters } } : null));
       } else {
         refresh();
       }
       return;
     case SSE.WORKING_CHANGED:
+      streamPatches++;
       set((s) => (s.ds ? {
         ds: { ...s.ds, working: {
           ...s.ds.working, dirty: !!data?.dirty, missing: !!data?.missing, sha256: data?.sha256 ?? s.ds.working?.sha256,
@@ -828,8 +839,10 @@ export function reloadFrame() {
 
 /**
  * Called by DocFrame when the iframe loaded a page whose guest never said hello: the doc navigated away (the guest
- * cancels navigations where the Navigation API exists; elsewhere a link or a script can still leave). The old
- * channel is dead, so the doc is shown as disconnected and a banner offers the way back (reloadFrame).
+ * cancels navigations where the Navigation API exists; elsewhere a link or a script can still leave, or the page
+ * replaced itself, e.g. with a `javascript:` URL or document.open()). The old channel is dead, so the doc is shown
+ * as disconnected and a banner offers the way back (reloadFrame). Nothing in the frame is answered until then
+ * (guest.reset(); a page there that says hello gets the frame loaded again instead: frame.js onStray).
  */
 export function frameLost() {
   guest.reset();
@@ -837,8 +850,12 @@ export function frameLost() {
 }
 
 guest.setHandlers({
-  // A hello is a page with its guest (also a late one after frameLost): the doc is back.
-  onHello: (hello) => set((s) => ({ guest: { ...s.guest, connected: false, title: hello.title, lost: false } })),
+  // A hello the bridge answered is the page it loaded, with its guest: the doc is back.
+  onHello: () => set((s) => ({ guest: { ...s.guest, connected: false, lost: false } })),
+  // The page is going away (a reload or a navigation inside the frame): its port is dead.
+  onBye: () => set((s) => ({ guest: { ...s.guest, connected: false, selection: null } })),
+  // The frame shows a page it loaded by itself, which cannot connect (frame.js): load the version shown again.
+  onStray: () => reloadFrame(),
   onMessage: onGuestMessage,
 });
 
@@ -1072,6 +1089,14 @@ function lineUpBase() {
 }
 
 baseGuest.setHandlers({
+  onBye: () => set({ baseConnected: false }),
+  // the older version's frame shows a page it loaded by itself: load that version again (frame.js)
+  onStray: () => {
+    const src = baseGuest.src;
+    if (!src) return;
+    baseFrameNavigating();
+    baseGuest.load(src);
+  },
   onMessage: (type, d) => {
     switch (type) {
       case MSG.READY:
@@ -1144,6 +1169,7 @@ function onGuestMessage(type, d) {
         guest: {
           ...s.guest,
           connected: true,
+          title: String(d.title ?? ''),
           outline,
           features: d.features && typeof d.features === 'object' ? d.features : {},
           externalsFailed: Array.isArray(d.externalsFailed) ? d.externalsFailed.map(String) : [],

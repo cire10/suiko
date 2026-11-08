@@ -47,6 +47,9 @@
 // A snapshot doc (a plan, an agent message, piped text, a fetched web page: not a workspace file) gets the strict
 // profile on top: script-src 'self' (only the guest and the vendored libraries under /__sr/ run: no inline script,
 // no javascript: URL, no remote script), form-action 'none', base-uri 'none', object-src 'none'.
+// No service worker can be registered here: a request for a worker script (`Service-Worker: script`, sent with every
+// registration and update check) gets 403. A doc's worker could otherwise answer the frame's later loads itself, with
+// pages that carry no guest (whatever runs first in the frame can take the guest's place in the handshake).
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -174,6 +177,11 @@ export class ContentOrigin {
       }
       if (!isSafeMethod(req.method)) {
         sendText(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
+        return;
+      }
+      if (String(req.headers['service-worker'] ?? '').trim().toLowerCase() === 'script') {
+        // never a service worker (see the header): the registration fails
+        sendText(res, 403, 'Service workers are not allowed here');
         return;
       }
       const target = parseTarget(req.url);
