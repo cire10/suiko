@@ -36,6 +36,7 @@
     "docs/agent-protocol.md",
     "docs/design.md",
     "docs/BUILD_AMENDMENTS.md",
+    "docs/development.md",
     "docs/img"
   ],
   "scripts": {
