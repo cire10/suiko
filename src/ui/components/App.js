@@ -1,22 +1,25 @@
 // @ts-check
 // Root component and the doc view layout (design 11.1 / 11.2, amendments 1 List layout):
-//   TopBar / banners / [outline rail | doc frame or Source / History view | side panel] / status bar.
+//   TopBar (one row) / banners / [outline rail | doc frame or Source / History view, with the tool dock | side panel].
+// There is no status bar: whose turn it is and what is wrong are in the top bar (turn pill, problems chip), the rest
+// in More > Document info.
 // A doc kind can replace the banners, the doc frame, the outline rail and the Changes list with its own components
 // (components/kinds/index.js: a code review shows a file tree and diffs instead of a rendered doc).
-// Between 900 and 1199 px (e.g. a desktop app's browser pane) the outline rail is collapsed behind the menu button
-// unless the user opened it (remembered), and the side panel is narrower, so the doc keeps most of the width.
+// The outline rail is beside the doc only from 1600 px (railShown, Outline rail setting Auto; a code review's file
+// tree from 1200 px): below, it is behind the ≡ button unless the user opened it (remembered), so the doc keeps most
+// of the width. Between 900 and 1199 px (e.g. a desktop app's browser pane) the side panel is narrower too.
 // From 900 px up the reviewer can drag the side panel to another width (PanelResizer; remembered).
 // Below 900 px the outline rail and the side panel become drawers (left / right) over the full-width doc.
 // Read mode shows the doc alone: no thread panel (the side panel appears only for a comment being written).
 // The doc iframe stays mounted in every mode, so switching between Review / Changes and Source / History never
 // reloads the document. Changes side by side adds the older version's frame after it in the DOM, placed on its
-// left by CSS grid, so the newer version's iframe never moves.
-// The Outline rail setting (Auto / Always / Never) and the menu button's choice for the page decide whether the rail
-// is beside the doc from 900 px up (railShown).
+// left by CSS grid, so the newer version's iframe never moves. The tool dock floats over the bottom of the doc area
+// (absolutely placed, so it takes no grid cell) and stays mounted wherever the doc frame is.
 // While a screen snip (Shift+B) waits for the reviewer in the macOS picker, a floating hint says what to do; it
 // blocks nothing (the picker itself is modal on the Mac).
-// The command palette, Settings and the keyboard shortcuts are global dialogs (also on the doc list); Submit review
-// belongs to the doc view. One dialog shows at a time.
+// The command palette, Settings and the keyboard shortcuts are global dialogs (also on the doc list); the Send
+// dialog, Document info and an agent's HTML attachment shown large (Attachments.js PreviewOverlay) belong to the doc
+// view. One dialog shows at a time.
 
 import { html } from 'preact-htm';
 import { navigate, railShown, splitShown, toggleNav, toggleSidebar } from '../actions.js';
@@ -26,8 +29,10 @@ import { Banners } from './Banners.js';
 import { ChangesView } from './ChangesView.js';
 import { CommandPalette } from './CommandPalette.js';
 import { ComparePane } from './ComparePane.js';
+import { PreviewOverlay } from './Attachments.js';
 import { Composer } from './Composer.js';
 import { DocFrame } from './DocFrame.js';
+import { DocInfo } from './DocInfo.js';
 import { HelpOverlay } from './HelpOverlay.js';
 import { HistoryView } from './HistoryView.js';
 import { Home } from './Home.js';
@@ -36,10 +41,10 @@ import { Outline } from './Outline.js';
 import { PanelResizer } from './PanelResizer.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { SourceView } from './SourceView.js';
-import { StatusBar } from './StatusBar.js';
 import { SubmitDialog } from './SubmitDialog.js';
 import { ThreadPanel } from './ThreadPanel.js';
 import { Toasts } from './Toasts.js';
+import { ToolDock } from './ToolDock.js';
 import { TopBar } from './TopBar.js';
 import { Icon } from './common.js';
 import { KindBanners, KindMain, KindRail, KindSide } from './kinds/index.js';
@@ -121,7 +126,7 @@ function DocView() {
     <${TopBar} />
     <${BannerSlot} />
     <div class="main">
-      <aside class="rail-left" aria-label="Outline and history" id="sr-nav">
+      <aside class="rail-left" aria-label=${s.railTitle} id="sr-nav">
         ${s.narrow ? html`<div class="drawer-head"><strong>${s.railTitle}</strong>
           <button type="button" class="icon-btn" aria-label=${`Close ${s.railTitle.toLowerCase()}`} onClick=${toggleNav}><${Icon} name="close" /></button></div>` : null}
         <${RailSlot} />
@@ -131,6 +136,7 @@ function DocView() {
         ${s.mode === 'source' ? html`<${SourceView} />` : null}
         ${s.mode === 'history' ? html`<${HistoryView} />` : null}
         ${s.split ? html`<${ComparePane} />` : null}
+        <${ToolDock} />
       </main>
       <aside class="rail-right" aria-label="Review panel" id="sr-side">
         ${s.narrow ? null : html`<${PanelResizer} />`}
@@ -139,8 +145,9 @@ function DocView() {
       ${s.narrow && ((s.drawer && (!reading || s.composing)) || s.nav)
         ? html`<div class="scrim" onClick=${() => store.set({ drawer: false, nav: false })} aria-hidden="true"></div>` : null}
     </div>
-    <${StatusBar} />
     ${s.dialog === 'submit' ? html`<${SubmitDialog} />` : null}
+    ${s.dialog === 'info' ? html`<${DocInfo} />` : null}
+    ${s.dialog === 'preview' ? html`<${PreviewOverlay} />` : null}
   </div>`;
 }
 
@@ -164,22 +171,28 @@ function RailSlot() {
   return KindRail({ ds }) ?? html`<${Outline} />`;
 }
 
-/** @param {{ narrow: boolean, mode: string }} props */
+/**
+ * The side panel. In the narrow drawer its head names it once: "Threads ×" (the thread panel's own title is hidden
+ * there by CSS), or in Changes mode the Changes | Threads tabs themselves, beside the close button.
+ * @param {{ narrow: boolean, mode: string }} props
+ */
 function SidePanel({ narrow, mode }) {
   const composerOpen = useStore((s) => !!s.composer);
   const pane = useStore((s) => s.sidePane);
   const ds = useStore((s) => s.ds);
   const showChanges = mode === 'changes' && pane === 'changes';
-  return html`<div class="side">
-    ${narrow ? html`<div class="drawer-head"><strong>${showChanges ? 'Changes' : 'Threads'}</strong>
-      <button type="button" class="icon-btn" aria-label="Close panel" onClick=${toggleSidebar}><${Icon} name="close" /></button></div>` : null}
-    ${composerOpen ? html`<${Composer} />` : null}
-    ${mode === 'changes' ? html`<div class="side-tabs" role="tablist" aria-label="Side panel">
+  const close = html`<button type="button" class="icon-btn" aria-label="Close panel" onClick=${toggleSidebar}><${Icon} name="close" /></button>`;
+  const tabs = mode === 'changes' ? html`<div class="side-tabs" role="tablist" aria-label="Side panel">
       <button type="button" role="tab" aria-selected=${pane === 'changes'} class=${pane === 'changes' ? 'active' : ''}
         onClick=${() => store.set({ sidePane: 'changes' })}>Changes</button>
       <button type="button" role="tab" aria-selected=${pane === 'threads'} class=${pane === 'threads' ? 'active' : ''}
         onClick=${() => store.set({ sidePane: 'threads' })}>Threads</button>
-    </div>` : null}
+    </div>` : null;
+  return html`<div class="side">
+    ${narrow && tabs ? html`<div class="drawer-head drawer-head-tabs">${tabs}${close}</div>`
+      : narrow ? html`<div class="drawer-head"><strong>Threads</strong>${close}</div>` : null}
+    ${composerOpen ? html`<${Composer} />` : null}
+    ${narrow ? null : tabs}
     ${mode === 'read' ? null : showChanges ? KindSide({ ds }) ?? html`<${ChangesView} />` : html`<${ThreadPanel} />`}
   </div>`;
 }

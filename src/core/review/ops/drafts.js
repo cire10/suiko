@@ -10,13 +10,16 @@
 // Drafts live in the runtime dir (SPECREVIEW_HOME); they become threads, replies and resolutions on submitReview.
 // Comments are allowed only on recorded versions (design C19), never on the live working copy.
 // Draft item kinds: 'thread' {type, severity, anchor | capture(+version), body, suggestion?, attachments?},
-// 'reply' {thread, body, reopen?}, 'resolve' {thread, decision?}.
+// 'reply' {thread, body, reopen?, use?}, 'resolve' {thread, decision?}. A reply's `use` ("Use in doc") lists
+// attachments of its thread ('attachments/a7.html') the agent is asked to put into the doc (attachments.js
+// normalizeUse: each must be an attachment of that thread).
 
 import { SEVERITIES, SSE, THREAD_TYPES } from '../../../shared/protocol.js';
 import { NotFoundError, UsageError } from '../../store/errors.js';
 import { lineIndex } from '../../text/index.js';
 import { isCode } from '../../store/snapshot.js';
 import { kindOf } from '../kinds.js';
+import { normalizeUse } from '../attachments.js';
 import { codeSuggestionFor } from '../../code/capture.js';
 import { emit, oneOf, parseVersionArg, requireThread, resolveDoc, withDoc } from './common.js';
 
@@ -139,9 +142,11 @@ async function normalizeDraft(ctx, doc, item, prev) {
   const kind = item.kind ?? prev?.kind ?? 'thread';
   const updatedAt = ctx.now();
   if (kind === 'reply') {
-    await requireThread(ctx, doc.id, item.thread);
+    const t = await requireThread(ctx, doc.id, item.thread);
     const body = String(item.body ?? '');
-    return { id: '', kind, thread: item.thread, body, reopen: Boolean(item.reopen), updatedAt };
+    // "Use in doc": attachments of this thread the agent is asked to put into the doc (checked again on submit)
+    const use = normalizeUse(t, item.use);
+    return { id: '', kind, thread: item.thread, body, reopen: Boolean(item.reopen), ...(use.length ? { use } : {}), updatedAt };
   }
   if (kind === 'resolve') {
     await requireThread(ctx, doc.id, item.thread);

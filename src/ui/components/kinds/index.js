@@ -18,7 +18,7 @@
 // CodeBanner and CodeSide, and WP1 PlanBanner.
 
 import { html } from 'preact-htm';
-import { docKindOf, kindCaps } from '../../model.js';
+import { docKindOf, isPlanDoc, kindCaps } from '../../model.js';
 import { CodeBanner } from './CodeBanner.js';
 import { CodeReviewView } from './CodeReviewView.js';
 import { CodeSide } from './CodeSide.js';
@@ -28,11 +28,6 @@ import { PlanBanner } from './PlanBanner.js';
 export { kindCaps };
 
 /** @typedef {any} DocState */
-
-/** A plan snapshot (Claude Code plan mode). @param {DocState} ds */
-function isPlanDoc(ds) {
-  return docKindOf(ds) === 'snapshot' && ds?.doc?.origin?.type === 'plan';
-}
 
 /**
  * The banner of the doc's kind, replacing the banner stack; null keeps the stack.

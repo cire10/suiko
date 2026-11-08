@@ -4,10 +4,12 @@
 // is the CLI's --json value. Additive tools beyond the design table: suiko_ask, suiko_threads.
 // suiko_snapshot is the only tool that uses the network (public hosts only: no allow_private, reader or as_html).
 // suiko_revise deliberately has no `force` (only a user at a terminal should force a refused revision).
+// Replies (suiko_reply, suiko_revise threads) may set status `planned` (batched edits) and attach files
+// (`attachments`: images or HTML previews the agent made; checked by core/review/attachments.js).
 
 import path from 'node:path';
 import * as z from 'zod/v4';
-import { AGENT_REPLY_STATUS } from '../shared/protocol.js';
+import { AGENT_REPLY_STATUS, LIMITS } from '../shared/protocol.js';
 import { normalizeAt, parseSingleRange, parseVersionRef } from '../cli/args.js';
 import { buildReviseInput } from '../cli/commands/revise.js';
 import { reviewInput } from '../cli/commands/review.js';
@@ -18,12 +20,16 @@ import { defaultDocId } from '../cli/runtime.js';
 export const WAIT_DEFAULT_SEC = 50;
 export const WAIT_MAX_SEC = 600;
 
-const docArg = z.string().min(1).describe('Doc id (e.g. "token-service") or the spec file path');
+const docArg = z.string().min(1).describe('Doc id (e.g. "token-service") or the path of its file');
 const threadId = z.string().regex(/^t\d+$/).describe('Thread id, e.g. "t3"');
 const linesArg = z.string().describe('Inclusive line range of the current file, e.g. "42-46" or "L42-46"');
 const versionArg = z.union([z.number().int().min(1), z.string().min(1)]).describe('Version: 3, "v3", "head" or "live"');
 const workspaceArg = z.string().optional().describe('Workspace root (optional; default: discovered from the path or the server cwd)');
 const fileArg = z.string().min(1).describe('Code reviews only: the repo file the lines are in (repo-root-relative, cwd-relative or a unique suffix)');
+const attachmentsArg = z
+  .array(z.string().min(1))
+  .max(LIMITS.maxReplyAttachments)
+  .describe(`Files you made to show in the thread: images (.png .jpg .jpeg .gif .webp .svg) or HTML previews (.html .htm); absolute paths (or relative to the server's cwd); at most ${LIMITS.maxReplyAttachments}, ${LIMITS.maxAttachmentBytes / (1024 * 1024)} MB each`);
 
 /**
  * @typedef {object} ToolDef
@@ -41,10 +47,10 @@ const fileArg = z.string().min(1).describe('Code reviews only: the repo file the
 export const TOOLS = [
   {
     name: 'suiko_open',
-    title: 'Open a spec for review',
+    title: 'Open a document for review',
     description:
-      'Track an HTML/Markdown spec (recording v1 if new), make sure the local review server runs, open the review UI in the default browser (unless SPECREVIEW_BROWSER is pane or none), and return its URL. Write the spec once before calling this; afterwards only make targeted edits.',
-    schema: z.object({ path: z.string().min(1).describe('Path of the .md/.html spec'), title: z.string().optional(), workspace: workspaceArg }),
+      'Track an HTML or Markdown file as it is (recording v1 if new), make sure the local review server runs, open the review UI in the default browser (unless SPECREVIEW_BROWSER is pane or none), and return its URL. After this, change only what review threads ask for (the file, or its sources and a rebuild).',
+    schema: z.object({ path: z.string().min(1).describe('Path of the .html or .md file'), title: z.string().optional(), workspace: workspaceArg }),
     command: 'open',
     toInput: async (a) => ({ paths: [a.path], title: a.title }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -82,7 +88,7 @@ export const TOOLS = [
     name: 'suiko_wait',
     title: 'Wait for the review',
     description:
-      'Block until the reviewer submits a review (or closes the session), up to timeout_sec (default 50, max 600). Returns the feedback packet, {"status":"waiting"} (call it again), or {"status":"closed"} (stop waiting). Refused while a thread you received has no reply: reply on each thread (suiko_revise or suiko_reply), where the reviewer reads it, then wait again.',
+      'Block until the reviewer submits a review (or closes the session), up to timeout_sec (default 50, max 600). Returns the feedback packet, {"status":"waiting"} (call it again), or {"status":"closed"} (stop waiting). Refused while a thread you received has no reply: reply on each thread (suiko_revise or suiko_reply; a planned reply counts), where the reviewer reads it, then wait again.',
     schema: z.object({
       doc: docArg.optional(),
       all: z.boolean().optional().describe('Wait on every doc of the workspace'),
@@ -122,7 +128,7 @@ export const TOOLS = [
     name: 'suiko_apply',
     title: 'Apply suggestions verbatim',
     description:
-      'Apply suggestion threads verbatim to the working copy (staged until revise). Do Edit-tool edits first; re-read the file afterwards. A conflict means: treat the thread as a normal comment.',
+      'Apply suggestion threads verbatim to the working copy (staged until revise). Do Edit-tool edits first; re-read the file afterwards. A conflict means: treat the thread as a normal comment. For a doc built from sources (a template, data, a script), do not use it: it changes only the built file, and the next rebuild brings the old text back (revise then refuses with "reverted"); put the suggested text into the sources and rebuild.',
     schema: z.object({ doc: docArg, thread_ids: z.array(threadId).min(1), dry_run: z.boolean().optional(), workspace: workspaceArg }),
     command: 'apply',
     toInput: async (a) => ({ doc: a.doc, threads: [...new Set(/** @type {string[]} */ (a.thread_ids))], dryRun: Boolean(a.dry_run) }),
@@ -148,25 +154,35 @@ export const TOOLS = [
   {
     name: 'suiko_reply',
     title: 'Reply on a thread',
-    description: 'Reply on a thread without recording a version (status: answered, declined, needs_input or addressed).',
+    description:
+      'Reply on a thread without recording a version (status: answered, declined, needs_input, addressed, or planned: in an EDITS: batch round, exactly what you will change, made later in the APPLY round). attachments: images or an HTML preview you made (a chart, a mock-up) for the reviewer to see in the thread.',
     schema: z.object({
       doc: docArg,
       thread_id: threadId,
       body: z.string().min(1).describe('Markdown reply'),
       status: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_REPLY_STATUS])).optional(),
       at: z.string().optional().describe('Lines you changed for it, e.g. "L42-46" (code reviews: "src/a.js:L42-46")'),
+      attachments: attachmentsArg.optional(),
       decision: z.string().optional(),
       workspace: workspaceArg,
     }),
     command: 'reply',
-    toInput: async (a) => ({ doc: a.doc, thread: a.thread_id, body: a.body, status: a.status, at: a.at !== undefined ? normalizeAt(a.at, 'at') : undefined, decision: a.decision }),
+    toInput: async (a) => ({
+      doc: a.doc,
+      thread: a.thread_id,
+      body: a.body,
+      status: a.status,
+      at: a.at !== undefined ? normalizeAt(a.at, 'at') : undefined,
+      decision: a.decision,
+      ...(a.attachments?.length ? { attachments: a.attachments } : {}),
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
     name: 'suiko_revise',
     title: 'Record a revision with replies',
     description:
-      'Record the working copy as a new version with one reply per thread of the packet. threads: {"t1":{"status":"addressed","reply":"...","at":"L90-91"}}; other: [{"at":"L12"|"L12-14"|"del:h6"|"h6","why":"..."}] explains changes no thread asked for. A refusal (isError) records nothing: follow its fix lines. Never use break_locks or allow_rewrite unless the user explicitly asked.',
+      'Record the working copy as a new version with one reply per thread of the packet (with no edit, it only posts the replies). threads: {"t1":{"status":"addressed","reply":"...","at":"L90-91","attachments":["/abs/chart.png"]}}; status planned (an EDITS: batch packet) says exactly what you will change, made later in the APPLY round; attachments are images or HTML previews you made, shown in the thread. other: [{"at":"L12"|"L12-14"|"del:h6"|"h6","why":"..."}] explains changes no thread asked for. A thread\'s at (lines of the new file) explains every change on the lines it names; without it a change is explained only within the thread\'s paragraph, so name the lines of a change that reaches further (a rebuilt table, data blob or chart script). A refusal (isError) records nothing: follow its fix lines. Never use break_locks or allow_rewrite unless the user explicitly asked.',
     schema: z.object({
       doc: docArg,
       summary: z.string(),
@@ -190,7 +206,7 @@ export const TOOLS = [
   {
     name: 'suiko_revert',
     title: 'Revert a hunk or a lock',
-    description: 'Undo one unrecorded hunk (hunk: "h5") or restore the agreed text of a lock (lock: "L1") in the working copy. Never revert changes you did not make.',
+    description: 'Undo one unrecorded hunk (hunk: "h5") or restore the agreed text of a lock (lock: "L1") in the working copy. It changes only the doc\'s file: for a doc built from sources, undo the change in the sources and rebuild instead. Never revert changes you did not make.',
     schema: z.object({ doc: docArg, hunk: z.string().regex(/^h\d+$/).optional(), lock: z.string().regex(/^L\d+$/).optional(), workspace: workspaceArg }),
     command: 'revert',
     toInput: async (a) => ({ doc: a.doc, hunk: a.hunk, lock: a.lock }),
@@ -229,7 +245,7 @@ export const TOOLS = [
   {
     name: 'suiko_threads',
     title: 'List threads',
-    description: 'List the threads of a doc, one line each (status: open, addressed, answered, declined, needs_input, resolved, outdated, active (default) or all).',
+    description: 'List the threads of a doc, one line each (status: open, addressed, answered, declined, needs_input, planned, resolved, outdated, active (default) or all).',
     schema: z.object({ doc: docArg, status: z.string().optional(), workspace: workspaceArg }),
     command: 'threads',
     toInput: async (a) => ({ doc: a.doc, status: a.status }),
@@ -238,7 +254,7 @@ export const TOOLS = [
   {
     name: 'suiko_diff',
     title: 'Diff two versions',
-    description: 'What changed between two versions (default: last reviewed..head). format "stat" (default) or "unified".',
+    description: 'What changed between two versions (default: last reviewed..head; from "head" to "live": your unrecorded changes, with the lines to name in a reply\'s at). format "stat" (default) or "unified".',
     schema: z.object({
       doc: docArg,
       from: versionArg.optional(),
@@ -299,7 +315,7 @@ export const TOOLS = [
   },
   {
     name: 'suiko_final',
-    title: 'Finalize an approved spec',
+    title: 'Finalize an approved document',
     description: 'After an APPROVED packet: check the working copy equals the final version and (decisions: true) write <name>.decisions.md.',
     schema: z.object({ doc: docArg, decisions: z.boolean().optional(), out_dir: z.string().optional(), workspace: workspaceArg }),
     command: 'final',

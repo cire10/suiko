@@ -23,7 +23,7 @@ export const spec = {
   options: { quote: { type: 'string' }, lines: { type: 'string' }, file: { type: 'string' }, message: { type: 'string', short: 'm' } },
   details: [
     'Code reviews: --file <path> --lines A-B (lines of the working file now), --file alone (the whole file), or',
-    '  neither (the whole review). --quote is for specs.',
+    '  neither (the whole review). --quote is for docs.',
   ],
 };
 

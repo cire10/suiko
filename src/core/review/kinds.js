@@ -38,8 +38,9 @@
 //     core/review/ops/docs.js        status: the snapshot fields (kind, origin, plan file); code has its own branch
 //     core/review/ops/final.js       decisions file of a snapshot in the cwd (a code doc's goes to its doc dir first)
 //     core/review/packet-data.js     snapshot NEXT, plan file and lines (the code branch comes first)
-//     core/review/packet.js          packet / status objects of kind 'snapshot', incl. web-page lines and protocol
-//                                    (code packets have their own branch)
+//     core/review/packet.js          packet / status objects of kind 'snapshot', incl. web-page lines and protocol,
+//                                    and no EDITS / APPLY lines for a plan or a public web page (code packets have
+//                                    their own branch)
 //     cli/hooks.js                   `hook prompt` skips plan docs
 //     ui/model.js                    kindCaps: snapshot docs have no "Apply now" (ThreadCard)
 //     daemon/api.js                  a web-page snapshot's source URL in the doc summary
@@ -251,7 +252,7 @@ export const SNAPSHOT_SITES = Object.freeze({
   'core/review/ops/docs.js': 1,
   'core/review/ops/final.js': 1,
   'core/review/packet-data.js': 1,
-  'core/review/packet.js': 8,
+  'core/review/packet.js': 9,
   'cli/hooks.js': 1,
   'daemon/api.js': 1,
   'daemon/content.js': 1,

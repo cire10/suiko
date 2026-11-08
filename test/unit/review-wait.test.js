@@ -73,7 +73,7 @@ describe('wait', () => {
     // delivered, no replies: refused, both named; nothing is registered
     let r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
     assert.deepEqual([r.status, r.docId, r.threads], ['unanswered', DOC, [
-      { id: 't1', type: 'comment', status: 'open', replied: false }, { id: 't2', type: 'question', status: 'open', replied: false }]]);
+      { id: 't1', type: 'comment', status: 'open', replied: false, batch: false }, { id: 't2', type: 'question', status: 'open', replied: false, batch: false }]]);
     assert.deepEqual(await ctx.store.listWaiters(DOC, { liveOnly: false }), [], 'no waiter registered');
     // without requireAnswers (the plan gate, --allow-unanswered) the wait blocks as before
     assert.equal((await ops.waitForFeedback(ctx, q)).status, 'timeout');
@@ -94,7 +94,7 @@ describe('wait', () => {
     await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: '' });
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'delivered');
     r = await ops.waitForFeedback(ctx, { ...q, requireAnswers: true });
-    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined', replied: false }]);
+    assert.deepEqual(r.threads, [{ id: 't1', type: 'comment', status: 'declined', replied: false, batch: false }]);
     // resolved by the reviewer: nothing left to answer
     await ops.resolveThread(ctx, DOC, 't1', {});
     assert.equal((await ops.waitForFeedback(ctx, { ...q, requireAnswers: true })).status, 'timeout');
@@ -293,7 +293,7 @@ describe('feedback and ack', () => {
     await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Prototype the issuer.'), body: 'Which region?' });
     const p = await ops.feedback(ctx, DOC, { peek: true, includeDrafts: true });
     const text = ops.formatPacket(p);
-    assert.match(text, /0 submitted reviews pending; 1 DRAFT comment not yet submitted \(ask the reviewer to click Submit review\)/);
+    assert.match(text, /0 submitted reviews pending; 1 DRAFT comment not yet submitted \(ask the reviewer to click Send\)/);
     assert.match(text, /Which region\?/);
   });
 });

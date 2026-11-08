@@ -302,6 +302,35 @@ describe('selection capture', () => {
     }
   });
 
+  test('dismissToolbar hides the toolbar and keeps the selection; a new selection shows it again', async () => {
+    const d = await openDoc(browser, harness, 'prose');
+    try {
+      const from = await mark(d.page);
+      await selectText(d.frame, 4, 'rotated on every use');
+      await waitMsg(d.page, 'selection', from, (m) => !!m.capture);
+      assert.ok((await inspect(d.frame)).toolbar, 'mini-toolbar is shown');
+
+      const from2 = await mark(d.page);
+      await send(d.page, 'dismissToolbar');
+      await settle(d.frame, 200);
+      assert.equal((await inspect(d.frame)).toolbar, null, 'the toolbar is hidden (a composer was opened for this text)');
+      assert.equal(await d.frame.evaluate(() => String(getSelection())), 'rotated on every use', 'the selection stays');
+      assert.deepEqual(await msgsOf(d.page, 'selection', from2), [], 'the capture is unchanged: no selection message');
+
+      // the same selection re-settling (a keyup) keeps it hidden; another selection shows it again
+      await d.page.keyboard.press('Shift');
+      await settle(d.frame, 250);
+      assert.equal((await inspect(d.frame)).toolbar, null);
+      const from3 = await mark(d.page);
+      await selectText(d.frame, 6, 'grace window');
+      await waitMsg(d.page, 'selection', from3, (m) => m.capture?.exact === 'grace window');
+      await settle(d.frame, 100);
+      assert.ok((await inspect(d.frame)).toolbar, 'a new selection shows the toolbar again');
+    } finally {
+      await d.close();
+    }
+  });
+
   test('clearSelection removes the selection and posts a null capture', async () => {
     const d = await openDoc(browser, harness, 'prose');
     try {
@@ -574,7 +603,9 @@ describe('targets', () => {
         for (const [name, h] of /** @type {any} */ (CSS).highlights) out[name] = [...h].map((/** @type {Range} */ r) => r.toString());
         return out;
       });
-      assert.deepEqual(hl['sr-open'].sort(), ['Refresh tokens are rotated on every use and expire', 'Tokens are rotated on every use', 'rotated on every use', 'secret rotation interval'].sort());
+      // tinted by whose turn: with the agent (open) apart from answered / changed, for the reviewer to check (addressed)
+      assert.deepEqual(hl['sr-open'].sort(), ['Refresh tokens are rotated on every use and expire', 'rotated on every use', 'secret rotation interval'].sort());
+      assert.deepEqual(hl['sr-check'], ['Tokens are rotated on every use']);
       assert.deepEqual(hl['sr-resolved'], [], 'a resolved thread is not drawn while it is not active');
       assert.deepEqual(hl['sr-outdated'], ['Phase two ships']);
       assert.deepEqual(hl['sr-lock'], ['Phase one ships to internal users.']);
@@ -593,10 +624,13 @@ describe('targets', () => {
       // Pins never overlap.
       const tops = ins.layers.pins.map((/** @type {any} */ p) => p.rect.y).sort((/** @type {number} */ a, /** @type {number} */ b) => a - b);
       for (let i = 1; i < tops.length; i++) assert.ok(tops[i] - tops[i - 1] >= 21.5);
-      // The adopted stylesheet only holds ::highlight rules.
+      // The adopted stylesheets: one only holds ::highlight rules, the other the room under the UI's tool dock.
       const sheets = await d.frame.evaluate(() => document.adoptedStyleSheets.map((s) => [...s.cssRules].map((r) => r.cssText)));
-      assert.equal(sheets.length, 1);
-      assert.ok(sheets[0].every((t) => t.startsWith('::highlight(sr-')));
+      assert.equal(sheets.length, 2);
+      const hlSheet = sheets.find((rules) => rules[0].startsWith('::highlight(')) || [];
+      assert.ok(hlSheet.length && hlSheet.every((t) => t.startsWith('::highlight(sr-')));
+      assert.deepEqual(sheets.find((rules) => rules !== hlSheet)?.map((t) => t.replace(/\s+/g, ' ')),
+        ['body::after { content: ""; display: block; clear: both; height: 72px; pointer-events: none; }']);
     } finally {
       await d.close();
     }
@@ -875,8 +909,8 @@ describe('changes overlay', () => {
       assert.equal(byKey['tab:h3'].text, '⊖ 3 lines removed');
       assert.equal(byKey['tab:h1'].text, '⊖ was');
       assert.equal(byKey['badge:h1:t:t1'].text, 't1');
-      assert.equal(byKey['badge:h3:other'].text, 'other');
-      assert.equal(byKey['badge:h3:other'].title, 'Merged into rollout');
+      assert.equal(byKey['badge:h3:other'].text, 'note');
+      assert.equal(byKey['badge:h3:other'].title, 'Also changed: Merged into rollout');
       // the removed tab sits just above the insertBefore element
       const h2 = await rectOf(d.frame, '[data-srid="8"]');
       assert.ok(byKey['tab:h3'].rect.y < h2.y && byKey['tab:h3'].rect.y > h2.y - 30);
@@ -1106,13 +1140,14 @@ describe('security and fidelity', () => {
     }
   });
 
-  test('keys are forwarded only from non-editable focus and when not defaultPrevented', async () => {
+  test('keys are forwarded only from non-editable focus (a page without key handlers of its own)', async () => {
     const d = await openDoc(browser, harness, 'prose');
     try {
+      // the guest's own key listeners never count as the page's (keys.test.mjs covers pages with key handlers)
+      assert.equal((await inspect(d.frame)).pageKeys, false);
       await d.page.mouse.click(700, 690); // focus the doc body
       const from = await mark(d.page);
       await d.page.keyboard.press('j');
-      await d.page.keyboard.press('z'); // the author's handler prevents 'z'
       await d.page.keyboard.press('Shift+?');
       const input = await rectOf(d.frame, '#name');
       await d.page.mouse.click(input.cx, input.cy);
@@ -1173,7 +1208,8 @@ describe('security and fidelity', () => {
         ctx.drawImage(img, 0, 0);
         return [...ctx.getImageData(1, 1, 1, 1).data.slice(0, 3)];
       }, shot.toString('base64'));
-      assert.ok(rgb[0] > 150 && rgb[2] < 100, `pin colour expected, got ${rgb}`);
+      // an open thread's pin: the UI's indigo (with the agent), not the white dialog
+      assert.ok(rgb[2] > 180 && rgb[0] < 120 && rgb[1] < 120, `pin colour expected, got ${rgb}`);
     } finally {
       await d.close();
     }

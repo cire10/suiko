@@ -3,8 +3,14 @@
 // - initialize({ startOnLoad: false, securityLevel: 'strict', theme }) with theme from prefers-color-scheme;
 // - renders every pre.mermaid / div.mermaid one by one; a diagram that fails to parse shows its error and source
 //   in place instead of mermaid's error graphic;
-// - marks diagrams with data-sr-kind="mermaid" (their source text is excluded from the rendered-text stream);
-// - re-renders on colour-scheme changes and on window 'sr-theme' CustomEvents ({ detail: 'light'|'dark'|'system' }).
+// - never touches a diagram it did not render itself: one that already holds an <svg> or carries data-processed
+//   when first seen (the document's own mermaid rendered it, or is rendering it right now), and one whose source is
+//   empty (a mermaid that is rendering clears the element first) are left exactly as they are, and are looked at
+//   again only on a later pass (still unclaimed, with a source by then);
+// - marks the diagrams it renders with data-sr-kind="mermaid" (their source text is excluded from the rendered-text
+//   stream);
+// - re-renders its own diagrams on colour-scheme changes and on window 'sr-theme' CustomEvents
+//   ({ detail: 'light'|'dark'|'system' }).
 (function () {
   'use strict';
   var mermaid = window.mermaid;
@@ -13,6 +19,7 @@
 
   var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   var forced = null; // 'light' | 'dark' | null (follow the system)
+  // element -> its diagram source (a diagram this script renders), or null (one it must never touch)
   var sources = new WeakMap();
   var running = Promise.resolve();
 
@@ -27,9 +34,20 @@
     return Array.prototype.slice.call(document.querySelectorAll('pre.mermaid, div.mermaid'));
   }
 
+  /**
+   * The source of a diagram this script renders, or null for one it must leave alone: already rendered (an <svg>
+   * inside, or data-processed) when first seen, or empty for now (not claimed: a later pass looks again).
+   */
   function sourceOf(el) {
-    if (!sources.has(el)) sources.set(el, el.textContent || '');
-    return sources.get(el);
+    if (sources.has(el)) return sources.get(el);
+    if (el.hasAttribute('data-processed') || el.querySelector('svg')) {
+      sources.set(el, null);
+      return null;
+    }
+    var src = el.textContent || '';
+    if (!src.trim()) return null;
+    sources.set(el, src);
+    return src;
   }
 
   function showError(el, src, err) {
@@ -60,6 +78,7 @@
     var chain = Promise.resolve();
     list.forEach(function (el) {
       var src = sourceOf(el);
+      if (src == null) return;
       if (!el.hasAttribute('data-sr-kind')) el.setAttribute('data-sr-kind', 'mermaid');
       chain = chain.then(function () {
         el.removeAttribute('data-processed');

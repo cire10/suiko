@@ -1,32 +1,47 @@
 // @ts-check
-// Top bar (design 11.1): doc title, version picker (in Changes / Source preceded by the older version's picker, so
-// the comparison reads "[v1 · last review] → [v3 (latest)]"), mode tabs (a dropdown below 900 px; each tab's tooltip
-// says what it shows), the command palette button (⌘K), comment / pick / snip / screen-snip / hide / theme tools,
-// Settings (gear) and the keyboard shortcuts; then presence chip, round status, the review progress chip, the changes
-// controls (the "Show changes" switch and Accept all revisions, in Read / Review / Changes), Changes' Inline / Side by
-// side switch (wide layouts), Drafts count and Submit review. The
-// modes and tools follow the doc kind (model.js modesFor / kindCaps: a code review has no Source, pick, snip, hide). The
-// capture tools carry a small key hint (e, b, ⇧B) so the shortcuts are discoverable; the screen-snip button
-// disappears once the daemon said it cannot capture the screen (not macOS). The menu button (outline drawer / rail)
-// shows whenever the outline is not simply beside the doc (narrow or medium width, or the Outline rail setting).
-// The second row keeps a fixed, keyed structure (optional items are empty slots, not inserted / removed nodes) and
-// Submit review is its own component: DocState refreshes arriving over SSE (drafts count, presence, a new round)
-// must never re-create or move the button between a mousedown and its mouseup, or the browser drops the click.
+// Top bar (design 11.1, the "calm review" header): ONE row, 48 px, that never wraps. Left to right:
+//   - ≡ (the outline), when the outline is not simply beside the doc: narrow, below 1600 px, or the Outline rail
+//     setting (railToggleShown);
+//   - the Suiko mark (back to the doc list) and the doc title (it truncates first);
+//   - the version (#sr-version), a compact pill: "v3 · latest", "v2", "v3 · final", "Working copy (live)". In Changes /
+//     Source the older end of the comparison (#sr-base) and an arrow come first: "[v1 · last review] → [v3 · latest]".
+//     Neither shows while Changes is side by side: the two frames' headers hold them then (ComparePane);
+//   - the mode switch: Read · Review · Changes (Files · Changes in a code review); the Changes tab counts the changes
+//     that are new since the last review. Source and History are in the More menu (keys 3 / 4 and the palette work as
+//     before) and show as a fourth tab only while one of them is open, so the switch always says where you are.
+//     Below 900 px a select lists every mode (#sr-mode). Each tab's tooltip says what it shows;
+//   - right-aligned: the turn pill (TurnPill: whose turn it is), the problems chip (Problems, only when something is
+//     wrong), the command palette (⌘K, an icon), the thread panel toggle with the number of open threads, the More
+//     menu (⋯: Source, History, Hide marks, Theme, Keyboard shortcuts, Settings, Document info, each with its key) and
+//     the one primary button: "Send N" while there are drafts, else "Approve" (accent when nothing is left for either
+//     side, approveReady), both opening the send dialog.
+// The comment tools live in the tool dock over the doc (ToolDock); Accept all and Inline / Side by side in the Changes
+// panel (ChangesView). The modes, tools and menu items follow the doc kind (model.js modesFor / kindCaps: a code review
+// has no Source, no doc frame, no marks to hide). Instead of wrapping, items give way by priority (layout.css): the
+// title shrinks first, the turn pill shows a short label at 900-1199 px and only its dot below 900 px.
+// The primary button is its own component that reads the store itself: DocState refreshes arriving over SSE
+// (presence, a delivery, a new version) re-render the top bar but must never re-create or move that button between a
+// mousedown and its mouseup, or the browser drops the click. It is the row's last item and the row is right-aligned
+// from the spacer on, so labels changing width to its left (the turn pill, a count) never move it.
 
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import {
-  acceptRevisions, cycleTheme, navigate, openComposer, openDialog, openSubmit, railShown, railToggleShown, setBase,
-  setCompareLayout, setMode, showChanges, snipScreen, switchVersion, toggleHidden, toggleNav, togglePick, toggleSidebar,
-  toggleSnip,
+  cycleTheme, navigate, openDialog, openSubmit, railShown, railToggleShown, setBase, setMode, splitShown, switchVersion,
+  toggleHidden, toggleNav, toggleSidebar,
 } from '../actions.js';
 import { KEYS, shortcut } from '../keys.js';
 import {
-  acceptableThreads, agentName, baseTag, defaultBase, draftCount, filterCounts, kindCaps, modesFor, presenceInfo,
-  reviewProgress, revisionsToAccept, roundSummary, showsDoc, versionNumbers,
+  approveReady, baseTag, docKindOf, draftCount, kindCaps, modesFor, newChangesCount, openThreadCount, versionNumbers,
 } from '../model.js';
 import { useStore } from '../state.js';
-import { Chip, Icon } from './common.js';
+import { Icon, Logo } from './common.js';
+import { MenuItem, MenuSeparator, Popover } from './Menu.js';
+import { Problems } from './Problems.js';
+import { TurnPill } from './TurnPill.js';
+
+/** The modes that are tabs; the others (Source, History) are reached from the More menu. */
+const TAB_MODES = new Set(['read', 'review', 'changes']);
 
 export function TopBar() {
   const s = useStore((st) => ({
@@ -34,10 +49,6 @@ export function TopBar() {
     version: st.version,
     mode: st.mode,
     base: st.base,
-    baseKind: st.baseKind,
-    tool: st.tool,
-    hidden: st.hidden,
-    theme: st.theme,
     narrow: st.narrow,
     medium: st.medium,
     rail: railShown(st),
@@ -45,31 +56,25 @@ export function TopBar() {
     drawer: st.drawer,
     sidebar: st.sidebar,
     nav: st.nav,
-    selection: st.guest.selection,
-    screenRunning: st.screenSnip.running,
-    screenSupported: st.screenSnip.supported,
-    compareLayout: st.compareLayout,
+    split: splitShown(st),
     changes: st.changes,
-    busyThreads: st.busyThreads,
   }));
   const ds = s.ds;
   if (!ds) return null;
   const head = Number(ds.doc.head);
-  // the doc kind's modes and tools (model.js modesFor / kindCaps): a code review has no Source mode, no doc frame
-  // (no text selection, pick, snip or hide) and no live working-copy preview
+  const finalV = Number(ds.doc.final?.version) || null;
+  // the doc kind's modes (model.js modesFor): a code review has no Read or Source mode
   const MODES = modesFor(ds);
   const caps = kindCaps(ds);
   const versions = versionNumbers(ds);
-  const presence = presenceInfo(ds);
-  const round = roundSummary(ds);
-  const progress = reviewProgress(ds);
-  const drafts = draftCount(ds);
-  const open = filterCounts(ds, s.version).open;
-  const canPick = s.version !== 'live' && showsDoc(s.mode);
+  const open = openThreadCount(ds);
   const showBase = s.mode === 'changes' || s.mode === 'source';
   const numericV = s.version === 'live' ? head + 1 : Number(s.version);
   // the older end of a comparison: any version before the shown one (every recorded version for the working copy)
   const olders = versions.filter((v) => v < numericV || (s.version === 'live' && v <= head)).reverse();
+  const railTitle = docKindOf(ds) === 'code' ? 'Files' : 'Outline';
+  const fresh = caps.frame ? newChangesCount(ds, s.version, s.changes) : 0;
+  const tabs = MODES.filter((m) => TAB_MODES.has(m.key) || m.key === s.mode);
 
   /** @param {Event} e */
   const onVersion = (e) => {
@@ -77,176 +82,147 @@ export function TopBar() {
     const v = el.value === 'live' ? 'live' : Number(el.value);
     if (!switchVersion(v)) el.value = String(s.version);
   };
+  // below 1200 px the pills keep only the version numbers (their tooltips, and the Changes panel, say the rest)
+  const compact = s.medium || s.narrow;
+  /** @param {number} v */
+  const versionLabel = (v) => (compact ? `v${v}` : `v${v}${v === head ? ' · latest' : ''}${finalV === v ? ' · final' : ''}`);
   // the version shown; in Changes / Source the newer end of the comparison range
   const versionSelect = html`<label class="sr-only" for="sr-version">${showBase ? 'Compare to' : 'Version'}</label>
-    <select id="sr-version" class="select" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}
-      title=${showBase ? 'The newer version: shown with what changed' : 'The version shown'}>
-      ${versions.slice().reverse().map((v) => html`<option value=${String(v)}>v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' FINAL' : ''}</option>`)}
-      ${caps.liveBanners && ((ds.working?.dirty && !ds.working?.missing) || s.version === 'live') ? html`<option value="live">Working copy (live)</option>` : null}
+    <select id="sr-version" class="select version-pill" data-testid=${TESTID.versionPicker} value=${String(s.version)} onChange=${onVersion}
+      title=${showBase ? 'The newer version: shown with what changed ([ and ] step through the versions)'
+        : 'The version shown ([ and ] step through the versions)'}>
+      ${versions.slice().reverse().map((v) => html`<option value=${String(v)}>${versionLabel(v)}</option>`)}
+      ${caps.liveBanners && ((ds.working?.dirty && !ds.working?.missing) || s.version === 'live')
+        ? html`<option value="live">${compact ? 'Working copy' : 'Working copy (live)'}</option>` : null}
     </select>`;
 
   return html`<header class="topbar">
-    <div class="tb-row">
-      ${s.railToggle ? html`<button type="button" class="icon-btn nav-toggle" aria-label="Outline and history" aria-controls="sr-nav"
-        aria-expanded=${s.narrow ? s.nav : s.rail} onClick=${toggleNav}><${Icon} name="menu" /></button>` : null}
-      <a class="brand" href="/" title="All documents" onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); navigate('/'); }}>
-        <${Icon} name="comment" size=${16} /><span class="brand-text">Suiko</span></a>
-      <h1 class="doc-name" title=${ds.doc.path}>${ds.doc.title || ds.doc.id}</h1>
-      ${showBase ? html`<span class="compare-range" role="group" aria-label="Compare versions">
-        <label class="sr-only" for="sr-base">Compare from</label>
-        <select id="sr-base" class="select" data-testid=${TESTID.compareFrom} value=${s.base == null ? '' : String(s.base)}
-          disabled=${!olders.length} title="The older version: what changed since it is shown (d: your last review / the previous version)"
-          onChange=${(/** @type {any} */ e) => setBase(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
-          ${s.base == null ? html`<option value="">${olders.length ? 'none' : 'no earlier version'}</option>` : null}
-          ${olders.map((v) => {
-            const tag = baseTag(ds, v);
-            return html`<option value=${String(v)}>
-              v${v}${tag === 'accepted' ? ' · accepted' : tag === 'review' ? ' · last review' : v === numericV - 1 ? ' · previous' : ''}</option>`;
-          })}
-        </select>
-        <span class="compare-arrow" aria-hidden="true">→</span>
-        ${versionSelect}
-      </span>` : versionSelect}
-      <nav class="mode-tabs" role="tablist" aria-label="Mode">
-        ${MODES.map((m) => html`<button type="button" role="tab" data-testid=${TESTID.modeTab} data-mode=${m.key}
-          aria-selected=${s.mode === m.key} class=${s.mode === m.key ? 'active' : ''} title=${`${m.label}: ${m.description} (${m.n})`}
-          onClick=${() => setMode(m.key)}>${m.label}</button>`)}
-      </nav>
-      <label class="sr-only" for="sr-mode">Mode</label>
-      <select id="sr-mode" class="select mode-select" value=${s.mode}
-        onChange=${(/** @type {any} */ e) => setMode(e.currentTarget.value)}>
-        ${MODES.map((m) => html`<option value=${m.key}>${m.label}</option>`)}
+    ${s.railToggle ? html`<button type="button" class="icon-btn nav-toggle" aria-label=${railTitle} aria-controls="sr-nav"
+      aria-expanded=${s.narrow ? s.nav : s.rail} title=${`${railTitle}: show or hide it`} onClick=${toggleNav}><${Icon} name="menu" /></button>` : null}
+    <a class="brand" href="/" aria-label="Suiko" title="All documents" onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); navigate('/'); }}>
+      <${Logo} size=${24} /></a>
+    <h1 class="doc-name" title=${ds.doc.path}>${ds.doc.title || ds.doc.id}</h1>
+    ${s.split ? null : showBase ? html`<span class="compare-range" role="group" aria-label="Compare versions">
+      <label class="sr-only" for="sr-base">Compare from</label>
+      <select id="sr-base" class="select version-pill base-pill" data-testid=${TESTID.compareFrom} value=${s.base == null ? '' : String(s.base)}
+        disabled=${!olders.length} title="The older version: what changed since it is shown (d: your last review / the previous version)"
+        onChange=${(/** @type {any} */ e) => setBase(e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}>
+        ${s.base == null ? html`<option value="">${olders.length ? 'none' : 'no earlier version'}</option>` : null}
+        ${olders.map((v) => {
+          const tag = baseTag(ds, v);
+          return html`<option value=${String(v)}>
+            v${v}${compact ? '' : tag === 'accepted' ? ' · accepted' : tag === 'review' ? ' · last review' : v === numericV - 1 ? ' · previous' : ''}</option>`;
+        })}
       </select>
-      <span class="spacer"></span>
-      <${PaletteButton} />
-      <span class="tools">
-        ${caps.frame ? html`<button type="button" class="icon-btn" data-selection-comment disabled=${!s.selection || !canPick}
-          aria-label="Comment on the selection" title="Comment on the selected text (c)"
-          onClick=${() => s.selection && openComposer({ capture: s.selection })}><${Icon} name="comment" /></button>` : null}
-        ${caps.pick ? html`<button type="button" class=${`icon-btn has-kbd ${s.tool === 'pick' ? 'active' : ''}`} data-testid=${TESTID.pickTool}
-          aria-pressed=${s.tool === 'pick'} disabled=${!canPick} aria-keyshortcuts="e"
-          aria-label="Pick an element (image, diagram, table, code)" title=${`Pick an element: image, diagram, table, code (${shortcut(KEYS.pick)})`}
-          onClick=${togglePick}>
-          <${Icon} name="pick" /><kbd class="kbd-hint" aria-hidden="true">e</kbd>
-        </button>` : null}
-        ${caps.snip ? html`<button type="button" class=${`icon-btn has-kbd ${s.tool === 'snip' ? 'active' : ''}`} data-testid=${TESTID.snipTool}
-          aria-pressed=${s.tool === 'snip'} disabled=${s.version === 'live'} aria-keyshortcuts="b"
-          aria-label="Snip an area of the document"
-          title=${`Snip an area of the document: drag a box over text, images or diagrams, then comment (${shortcut(KEYS.snip)})`}
-          onClick=${() => toggleSnip()}>
-          <${Icon} name="scissors" /><kbd class="kbd-hint" aria-hidden="true">b</kbd>
-        </button>` : null}
-        ${s.screenSupported ? html`<button type="button" class=${`icon-btn has-kbd ${s.screenRunning ? 'active' : ''}`} data-testid=${TESTID.snipScreen}
-          aria-busy=${s.screenRunning ? 'true' : undefined} disabled=${s.screenRunning || s.version === 'live'} aria-keyshortcuts="Shift+B"
-          aria-label="Snip anywhere on your screen"
-          title=${`Snip anywhere on your screen with the macOS picker, then comment on the screenshot (${shortcut(KEYS.snipScreen)})`}
-          onClick=${snipScreen}>
-          <${Icon} name="screen" /><kbd class="kbd-hint" aria-hidden="true">⇧B</kbd>
-        </button>` : null}
-        ${caps.hide ? html`<button type="button" class=${`icon-btn ${s.hidden ? 'active' : ''}`} aria-pressed=${s.hidden}
-          disabled=${s.mode === 'read'} aria-label="Hide annotations"
-          title=${s.mode === 'read' ? 'Read mode shows no annotations' : 'Hide annotations (h)'} onClick=${toggleHidden}>
-          <${Icon} name=${s.hidden || s.mode === 'read' ? 'eyeOff' : 'eye'} />
-        </button>` : null}
-        <button type="button" class="icon-btn" data-theme-toggle aria-label=${`Theme: ${s.theme}. Change theme`}
-          title=${`Theme: ${s.theme} (t)`} onClick=${cycleTheme}>
-          <${Icon} name=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'system'} />
-        </button>
-        <${SettingsButton} />
-        <${HelpButton} />
-      </span>
-    </div>
-    <div class="tb-row tb-sub">
-      <span key="presence" data-testid=${TESTID.presence} class=${`presence tone-${presence.tone}`} data-presence=${presence.kind}
-        title=${presence.kind === 'none' ? `Tell ${agentName(ds)} to run suiko wait` : presence.label}>
-        <span class="dot" aria-hidden="true"></span>${presence.label}
-      </span>
-      <span key="round" class="round-status" hidden=${!round}>${round ? round.text : ''}</span>
-      <span key="progress" class="progress-slot">${progress && progress.stage !== 'ready'
-        ? html`<${Chip} tone=${progress.tone} class="review-progress">${progress.label}<//>` : null}</span>
-      <span key="spacer" class="spacer"></span>
-      <span key="changes" class="changes-slot">${caps.frame && showsDoc(s.mode)
-        ? html`<${ChangesControls} ds=${ds} mode=${s.mode} version=${s.version} changes=${s.changes} busy=${s.busyThreads} />` : null}</span>
-      <span key="layout" class="layout-slot">${s.mode === 'changes' && caps.frame && !s.narrow ? html`<${CompareLayout} layout=${s.compareLayout} />` : null}</span>
-      <button key="threads" type="button" class="btn btn-sm threads-toggle" aria-controls="sr-side" aria-label=${`Threads (${open})`}
-        aria-expanded=${s.narrow ? s.drawer : s.sidebar} onClick=${toggleSidebar} title="Toggle the thread panel (\\)">
-        <${Icon} name="threads" size=${14} /> <span class="lbl-long">Threads (${open})</span><span class="lbl-short">${open}</span>
-      </button>
-      <span key="drafts" class="drafts-count" title="Unsubmitted comments">Drafts <strong>${drafts}</strong></span>
-      <${SubmitButton} key="submit" />
-    </div>
+      <span class="compare-arrow" aria-hidden="true"><${Icon} name="arrowRight" size=${14} /></span>
+      ${versionSelect}
+    </span>` : html`<span class="version-slot">${versionSelect}</span>`}
+    <nav class="mode-tabs" role="tablist" aria-label="Mode">
+      ${tabs.map((m) => html`<button type="button" role="tab" data-testid=${TESTID.modeTab} data-mode=${m.key} key=${m.key}
+        aria-selected=${s.mode === m.key} class=${`${s.mode === m.key ? 'active' : ''} ${TAB_MODES.has(m.key) ? '' : 'is-extra'}`.trim()}
+        title=${`${m.label}: ${m.description} (${m.n})`} onClick=${() => setMode(m.key)}>${m.label}${m.key === 'changes' && fresh
+          ? html`<span class="badge tone-accent" aria-hidden="true">${fresh}</span><span class="sr-only"> (${fresh} new)</span>` : null}</button>`)}
+    </nav>
+    <label class="sr-only" for="sr-mode">Mode</label>
+    <select id="sr-mode" class="select mode-select" value=${s.mode}
+      onChange=${(/** @type {any} */ e) => setMode(e.currentTarget.value)}>
+      ${MODES.map((m) => html`<option value=${m.key}>${m.label}</option>`)}
+    </select>
+    <span class="spacer"></span>
+    <${TurnPill} key="turn" />
+    <${Problems} key="problems" />
+    <${PaletteButton} key="palette" />
+    <button key="threads" type="button" class="icon-btn threads-toggle" aria-controls="sr-side" aria-label=${`Threads (${open})`}
+      aria-expanded=${s.narrow ? s.drawer : s.sidebar} onClick=${toggleSidebar} title="Threads: show or hide the panel (\\)">
+      <${Icon} name="threads" />${open ? html`<span class="tb-count" aria-hidden="true">${open}</span>` : null}
+    </button>
+    <${MoreMenu} key="more" />
+    <${SubmitButton} key="submit" />
   </header>`;
 }
 
 /**
- * The changes controls, in Read / Review / Changes: the "Show changes" switch (the change marks on or off: Changes, or
- * back to Read / Review), with the number of changes when the latest version has revisions you have not reviewed or
- * accepted yet, and then "Accept all revisions" on that version. Nothing for a doc with only one version.
- * @param {{ ds: any, mode: string, version: number|'live'|null, changes: any, busy: string[] }} props
+ * ⋯ More: what used to be header buttons and tabs, each with its key (single-letter keys only while they are on).
+ * Source and History switch the mode, Hide marks the annotations (Read mode has none), Theme cycles System / Light /
+ * Dark and stays open so the next click goes on cycling, then Keyboard shortcuts, Settings and Document info.
  */
-function ChangesControls({ ds, mode, version, changes, busy }) {
-  const on = mode === 'changes';
-  if (!on && defaultBase(ds, version, 'last') == null) return null;
-  const todo = revisionsToAccept(ds);
-  const onNew = !!todo && version === todo.version;
-  const n = onNew ? (changes?.hunks || []).length : 0;
-  const threads = onNew ? acceptableThreads(ds).length : 0;
-  const since = todo?.since != null ? `since v${todo.since}` : '';
-  return html`<label class="switch changes-switch" data-testid=${TESTID.showChanges}
-      title=${on ? 'Showing what changed, marked in the document. Turn off to see the version without change marks'
-        : 'Show what changed since your last review, marked in the document (Changes)'}>
-      <input type="checkbox" role="switch" checked=${on} aria-checked=${on ? 'true' : 'false'}
-        aria-label=${`Show changes${n ? ` (${n} new)` : ''}`} onChange=${(/** @type {any} */ e) => showChanges(!!e.currentTarget.checked)} />
-      <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-      <span class="changes-switch-text" aria-hidden="true"><span class="lbl-long">Show changes</span><span class="lbl-short">Changes</span></span>
-      ${n ? html`<span class="badge tone-accent" aria-hidden="true">${n}</span>` : null}
-    </label>
-    ${onNew && todo ? html`<button type="button" class="btn btn-sm btn-ok accept-revisions" data-testid=${TESTID.acceptRevisions}
-      aria-label="Accept all revisions" disabled=${busy.length > 0} onClick=${() => acceptRevisions()}
-      title=${`Accept the revisions of v${todo.version}${since ? ` (${since})` : ''}: they stop showing as new${threads
-        ? `, and the ${threads} thread${threads === 1 ? '' : 's'} ${agentName(ds)} addressed or answered ${threads === 1 ? 'is' : 'are'} resolved` : ''}. You can undo it`}>
-      <span class="lbl-long">Accept all revisions</span><span class="lbl-short">Accept all</span></button>` : null}`;
+function MoreMenu() {
+  const s = useStore((st) => ({ ds: st.ds, mode: st.mode, hidden: st.hidden, theme: st.theme, singleKeys: st.prefs.singleKeys }));
+  if (!s.ds) return null;
+  const caps = kindCaps(s.ds);
+  const modes = modesFor(s.ds);
+  const keyOf = (/** @type {string} */ k) => (s.singleKeys ? k : undefined);
+  const theme = `${s.theme[0].toUpperCase()}${s.theme.slice(1)}`;
+  const reading = s.mode === 'read';
+  return html`<${Popover} label="More" kind="menu" align="end" triggerClass="icon-btn more-btn"
+    triggerProps=${{ 'data-testid': TESTID.moreMenu, 'aria-label': 'More', title: 'More: Source, History, marks, theme, settings' }}
+    trigger=${html`<${Icon} name="more" />`}>
+    ${modes.filter((m) => !TAB_MODES.has(m.key)).map((m) => html`<${MenuItem} key=${m.key} data-menu-item=${m.key}
+      icon=${m.key === 'source' ? 'source' : 'history'} label=${m.label} keys=${keyOf(String(m.n))} hint=${m.description}
+      class=${s.mode === m.key ? 'is-current' : ''} aria-current=${s.mode === m.key ? 'true' : undefined} onSelect=${() => setMode(m.key)} />`)}
+    <${MenuSeparator} />
+    ${caps.hide ? html`<${MenuItem} data-menu-item="hide" icon=${s.hidden ? 'eye' : 'eyeOff'}
+      label=${s.hidden ? 'Show marks' : 'Hide marks'} aria-label=${s.hidden ? 'Show annotations' : 'Hide annotations'}
+      keys=${keyOf('h')} disabled=${reading}
+      hint=${reading ? 'Read mode shows no marks' : 'Threads, changes and locks drawn over the document'} onSelect=${toggleHidden} />` : null}
+    <${MenuItem} data-menu-item="theme" data-theme-toggle icon=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'system'}
+      label=${`Theme: ${theme}`} aria-label=${`Theme: ${s.theme}. Change theme`} keys=${keyOf('t')} keepOpen
+      hint="System, Light, Dark" onSelect=${cycleTheme} />
+    <${MenuSeparator} />
+    <${MenuItem} data-menu-item="help" data-testid=${TESTID.helpOpen} icon="keyboard" label="Keyboard shortcuts"
+      keys=${s.singleKeys ? '?' : shortcut(KEYS.help)} aria-keyshortcuts="Meta+/ Control+/ ?" onSelect=${() => openDialog('help')} />
+    <${MenuItem} data-menu-item="settings" data-testid=${TESTID.settingsOpen} icon="gear" label="Settings" keys=${shortcut(KEYS.settings)}
+      aria-keyshortcuts="Meta+, Control+," onSelect=${() => openDialog('settings')} />
+    <${MenuItem} data-menu-item="info" icon="info" label="Document info" hint="Path, versions, working copy, page errors"
+      onSelect=${() => openDialog('info')} />
+  <//>`;
 }
 
 /**
- * Changes: Inline (what changed drawn over the newer version) or Side by side (the older version beside it).
- * @param {{ layout: 'inline'|'split' }} props
+ * The command palette button. In the doc's top bar a search icon (⌘K in its tooltip); on the doc list (`wide`) a
+ * search field look-alike with its key.
+ * @param {{ wide?: boolean }} props
  */
-function CompareLayout({ layout }) {
-  return html`<span class="seg compare-layout" role="group" aria-label="Compare layout" data-testid=${TESTID.compareLayout}>
-    <button type="button" data-layout="inline" aria-pressed=${layout !== 'split'} class=${layout !== 'split' ? 'active' : ''}
-      title="What changed, drawn over the newer version" onClick=${() => setCompareLayout('inline')}>Inline</button>
-    <button type="button" data-layout="split" aria-pressed=${layout === 'split'} class=${layout === 'split' ? 'active' : ''}
-      title="The older version beside the newer one, scrolled together: removed text in red, added text in green"
-      onClick=${() => setCompareLayout('split')}>Side by side</button>
-  </span>`;
+export function PaletteButton({ wide = false }) {
+  const title = `Command palette: run anything by name (${shortcut(KEYS.palette)})`;
+  return wide
+    ? html`<button type="button" class="palette-btn" data-testid=${TESTID.commandPaletteOpen} onClick=${() => openDialog('palette')}
+      aria-label="Command palette" aria-keyshortcuts="Meta+K Control+K" title=${title}>
+      <${Icon} name="search" size=${14} /><span class="palette-btn-text">Search or run a command</span>
+      <kbd class="palette-btn-kbd" aria-hidden="true">${shortcut(KEYS.palette, { compact: true })}</kbd>
+    </button>`
+    : html`<button type="button" class="icon-btn palette-icon" data-testid=${TESTID.commandPaletteOpen} onClick=${() => openDialog('palette')}
+      aria-label="Command palette" aria-keyshortcuts="Meta+K Control+K" title=${title}><${Icon} name="search" /></button>`;
 }
 
-/** The command palette button: a search field look-alike with its key (⌘K / Ctrl K). Also on the doc list. */
-export function PaletteButton() {
-  return html`<button type="button" class="palette-btn" data-testid=${TESTID.commandPaletteOpen} onClick=${() => openDialog('palette')}
-    aria-label="Command palette" aria-keyshortcuts="Meta+K Control+K" title=${`Command palette: run anything by name (${shortcut(KEYS.palette)})`}>
-    <${Icon} name="search" size=${14} /><span class="palette-btn-text">Commands</span>
-    <kbd class="palette-btn-kbd" aria-hidden="true">${shortcut(KEYS.palette, { compact: true })}</kbd>
-  </button>`;
-}
-
-/** The gear: Settings (⌘,). Also on the doc list. */
+/** The gear: Settings (⌘,). On the doc list; in a doc it is in the More menu. */
 export function SettingsButton() {
   return html`<button type="button" class="icon-btn" data-testid=${TESTID.settingsOpen} aria-label="Settings"
     aria-keyshortcuts="Meta+, Control+," title=${`Settings (${shortcut(KEYS.settings)})`} onClick=${() => openDialog('settings')}>
     <${Icon} name="gear" /></button>`;
 }
 
-/** Keyboard shortcuts (⌘/ or ?). Also on the doc list. */
+/** Keyboard shortcuts (⌘/ or ?). On the doc list; in a doc it is in the More menu. */
 export function HelpButton() {
   return html`<button type="button" class="icon-btn" data-testid=${TESTID.helpOpen} aria-label="Keyboard shortcuts"
     aria-keyshortcuts="Meta+/ Control+/ ?" title=${`Keyboard shortcuts (${shortcut(KEYS.help)} or ?)`}
     onClick=${() => openDialog('help')}><${Icon} name="help" /></button>`;
 }
 
-/** Submit review: no props, so a TopBar re-render never touches it (see the header). */
+/**
+ * The primary button: "Send N" with N drafts (accent), else "Approve" (accent when approving is the obvious next
+ * step, neutral otherwise). Both open the send dialog. It reads the store itself and keeps one element (see the
+ * header comment); `.drafts-count` holds N.
+ */
 function SubmitButton() {
-  return html`<button type="button" class="btn btn-primary" data-testid=${TESTID.submitReviewOpen} onClick=${openSubmit}
-    aria-keyshortcuts="F" title=${`Submit review: everything in it goes to the agent (${shortcut(KEYS.submit)}, or ${shortcut(KEYS.sendNow)} when no comment is open)`}>Submit review</button>`;
+  // the selector keeps to references (it runs on every store update); what they mean is worked out when they change
+  const s = useStore((st) => ({ ds: st.ds, version: st.version }));
+  const n = draftCount(s.ds);
+  const ready = !n && !!s.ds && approveReady(s.ds, s.version);
+  const keys = `${shortcut(KEYS.submit)}, or ${shortcut(KEYS.sendNow)} when no comment is open`;
+  return html`<button type="button" class=${`btn send-btn ${n || ready ? 'btn-primary' : ''}`} data-testid=${TESTID.submitReviewOpen}
+    onClick=${openSubmit} aria-keyshortcuts="F"
+    title=${n ? `Send: your ${n} comment${n === 1 ? '' : 's'} go${n === 1 ? 'es' : ''} to the agent together (${keys})`
+      : `Approve this version, or send feedback (${keys})`}>
+    ${n ? html`Send <span class="drafts-count"><strong>${n}</strong></span>` : 'Approve'}</button>`;
 }

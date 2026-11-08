@@ -6,7 +6,8 @@
 //   1. Resolve the doc (or every doc with --all; with no argument, the workspace's only doc).
 //   2. engine.waitForFeedback(ctx, { docIds, timeoutMs, allowDirty, requireAnswers, signal, onStart, write,
 //      heartbeatMs }). requireAnswers (unless --allow-unanswered): a thread already handed to this agent that has no
-//      reply yet refuses the wait, so answers reach the reviewer in Suiko instead of staying in the agent's chat.
+//      reply yet refuses the wait, so answers reach the reviewer in Suiko instead of staying in the agent's chat;
+//      when the review that handed it over asked for batched edits, the refusal asks for a `planned` reply.
 //      The engine registers the waiter (`<home>/ws/<wsId>/waiters/<doc|_all>/<pid>.json`, heartbeat every 10 s,
 //      supersedes older waits of the same doc + agent), watches for reviews and, under the doc lock, calls our
 //      write(text): we print the packet and resolve only after stdout flushed; then it records the delivery.
@@ -216,7 +217,7 @@ async function finish(rt, engine, s) {
     const after = s.timeoutMs ? ` after ${formatDuration(s.timeoutMs)}` : '';
     return {
       exit: EXIT.TIMEOUT,
-      text: `suiko: no review yet for ${s.noun}${after}. Run \`suiko wait ${label}\` again (or ask the reviewer to click Submit review).`,
+      text: `suiko: no review yet for ${s.noun}${after}. Run \`suiko wait ${label}\` again (or ask the reviewer to click Send).`,
       json: { status: 'timeout', doc: s.input.all ? null : s.noun },
     };
   }
@@ -264,20 +265,26 @@ async function finish(rt, engine, s) {
   if (status === 'unanswered') {
     const doc = outcome.docId ?? outcome.doc ?? (s.input.all ? label : s.noun);
     const ref = s.input.all ? doc : label;
-    /** @type {Array<{ id: string, type: string, status: string, replied?: boolean }>} */
+    /** @type {Array<{ id: string, type: string, status: string, replied?: boolean, batch?: boolean }>} */
     const threads = Array.isArray(outcome.threads) ? outcome.threads : [];
     // an open thread the agent replied to without a status is not "without a reply": say what is missing
     const state = (/** @type {typeof threads[number]} */ t) =>
       t.replied ? ', open: your reply set no status' : t.status && t.status !== 'open' ? `, ${t.status.replace('_', ' ')}` : '';
     const list = threads.map((t) => `${t.id} (${t.type}${state(t)})`).join(', ');
     const one = threads.length === 1;
+    // batched edits (the review that handed a thread over asked for them): a change agreed to is a `planned` reply
+    const batched = threads.filter((t) => t.batch).map((t) => t.id);
+    const entries = batched.length
+      ? `one entry per thread; batched edits${batched.length < threads.length ? ` for ${batched.join(', ')}` : ''}: no edits yet, status "planned" with exactly what you will change`
+      : 'one entry per thread, with your edits if any';
+    const statuses = batched.length ? ['planned', 'answered, declined, needs_input'] : ['answered', 'declined, needs_input, planned'];
     return {
       exit: EXIT.REFUSED,
       stderr: [
         `suiko: ${doc}: ${one ? 'a thread you received still waits' : `${threads.length} threads you received still wait`} on your answer: ${list || '?'}. ` +
           'The reviewer reads your answers on the threads in Suiko, not in this chat.',
-        `  Reply on ${one ? 'it' : 'each'}: \`suiko revise ${ref} --replies -\` (one entry per thread, with your edits if any), or ` +
-          `\`suiko reply ${ref} <tid> -m <answer> --status answered\` (or declined, needs_input; a reply without --status leaves the thread open). ` +
+        `  Reply on ${one ? 'it' : 'each'}: \`suiko revise ${ref} --replies -\` (${entries}), or ` +
+          `\`suiko reply ${ref} <tid> -m <answer> --status ${statuses[0]}\` (or ${statuses[1]}; a reply without --status leaves the thread open). ` +
           'Then wait again (--allow-unanswered skips this check).',
       ],
       json: { status: 'unanswered', doc, threads },

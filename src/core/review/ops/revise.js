@@ -2,9 +2,18 @@
 // Recording revisions (design 3.8, 8.1, 9.5; BUILD_AMENDMENTS 4.3 / 4.4):
 //   revise(ctx, doc, ReviseInput & { dryRun, force, allowRewrite, breakLocks }) -> ReviseReport
 //     - working copy == head (text and local assets): replies only (or "nothing to record"); pending tagged edits
-//       are stale then (undone / reverted) and are dropped, their `staged` suggestions set back to `pending`;
+//       are stale then (undone / reverted) and are dropped, their `staged` suggestions set back to `pending`.
+//       This is also how a batched round is answered: `planned` replies (what the agent will change) without an
+//       edit, then one APPLY round records the changes. Every reply is built in memory first (ids allocated on
+//       doc.json's counters; a bad reply throws before anything is written), then doc.json is saved, then the
+//       attachment files and the threads: a failure part way can leave a file no thread names, never an id that is
+//       handed out again. An `addressed` reply gets a warning (guards.warnings, code 'not-recorded'): nothing was
+//       recorded, often because the agent changed a file the document loads at runtime (fetch, XHR), which is not
+//       versioned;
 //     - otherwise hunks + attribution + guards; refused => report.refused (nothing written, exit 3 in the CLI);
 //       dryRun => the full report, nothing written; else the version is recorded (see ops/record.js).
+//     - threads.tN.attachments (files the agent made: ../attachments.js) are read and checked first, before anything
+//       is written, and copied into the store only when the replies are posted (never on a dry run or a refusal).
 //   recordReviewerVersion(ctx, doc, { summary, by })     -> VersionManifest ("Record as my revision")
 //   applySuggestionAsReviewer(ctx, doc, tid, { by })     -> VersionManifest ("Apply now"; clean working copy only;
 //     the suggestion's text must still be on the thread's anchored lines - never another copy elsewhere)
@@ -15,10 +24,11 @@
 //   guards: GuardResult, anchors: { threads, locks, exact, moved, edited, changed, orphaned } | null,
 //   notified, git }
 
-import { AGENT_REPLY_STATUS, SSE } from '../../../shared/protocol.js';
+import { AGENT_REPLY_STATUS, LIMITS, SSE } from '../../../shared/protocol.js';
 import { ConflictError, RefusedError, UsageError } from '../../store/errors.js';
 import { eolOf, lineWindow, locateSuggestion, matchEol, spliceText, suggestionTarget } from '../apply.js';
 import { anchorAt, isActionable } from '../threadstate.js';
+import { loadReplyAttachments, storeReplyAttachments } from '../attachments.js';
 import { resolveInPlace } from './submit.js';
 import { addAgentReply } from './threads.js';
 import { commitRecord, prepareRecord, reportHunks } from './record.js';
@@ -45,19 +55,31 @@ import { sha256 } from '../../util/hash.js';
 export function parseReviseInput(input) {
   const src = input ?? {};
   if (typeof src !== 'object' || Array.isArray(src)) throw new UsageError('revise input must be a JSON object');
-  /** @type {Record<string, { status: string, reply: string, at?: string }>} */
+  /** @type {Record<string, { status: string, reply: string, at?: string, attachments?: string[] }>} */
   const threads = {};
   const rawThreads = src.threads ?? {};
   if (typeof rawThreads !== 'object' || Array.isArray(rawThreads)) throw new UsageError('"threads" must be an object keyed by thread id');
   for (const [tid, r] of Object.entries(rawThreads)) {
     if (!/^t\d+$/.test(tid)) throw new UsageError(`invalid thread id in "threads": ${JSON.stringify(tid)}`);
-    if (!r || typeof r !== 'object') throw new UsageError(`"threads.${tid}" must be an object {status, reply, at?}`);
+    if (!r || typeof r !== 'object') throw new UsageError(`"threads.${tid}" must be an object {status, reply, at?, attachments?}`);
     const entry = /** @type {any} */ (r);
     if (!AGENT_REPLY_STATUS.includes(entry.status)) {
       throw new UsageError(`"threads.${tid}.status" must be one of ${AGENT_REPLY_STATUS.join(' | ')}`);
     }
     if (typeof entry.reply !== 'string' || !entry.reply.trim()) throw new UsageError(`"threads.${tid}.reply" must be a non-empty string`);
-    threads[tid] = { status: entry.status, reply: entry.reply, ...(entry.at ? { at: String(entry.at) } : {}) };
+    const files = entry.attachments;
+    if (files !== undefined && (!Array.isArray(files) || !files.every((/** @type {unknown} */ f) => typeof f === 'string' && f.trim()))) {
+      throw new UsageError(`"threads.${tid}.attachments" must be a list of file paths`);
+    }
+    if (files && files.length > LIMITS.maxReplyAttachments) {
+      throw new UsageError(`"threads.${tid}.attachments": at most ${LIMITS.maxReplyAttachments} files per reply`);
+    }
+    threads[tid] = {
+      status: entry.status,
+      reply: entry.reply,
+      ...(entry.at ? { at: String(entry.at) } : {}),
+      ...(files?.length ? { attachments: files.map(String) } : {}),
+    };
   }
   const other = src.other ?? [];
   if (!Array.isArray(other)) throw new UsageError('"other" must be an array of {at, why}');
@@ -78,12 +100,12 @@ export function parseReviseInput(input) {
 }
 
 /**
- * A spec or snapshot doc takes lines of its own text in `at` ('L42-46'); the repo-file forms ('src/a.js:L42',
+ * A file or snapshot doc takes lines of its own text in `at` ('L42-46'); the repo-file forms ('src/a.js:L42',
  * 'src/a.js#h3') are for code reviews. Refused before anything is written (exit 1).
  * @param {{ threads: Record<string, { at?: string }>, other: Array<{ at: string }> }} p
  */
 function refuseCodeAtForms(p) {
-  const hint = 'file paths are for code reviews; give lines of the spec, e.g. "L42-46"';
+  const hint = 'file paths are for code reviews; give lines of the doc, e.g. "L42-46"';
   for (const [tid, r] of Object.entries(p.threads)) {
     if (r.at !== undefined && !linesOk(r.at) && isCodeAt(r.at)) throw new UsageError(`threads.${tid}.at ${JSON.stringify(r.at)}: ${hint}`);
   }
@@ -118,6 +140,8 @@ function linesOk(s) {
  */
 export async function revise(ctx, ref, input, snapshot = null) {
   const p = parseReviseInput(input);
+  // the agent's files are read and checked in its own process before anything is locked or written
+  await loadReplyAttachments(ctx, p.threads);
   return withDoc(
     ctx,
     ref,
@@ -143,7 +167,7 @@ export async function revise(ctx, ref, input, snapshot = null) {
       }
       const head = await readHead(ctx, doc);
       const working = snapshot ? snapshotWorking(head, snapshot.source) : await requireWorking(ctx, doc, head);
-      const replies = Object.entries(p.threads).map(([thread, r]) => ({ thread, status: r.status }));
+      const replies = replyList(p.threads);
       const base = {
         doc: doc.id,
         ref: docRefFor(doc.id, ctx.root),
@@ -165,7 +189,7 @@ export async function revise(ctx, ref, input, snapshot = null) {
         git: /** @type {any} */ (null),
       };
 
-      // An unchanged spec with a replaced image is still a revision (BUILD_AMENDMENTS 4.5).
+      // An unchanged doc with a replaced image is still a revision (BUILD_AMENDMENTS 4.5).
       if (!working.dirty && !(await changedWorkingAssets(ctx, doc, head)).length) {
         // The working copy equals head, so nothing applied or edited since is in it any more (undone by hand or
         // with `revert`): drop the stale tagged edits and un-stage their suggestions, or they would tag (and
@@ -173,15 +197,11 @@ export async function revise(ctx, ref, input, snapshot = null) {
         const unstaged = p.dryRun ? [] : await dropStalePending(ctx, doc);
         if (!replies.length) return { ...base, nothing: true };
         if (!p.dryRun) {
-          for (const [tid, r] of Object.entries(p.threads)) {
-            const t = unstaged.find((x) => x.id === tid) ?? (await requireThread(ctx, doc.id, tid));
-            addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at });
-            await ctx.store.saveThread(doc.id, t);
-          }
-          await ctx.store.saveDoc(doc);
+          await postReplies(ctx, doc, /** @type {any} */ (p.threads), unstaged);
           await emit(ctx, doc.id, SSE.THREAD_UPDATED, { threads: Object.keys(p.threads), replies: true });
         }
-        return { ...base, repliesOnly: true, notified: !p.dryRun };
+        const warnings = notRecorded(replies, { snapshot: snap });
+        return { ...base, repliesOnly: true, notified: !p.dryRun, guards: { ...base.guards, warnings } };
       }
 
       const prepare = () =>
@@ -201,7 +221,7 @@ export async function revise(ctx, ref, input, snapshot = null) {
           // actionable, so already linkable
           p.threads = { ...p.threads, ...auto };
           prep = await prepare();
-          base.replies = Object.entries(p.threads).map(([thread, r]) => ({ thread, status: r.status }));
+          base.replies = replyList(p.threads);
         }
       }
       const g = /** @type {import('../guards.js').GuardResult} */ (prep.guards);
@@ -226,6 +246,8 @@ export async function revise(ctx, ref, input, snapshot = null) {
       if (g.refused) return { ...report, refused: true };
       if (p.dryRun) return { ...report, version: head.v + 1 };
 
+      // the reply attachments go into the store with the version (their ids are committed with doc.json)
+      await storeReplyAttachments(ctx, doc, /** @type {any} */ (p.threads));
       const summary = p.summary || defaultSummary(respondsTo, Object.keys(p.threads));
       const res = await commitRecord(ctx, doc, prep, {
         author: agentActor(ctx),
@@ -240,6 +262,71 @@ export async function revise(ctx, ref, input, snapshot = null) {
     },
     { ack: true },
   );
+}
+
+/**
+ * The report's reply rows: { thread, status } (+ files: the number of attachments, when there are any).
+ * @param {Record<string, { status: string, files?: unknown[], attachments?: unknown[] }>} threads
+ * @returns {Array<{ thread: string, status: string, files?: number }>}
+ */
+function replyList(threads) {
+  return Object.entries(threads).map(([thread, r]) => {
+    const n = (r.files ?? r.attachments ?? []).length;
+    return { thread, status: r.status, ...(n ? { files: n } : {}) };
+  });
+}
+
+/**
+ * Posts the replies of a replies-only revise (the working copy equals head). Every reply is built in memory first:
+ * its attachment and comment ids are allocated on `doc`, and a reply that cannot be posted (an invalid `at`) throws
+ * before anything is written. Then doc.json is saved, so its counters are on disk before any attachment file or
+ * thread that uses the new ids; then the files, then the threads. A failure after that leaves at worst a stored file
+ * that no thread names, never an id that is handed out again (whose file a later reply would overwrite).
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Record<string, { status: string, reply: string, at?: string,
+ *   files?: import('../attachments.js').LoadedAttachment[] }>} replies the parsed threads, attachments loaded
+ * @param {import('../../../shared/types.js').Thread[]} unstaged threads dropStalePending just saved
+ */
+async function postReplies(ctx, doc, replies, unstaged) {
+  /** @type {Array<{ name: string, buf: Buffer }>} */
+  const files = [];
+  /** @type {import('../../../shared/types.js').Thread[]} */
+  const threads = [];
+  for (const [tid, r] of Object.entries(replies)) {
+    const t = unstaged.find((x) => x.id === tid) ?? (await requireThread(ctx, doc.id, tid));
+    // the stored form of attachments.js storeAttachments: attachments/aN.<ext>, the original name and kind kept
+    const attachments = (r.files ?? []).map((a) => {
+      const name = `${ctx.store.nextId(doc, 'attachment')}.${a.ext}`;
+      files.push({ name, buf: a.buf });
+      return { path: `attachments/${name}`, name: a.name, kind: a.kind };
+    });
+    addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at, attachments });
+    threads.push(t);
+  }
+  await ctx.store.saveDoc(doc);
+  for (const f of files) await ctx.store.saveAttachment(doc.id, f.name, f.buf);
+  for (const t of threads) await ctx.store.saveThread(doc.id, t);
+}
+
+/**
+ * The warnings of a replies-only revise: a thread marked `addressed` says the document changed, but nothing was
+ * recorded. Often the agent changed a file the document loads at runtime (fetch, XHR), which is not versioned, so
+ * the reviewer would find no change to check.
+ * @param {Array<{ thread: string, status: string }>} replies
+ * @param {{ snapshot?: boolean }} [o] a snapshot doc (its text, not a file)
+ * @returns {Array<{ code: string, thread: string, message: string }>}
+ */
+function notRecorded(replies, { snapshot = false } = {}) {
+  return replies
+    .filter((r) => r.status === 'addressed')
+    .map((r) => ({
+      code: 'not-recorded',
+      thread: r.thread,
+      message: snapshot
+        ? `${r.thread} is marked addressed but nothing was recorded: the text did not change. Change it, or reply "answered".`
+        : `${r.thread} is marked addressed but nothing was recorded: the document did not change. A file the document loads at runtime (fetch, XHR) is not versioned; change the document itself, or reply "answered".`,
+    }));
 }
 
 /**

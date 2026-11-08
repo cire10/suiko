@@ -11,7 +11,9 @@
 // doc.head, leftovers of interrupted writes (fixed with --fix via the store's recoverDoc), unrecorded edits.
 // --fix also chmods daemon.json to 0600 and (re)starts a missing or outdated server.
 // Last, the agent integrations: per detected (or configured) agent, whether `suiko install` configured it and
-// whether that configuration is current (a dry run of the installer; nothing is written).
+// whether that configuration is current (a dry run of the installer; nothing is written), naming the Suiko version
+// its instruction files came from when they are older than this CLI, and the command that updates them and nothing
+// else (`suiko install --only <agent> --apply`, the same line `suiko open` prints; install/freshness.js).
 // Exit 0 when no ERR remains, else 1.
 
 import fs from 'node:fs';
@@ -209,6 +211,7 @@ async function checkIntegrations(rt, add) {
     for (const s of list) {
       const check = `integration:${s.id}`;
       if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
+      else if (s.stale) add('warn', check, `${s.name}: ${s.stale}`);
       else if (s.plugin) add('ok', check, `${s.name}: Suiko plugin installed (${s.plugin})`);
       else if (s.configured && s.upToDate) add('ok', check, `${s.name}: Suiko configured`);
       else if (s.configured) add('warn', check, `${s.name}: Suiko configuration is incomplete or outdated (run \`suiko install --only ${s.id} --apply\`)`);

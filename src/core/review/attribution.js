@@ -3,8 +3,9 @@
 // head -> working copy, in order of strength:
 //   1. tagged:  a pending `apply` / `edit` (pending/<doc>.jsonl) whose new lines overlap the hunk's new lines;
 //   2. hint:    a reply's `at` lines ("L90-91", "L12,L90-91"; lines of the NEW file) overlap the hunk's new lines;
-//   3. overlap: the hunk's changed OLD characters intersect an actionable thread's head anchor range widened to
-//               whole lines (an insertion counts when it lands inside or right at the edge of that range);
+//   3. overlap: the hunk's changed OLD characters intersect an actionable thread's head anchor range, widened to
+//               whole lines where those lines are short (an insertion counts when it lands inside or right at the
+//               edge of that range);
 //   4. otherwise the hunk is unlinked, unless an `other[]` entry covers it (`at: "L12"` overlaps its new lines;
 //      `at: "del:h6"` or `"h6"` names it). An `other` entry is recorded on linked hunks too.
 // Tagged and hint links (both explicit) are merged; overlap is used only when neither matched. External or human
@@ -12,10 +13,14 @@
 // Pending-edit line numbers are adjusted for later tagged edits (each records oldLines/newLines), so a sequence of
 // `apply`/`edit` calls attributes correctly. A tagged edit whose inserted text is no longer in the working copy
 // (undone, reverted or rewritten since) is dropped: its recorded lines would tag whatever now sits there.
-// A hint or overlap link explains only the part of a hunk inside its threads' SCOPES (the thread's head anchor
-// range plus the paragraph-level block holding it, widened to whole lines; a GENERAL thread's scope is the whole
-// doc): `outside` reports what the hunk removes beyond them, which the deletion guard checks like an unlinked hunk
-// (a "tighten this sentence" comment does not explain deleting the four sections around it).
+// A hint or overlap link explains only part of a hunk: what lies inside its threads' SCOPES (the thread's head
+// anchor range plus the paragraph-level block or the section holding it; a GENERAL thread's scope is the whole doc),
+// and, for a hint, what lands on the lines the `at` names (`atExplained`: text now on those lines, removed text whose
+// removal point or replacement is on them; the whole hunk when all its new lines are named). `outside` reports what
+// the hunk removes beyond that, which the deletion guard checks like an unlinked hunk (a "tighten this sentence"
+// comment does not explain deleting the four sections around it). Anchors and scopes are widened to whole lines
+// only on lines of up to WIDEN_MAX_LINE (1,000) characters: one line of a minified or generated file is no unit of
+// meaning, so there they keep their exact character ranges (else any thread would explain a whole one-line report).
 
 import { countWords } from '../diff/index.js';
 import { parseLinesArg } from '../util/lines-arg.js';
@@ -33,9 +38,12 @@ import { preciseMapper } from './workmap.js';
  * @property {number} insertedChars
  * @property {number} wholeLinesRemoved old lines none of whose non-blank text survives
  * @typedef {{ removedWords: number, wholeLinesRemoved: number }} OutsideStats removal outside the linked
- *   threads' scopes (hint / overlap links only; null when tagged, unlinked or fully inside)
+ *   threads' scopes and the lines their `at` names (hint / overlap links only; null when tagged, unlinked or fully
+ *   inside)
  * @typedef {Hunk & { threads: string[], linkedBy: LinkedBy | null, via: string | null, other: string | null,
- *   stats: HunkStats, outside: OutsideStats | null }} AttributedHunk
+ *   stats: HunkStats, outside: OutsideStats | null, atExplained: Array<[number, number]> }} AttributedHunk
+ *   atExplained: head ranges of the hunk that land on lines an `at` hint linking it names (explained by that link;
+ *   [] for other hunks)
  * @typedef {object} Attribution
  * @property {AttributedHunk[]} hunks
  * @property {Record<string, string[]>} threadLinks thread id -> hunk ids
@@ -77,7 +85,9 @@ export function attribute({ hunks, headSource, workingSource, pending = [], hint
   }
 
   const otherSpecs = (other ?? []).map((o) => ({ ...o, spec: parseOtherAt(o?.at), used: false }));
-  const threadRanges = threads.map((t) => ({ id: t.id, ...wholeLines(li, headSource, t.start, t.end) }));
+  const threadRanges = threads.map((t) => ({ id: t.id, ...widenToLines(li, headSource, t.start, t.end) }));
+  /** @type {ReturnType<typeof lineIndex> | null} */
+  let wli = null;
 
   /** @type {AttributedHunk[]} */
   const out = [];
@@ -97,14 +107,19 @@ export function attribute({ hunks, headSource, workingSource, pending = [], hint
       linkedBy = 'tagged';
       via ??= e.via;
     }
-    let hinted = false;
+    /** @type {Array<[number, number]>} the `at` line ranges that link this hunk */
+    const atLines = [];
     for (const hr of hintRanges) {
-      if (hr.ranges.some((r) => overlaps(r, newRange))) {
+      const hit = hr.ranges.filter((r) => overlaps(r, newRange));
+      if (hit.length) {
         explicit.add(hr.thread);
-        hinted = true;
+        atLines.push(...hit);
       }
     }
-    if (!linkedBy && hinted) linkedBy = 'hint';
+    if (!linkedBy && atLines.length) linkedBy = 'hint';
+    /** @type {Array<[number, number]>} */
+    let atExplained = [];
+    if (linkedBy === 'hint' && h.oldLines > 0) atExplained = atRangesOf(pm, h, (wli ??= lineIndex(workingSource)), atLines);
 
     let linked = [...explicit];
     if (!linked.length) {
@@ -131,15 +146,12 @@ export function attribute({ hunks, headSource, workingSource, pending = [], hint
     if (scopes && threadsSorted.length && linkedBy !== 'tagged' && h.oldLines > 0) {
       const sc = threadsSorted.map((t) => scopes[t] ?? []);
       if (!sc.includes('all')) {
-        const explained = /** @type {Array<[number, number]>} */ (sc.flat()).map(([a, b]) => {
-          const w = wholeLines(li, headSource, a, b);
-          return /** @type {[number, number]} */ ([w.start, w.end]);
-        });
+        const explained = mergeRanges([...scopeRanges(li, headSource, /** @type {Array<[number, number]>} */ (sc.flat())), ...atExplained]);
         const r = removalStats(pm, headSource, h, li, explained);
         if (r.removedWords || r.wholeLinesRemoved) outside = { removedWords: r.removedWords, wholeLinesRemoved: r.wholeLinesRemoved };
       }
     }
-    out.push({ ...h, threads: threadsSorted, linkedBy, via: linkedBy === 'tagged' ? via : null, other: otherWhy, stats: statsOf(pm, headSource, workingSource, h, li), outside });
+    out.push({ ...h, threads: threadsSorted, linkedBy, via: linkedBy === 'tagged' ? via : null, other: otherWhy, stats: statsOf(pm, headSource, workingSource, h, li), outside, atExplained });
   }
 
   return {
@@ -345,18 +357,126 @@ function keptRanges(h, changed) {
   return out;
 }
 
+/** Lines up to this long (characters, terminator aside) are units of meaning: anchors and scopes widen to them. */
+export const WIDEN_MAX_LINE = 1000;
+
 /**
- * Range [start, end) widened to whole lines: [start of its first line, end of its last line incl. terminator).
+ * Range [start, end) widened to whole lines where those lines are short: its start to the start of its line and its
+ * end to the end of its line (terminator included) when that line has at most WIDEN_MAX_LINE characters; an edge on
+ * a longer line (a minified or generated file) stays where it is.
  * @param {ReturnType<typeof lineIndex>} li
  * @param {string} source
  * @param {number} start
  * @param {number} end
  * @returns {{ start: number, end: number }}
  */
-function wholeLines(li, source, start, end) {
+export function widenToLines(li, source, start, end) {
   const a = li.lineOf(start);
   const b = end > start ? li.lineOf(end - 1) : a;
-  return { start: li.startOf(a), end: Math.min(source.length, li.nextStartOf(b)) };
+  const s = li.endOf(a) - li.startOf(a) <= WIDEN_MAX_LINE ? li.startOf(a) : start;
+  const e = li.endOf(b) - li.startOf(b) <= WIDEN_MAX_LINE ? Math.min(source.length, li.nextStartOf(b)) : end;
+  return { start: s, end: Math.max(s, e) };
+}
+
+/**
+ * Thread scopes as the head ranges they explain (widenToLines each).
+ * @param {ReturnType<typeof lineIndex>} li
+ * @param {string} source
+ * @param {Array<[number, number]>} ranges
+ * @returns {Array<[number, number]>}
+ */
+export function scopeRanges(li, source, ranges) {
+  return ranges.map(([a, b]) => {
+    const w = widenToLines(li, source, a, b);
+    return /** @type {[number, number]} */ ([w.start, w.end]);
+  });
+}
+
+/**
+ * Sorted, merged copy of a set of ranges (touching ones joined), so a line inside their union is inside one of them.
+ * @param {Array<[number, number]>} ranges
+ * @returns {Array<[number, number]>}
+ */
+export function mergeRanges(ranges) {
+  /** @type {Array<[number, number]>} */
+  const out = [];
+  for (const [s, e] of [...ranges].sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
+    const last = out[out.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else out.push([s, e]);
+  }
+  return out;
+}
+
+/**
+ * Head ranges of a hunk whose text lands on the given lines of the new file (the lines an `at` hint names): the old
+ * text whose new place is on them (unchanged text where it now stands, removed text at the point it was removed
+ * from; a removal point right at the end of the named lines counts), and a replaced range whose replacement reaches
+ * onto them from above. The whole hunk when all its new lines are named, or, for a pure deletion, when the lines
+ * around it are (the lines a hint names for it).
+ * @param {import('./workmap.js').PreciseMapper} pm
+ * @param {Hunk} h
+ * @param {ReturnType<typeof lineIndex>} wli line index of the new text
+ * @param {Array<[number, number]>} lines inclusive new-file line ranges that overlap the hunk's new lines
+ * @returns {Array<[number, number]>} sorted
+ */
+export function atRangesOf(pm, h, wli, lines) {
+  if (!lines.length || h.oldLines === 0) return [];
+  /** @type {Array<[number, number]>} */
+  const whole = [[h.oldStartOff, h.oldEndOff]];
+  if (h.newLines === 0) return whole;
+  const first = h.newStart;
+  const last = h.newStart + h.newLines - 1;
+  const named = lines.map(([a, b]) => /** @type {[number, number]} */ ([Math.max(a, first), Math.min(b, last)])).filter(([a, b]) => a <= b);
+  if (coveredLines(named, first, last)) return whole;
+  const changed = pm.changedOld(h).filter(([s, e]) => e > s);
+  /** @type {Array<[number, number]>} */
+  const out = [];
+  for (const [a, b] of named) {
+    const ts = wli.startOf(a);
+    const te = wli.nextStartOf(b);
+    // the new place of old offsets only grows with them: binary search for the old offsets placed in [ts, te]
+    let lo = firstOld(h, (o) => pm.map(o, 'right') >= ts);
+    const hi = firstOld(h, (o) => pm.map(o, 'right') > te);
+    const before = lo > h.oldStartOff ? changed.find(([s, e]) => s < lo && lo <= e) : undefined;
+    if (before && pm.mapRange(before[0], before[1]).end > ts) lo = before[0];
+    if (hi > lo) out.push([lo, hi]);
+  }
+  return mergeRanges(out);
+}
+
+/**
+ * The first old offset o of a hunk's old range [oldStartOff, oldEndOff] for which `pred` holds (pred is false, then
+ * true); oldEndOff when it never holds before.
+ * @param {Hunk} h
+ * @param {(o: number) => boolean} pred
+ * @returns {number}
+ */
+function firstOld(h, pred) {
+  let lo = h.oldStartOff;
+  let hi = h.oldEndOff;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pred(mid)) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/**
+ * Whether the line ranges together cover every line of [first, last].
+ * @param {Array<[number, number]>} ranges
+ * @param {number} first
+ * @param {number} last
+ */
+function coveredLines(ranges, first, last) {
+  let next = first;
+  for (const [a, b] of [...ranges].sort((x, y) => x[0] - y[0])) {
+    if (a > next) return false;
+    next = Math.max(next, b + 1);
+    if (next > last) return true;
+  }
+  return next > last;
 }
 
 /**

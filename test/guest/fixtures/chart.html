@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chart report</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; color: #222; background: #fff; }
+  /* a grid column sized by its content (1fr = minmax(auto, 1fr)), like many report layouts */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .card { border: 1px solid #ddd; padding: 12px; }
+  .chart-wrap { position: relative; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Revenue</h1>
+<div class="grid" data-srid="3">
+  <div class="card" data-srid="4"><div class="chart-wrap" data-srid="5"><canvas id="chart" data-srid="6"></canvas></div></div>
+</div>
+<p data-srid="7">Monthly recurring revenue by plan.</p>
+<script>
+  // A responsive chart the way Chart.js does it: a ResizeObserver on the canvas's container sets the canvas's size
+  // (inline style) to the container's width on the next frame.
+  const canvas = document.getElementById('chart');
+  const wrap = canvas.parentElement;
+  window.__resizes = 0;
+  const draw = (w) => {
+    canvas.width = w;
+    canvas.height = 120;
+    canvas.style.width = w + 'px';
+    canvas.style.height = '120px';
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#4f46e5';
+    g.fillRect(0, 40, w, 40);
+  };
+  new ResizeObserver((entries) => {
+    const w = Math.floor(entries[0].contentRect.width);
+    if (!w) return;
+    requestAnimationFrame(() => { window.__resizes++; draw(w); });
+  }).observe(wrap);
+</script>
+</body>
+</html>

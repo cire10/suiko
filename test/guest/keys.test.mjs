@@ -1,7 +1,8 @@
 // @ts-check
 // Browser tests for the guest's keyboard handling (src/guest/85-keys.js): the app-level combos Mod+K (command
 // palette), Mod+, (settings) and Mod+/ (keyboard shortcuts), forwarded from anywhere in the doc and default-prevented
-// unless the page claims them, and the single-key preference (setPrefs / init.prefs {singleKeys}).
+// unless the page claims them, the single-key preference (setPrefs / init.prefs {singleKeys}), and a page that
+// handles keys itself (07-page.js PageKeys: its single keys stay its own) or a widget that takes keys.
 // Driven through the two-origin harness in server.mjs with system Chrome (playwright-core, channel 'chrome').
 // Run: node --test "test/guest/**/*.test.mjs"
 
@@ -358,6 +359,183 @@ describe('single-key shortcuts preference (setPrefs / init.prefs)', () => {
       assert.deepEqual(await msgsOf(d.page, 'key', from), []);
     } finally {
       await d.close();
+    }
+  });
+});
+
+describe('a page that handles keys itself', () => {
+  test('keeps its single keys; Escape, Cmd+Enter, the app combos and the selection actions still reach Suiko', async () => {
+    const d = await openDoc(browser, harness, 'keyed');
+    try {
+      assert.equal((await inspect(d.frame)).pageKeys, true, 'the page added a keydown listener to document');
+      await d.page.mouse.click(700, 690); // focus the doc body
+      let from = await mark(d.page);
+      // r is the page's own shortcut; j, 3, f, e, b, Shift+B would drive Suiko from a page without key handlers
+      for (const k of ['r', 'j', '3', 'f', 'e', 'b', 'Shift+B']) await d.page.keyboard.press(k);
+      await settle(d.frame, 120);
+      assert.deepEqual(await msgsOf(d.page, 'key', from), [], 'no single key reaches Suiko');
+      assert.deepEqual(await msgsOf(d.page, 'toolChanged', from), [], 'b does not snip');
+      assert.equal((await inspect(d.frame)).snip.active, false);
+      assert.equal(await d.frame.evaluate(() => /** @type {any} */ (window).__resets), 1, 'the page got its r');
+
+      // Escape, Cmd+Enter and Cmd+Shift+Enter, and the app combos still do
+      from = await mark(d.page);
+      await d.page.keyboard.press('Escape');
+      await d.page.keyboard.press('Meta+Enter');
+      await d.page.keyboard.press('Control+Shift+Enter');
+      await d.page.keyboard.press('Meta+k');
+      await waitMsg(d.page, 'key', from, (m) => m.key === 'k');
+      await settle(d.frame, 60);
+      assert.deepEqual(keysOf(await msgsOf(d.page, 'key', from)), [
+        { key: 'Escape', meta: false, ctrl: false, shift: false, alt: false },
+        { key: 'Enter', meta: true, ctrl: false, shift: false, alt: false },
+        { key: 'Enter', meta: false, ctrl: true, shift: true, alt: false },
+        { key: 'k', meta: true, ctrl: false, shift: false, alt: false },
+      ]);
+
+      // an Escape the page uses (closing its own modal) stays with the page
+      await d.frame.evaluate(() => { /** @type {any} */ (window).__modal = true; });
+      from = await mark(d.page);
+      await d.page.keyboard.press('Escape');
+      await settle(d.frame, 100);
+      assert.deepEqual(await msgsOf(d.page, 'key', from), []);
+
+      // c / s / q / a with a selection are still the selection actions; without one, c stays with the page
+      from = await mark(d.page);
+      await selectText(d.frame, 4, 'seat price');
+      await waitMsg(d.page, 'selection', from, (m) => !!m.capture);
+      from = await mark(d.page);
+      await d.page.keyboard.press('c');
+      assert.equal((await waitMsg(d.page, 'action', from)).action, 'comment');
+      await send(d.page, 'clearSelection');
+      await waitMsg(d.page, 'selection', from, (m) => m.capture === null);
+      from = await mark(d.page);
+      await d.page.keyboard.press('c');
+      await settle(d.frame, 100);
+      assert.deepEqual(await msgsOf(d.page, 'key', from), []);
+      assert.deepEqual(await msgsOf(d.page, 'action', from), []);
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('the first single key the page keeps is reported once per load (keyKept); combos, space and single keys off never', async () => {
+    const d = await openDoc(browser, harness, 'keyed');
+    try {
+      await d.page.mouse.click(700, 690); // focus the doc body
+      // single keys off: nothing to explain (Suiko would not act on them anyway)
+      await send(d.page, 'setPrefs', { singleKeys: false });
+      let from = await mark(d.page);
+      await d.page.keyboard.press('b');
+      await settle(d.frame, 120);
+      assert.deepEqual(await msgsOf(d.page, 'keyKept', from), []);
+
+      await send(d.page, 'setPrefs', { singleKeys: true });
+      from = await mark(d.page);
+      await d.page.keyboard.press('Space');
+      await d.page.keyboard.press('Alt+j');
+      await settle(d.frame, 120);
+      assert.deepEqual(await msgsOf(d.page, 'keyKept', from), [], 'not for the space bar or a combo');
+      for (const k of ['e', 'b', 'j']) await d.page.keyboard.press(k);
+      await settle(d.frame, 150);
+      const kept = await msgsOf(d.page, 'keyKept', from);
+      assert.equal(kept.length, 1, 'once per page load');
+      assert.equal(kept[0].key, 'e');
+      assert.deepEqual(await msgsOf(d.page, 'key', from), [], 'the keys themselves still stay with the page');
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('a page without key handlers never reports keyKept', async () => {
+    const d = await openDoc(browser, harness, 'prose');
+    try {
+      await d.page.mouse.click(700, 690);
+      const from = await mark(d.page);
+      await d.page.keyboard.press('j');
+      await waitMsg(d.page, 'key', from, (m) => m.key === 'j');
+      await settle(d.frame, 100);
+      assert.deepEqual(await msgsOf(d.page, 'keyKept', from), []);
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('handlers added later, on<key> properties and listeners on the key\'s path count; the guest\'s own never do', async () => {
+    const d = await openDoc(browser, harness, 'prose');
+    try {
+      assert.equal((await inspect(d.frame)).pageKeys, false);
+      await d.page.mouse.click(700, 690);
+      /** Presses j and says whether it reached Suiko. */
+      const jForwarded = async () => {
+        const from = await mark(d.page);
+        await d.page.keyboard.press('j');
+        await settle(d.frame, 100);
+        return (await msgsOf(d.page, 'key', from)).length === 1;
+      };
+      assert.equal(await jForwarded(), true);
+
+      // an on<key> handler property of window / document / <html> / <body>, while it is set
+      await d.frame.evaluate(() => { window.onkeyup = () => {}; });
+      assert.equal(await jForwarded(), false);
+      assert.equal((await inspect(d.frame)).pageKeys, true);
+      await d.frame.evaluate(() => { window.onkeyup = null; });
+      assert.equal(await jForwarded(), true);
+
+      // a listener on an element the key passes through (a focusable paragraph of the doc), not elsewhere
+      await d.frame.evaluate(() => {
+        const p = /** @type {HTMLElement} */ (document.getElementById('clicks'));
+        p.tabIndex = -1;
+        p.addEventListener('keydown', () => {});
+        p.focus();
+      });
+      assert.equal(await jForwarded(), false);
+      await d.page.mouse.click(700, 690); // back to the body: the paragraph's listener is not on the path
+      assert.equal(await jForwarded(), true);
+
+      // a listener added to the document later (after load) counts from then on
+      await d.frame.evaluate(() => document.body.addEventListener('keypress', () => {}));
+      assert.equal(await jForwarded(), false);
+      assert.equal((await inspect(d.frame)).pageKeys, true);
+    } finally {
+      await d.close();
+    }
+  });
+
+  test('keys typed into a widget (a listbox, a checkbox, an ARIA tab) stay with it', async () => {
+    const d = await openDoc(browser, harness, 'keyed');
+    try {
+      // a widget keeps even Escape
+      await d.frame.focus('#plans');
+      let from = await mark(d.page);
+      await d.page.keyboard.press('b'); // typeahead: Business
+      await d.page.keyboard.press('Escape');
+      await settle(d.frame, 100);
+      assert.deepEqual(await msgsOf(d.page, 'key', from), []);
+      assert.equal(await d.frame.evaluate(() => document.querySelector('[aria-selected="true"]')?.textContent), 'Business');
+      await d.frame.focus('#annual');
+      from = await mark(d.page);
+      await d.page.keyboard.press('Escape');
+      await settle(d.frame, 100);
+      assert.deepEqual(await msgsOf(d.page, 'key', from), []);
+    } finally {
+      await d.close();
+    }
+
+    // a page without key handlers: its ARIA tab keeps j, the body forwards it
+    const p = await openDoc(browser, harness, 'prose');
+    try {
+      await p.frame.focus('#tab-a');
+      let from = await mark(p.page);
+      await p.page.keyboard.press('j');
+      await settle(p.frame, 100);
+      assert.deepEqual(await msgsOf(p.page, 'key', from), []);
+      await p.page.mouse.click(700, 690);
+      from = await mark(p.page);
+      await p.page.keyboard.press('j');
+      await waitMsg(p.page, 'key', from, (m) => m.key === 'j');
+    } finally {
+      await p.close();
     }
   });
 });

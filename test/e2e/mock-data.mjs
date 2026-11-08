@@ -11,6 +11,13 @@
 //                t5 comment on "Prototype the issuer."           -> resolved with decision D1
 //                t6 agent question (needs_input) on the open-questions paragraph
 //              plus app-spec.html v1.
+//   'rich'   - batched edits and rich replies: kitchen-sink as in 'round2', then rv2 (comment, edits 'batch',
+//              delivered to claude) asked t7 (a question on "Issue short-lived") and t8 (a comment on "Ship rotation
+//              behind a flag."), and claude answered without a new version:
+//                t3 -> planned, t8 -> planned (the "Planned changes" group: Apply 2)
+//                t7 -> answered, with a PNG (lifetimes.png) and a live HTML chart (chart.html) attached
+//              plus app-spec.html v1 and long-spec.md v1 (generated, over 20,000 characters of text: a long doc,
+//              whose edits the Auto setting batches).
 
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -166,14 +173,88 @@ function seedRound2(doc) {
   doc.seq = 0;
 }
 
+/** The "lifetimes.png" claude attaches in the 'rich' scenario: four bars on a light background. */
+export const LIFETIMES_PNG = makePng(240, 120, (x, y) => {
+  const bars = [[20, 112], [80, 112], [140, 20], [200, 70]];
+  const hit = bars.some(([bx, top]) => x >= bx && x < bx + 30 && y >= top && y < 112);
+  return hit ? [79, 70, 229, 255] : y >= 112 && y < 114 ? [160, 160, 170, 255] : [248, 248, 250, 255];
+});
+
+/**
+ * The "chart.html" claude attaches in the 'rich' scenario: a bar chart drawn by its own script (so a test can see
+ * that scripts run in the sandboxed preview); it also tries what the sandbox forbids and writes what happened into
+ * data-* attributes of <body> (data-drawn, data-cookie, data-storage, data-parent).
+ */
+export const CHART_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Token lifetimes</title>
+<style>
+  body { margin: 12px 14px; font: 13px/1.4 -apple-system, system-ui, sans-serif; color: #18181b; background: #fff; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .bar { fill: #4f46e5; } .bar.new { fill: #16a34a; } text { font-size: 11px; fill: #5b5b66; }
+</style></head>
+<body>
+<h1>Token lifetimes (log scale, minutes)</h1>
+<svg id="chart" viewBox="0 0 420 160" width="100%" style="max-width: 560px" role="img" aria-label="Token lifetimes"></svg>
+<script>
+  const data = [['access_token', 15, ''], ['id_token', 15, ''], ['refresh_token (now)', 43200, ''], ['refresh_token (planned)', 10080, 'new']];
+  const svg = document.getElementById('chart');
+  const max = Math.log10(43200);
+  data.forEach(([label, minutes, cls], i) => {
+    const w = Math.round((Math.log10(minutes) / max) * 240);
+    const y = 8 + i * 38;
+    svg.insertAdjacentHTML('beforeend', '<text x="0" y="' + (y + 14) + '">' + label + '</text>'
+      + '<rect class="bar ' + cls + '" x="160" y="' + y + '" width="' + w + '" height="20" rx="3"></rect>');
+  });
+  document.body.dataset.drawn = String(svg.querySelectorAll('rect').length);
+  try { document.body.dataset.cookie = String(document.cookie); } catch (e) { document.body.dataset.cookie = 'blocked'; }
+  try { localStorage.setItem('x', '1'); document.body.dataset.storage = 'open'; } catch (e) { document.body.dataset.storage = 'blocked'; }
+  try { document.body.dataset.parent = String(parent.document.title); } catch (e) { document.body.dataset.parent = 'blocked'; }
+</script>
+</body></html>
+`;
+
+/** @param {MockDoc} doc */
+function seedRich(doc) {
+  seedRound2(doc);
+  doc.saveDraft({ kind: 'thread', type: 'question', severity: 'normal', capture: textCapture(doc, 2, 'Issue short-lived'), version: 2,
+    body: 'Can you show the token lifetimes as a chart?' });
+  doc.saveDraft({ kind: 'thread', type: 'comment', severity: 'normal', capture: textCapture(doc, 2, 'Ship rotation behind a flag.'), version: 2,
+    body: 'Name the flag and say what its default is.' });
+  const rv2 = doc.submitReview({ verdict: 'comment', body: '', edits: 'batch' });
+  doc.deliver(rv2.id, 'claude');
+  const png = doc.addAgentAttachment('lifetimes.png', LIFETIMES_PNG);
+  const chart = doc.addAgentAttachment('chart.html', CHART_HTML);
+  doc.agentReply('t3', { status: 'planned', body: 'I will shorten the refresh token TTL to **7 d** and add a footnote on why.' });
+  doc.agentReply('t8', { status: 'planned', body: 'I will name the flag `rotation_v2` and say that it is off by default.' });
+  doc.agentReply('t7', { status: 'answered', body: 'Here are the lifetimes, as a picture and as a live chart.', attachments: [png, chart] });
+  doc.events.length = 0;
+  doc.seq = 0;
+}
+
+/**
+ * A generated spec long enough to count as a long doc (over 20,000 characters of visible text).
+ * @param {{ clock?: () => string }} [opts]
+ */
+function longSpec(opts = {}) {
+  const para = 'The ingestion service accepts events from every producer, checks their schema, stamps them with the '
+    + 'arrival time and writes them to the partitioned log, so that consumers can replay any window of the last thirty days.';
+  const parts = ['# Event Pipeline Design', ''];
+  for (let i = 1; i <= 36; i++) parts.push(`## ${i} Section ${i}`, '', `${para} (${i}a)`, '', `${para} (${i}b)`, '', `${para} (${i}c)`, '');
+  return new MockDoc({ ws: WS, id: 'long-spec', path: 'long-spec.md', format: 'markdown', source: parts.join('\n'), clock: opts.clock });
+}
+
 /**
  * Builds the docs of a scenario.
- * @param {'fresh'|'round2'} scenario
+ * @param {'fresh'|'round2'|'rich'} scenario
  * @param {{ clock?: () => string }} [opts]
  * @returns {MockDoc[]}
  */
 export function buildScenario(scenario, opts = {}) {
   const ks = kitchenSink(opts);
   if (scenario === 'round2') seedRound2(ks);
+  if (scenario === 'rich') {
+    seedRich(ks);
+    return [ks, appSpec(opts), longSpec(opts)];
+  }
   return [ks, appSpec(opts)];
 }

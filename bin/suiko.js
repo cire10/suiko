@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // @ts-check
 // suiko CLI entry point.
-// `suiko hook <name>` is dispatched first, importing only src/cli/hooks.js (node:* builtins only), so the
+// `suiko hook <name>` is dispatched first, importing only src/cli/hooks.js (node:* builtins and the dependency-free
+// src/shared/visible-text.js), so the
 // Claude Code hooks start fast and can never fail: they always exit 0 and print nothing on error
 // (BUILD_AMENDMENTS 5). Every other command goes through src/cli/main.js.
 

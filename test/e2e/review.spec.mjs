@@ -1,7 +1,7 @@
 // @ts-check
 // Review flow on a fresh doc (kitchen-sink.md v1, no threads): loading, commenting on selected text (mouse drag
-// in the iframe + forwarded key), suggestions, picking an image, Send now, and submitting a review with
-// "Request changes".
+// in the iframe + forwarded key), suggestions, picking an image, Send now, and sending a review as "Needs changes"
+// (with the preferences these tests were written for: comments wait as drafts until Send; fixtures.mjs).
 
 import { expect, test } from './fixtures.mjs';
 
@@ -12,8 +12,8 @@ test('loads the doc in Review mode with an empty thread panel', async ({ page, u
   await expect(page.getByTestId('doc-frame')).toBeVisible();
   await expect(page.locator('[data-testid="mode-tab"][data-mode="review"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('version-picker')).toHaveValue('1');
-  await expect(page.getByTestId('thread-panel')).toContainText('No threads yet');
-  await expect(page.getByTestId('presence')).toHaveText(/No agent listening/);
+  await expect(page.getByTestId('thread-panel')).toContainText('No comments yet. Select text in the document to comment.');
+  await expect(page.getByTestId('presence')).toHaveText(/Claude isn't connected/);
   await expect(page.locator('.outline-link')).toHaveCount(7);
   await expect(page).toHaveTitle(/Token Service Implementation Spec/);
   const g = await ui.inspect();
@@ -34,11 +34,11 @@ test('select text in the iframe -> composer with anchor preview -> Add to review
   await page.keyboard.press('c');
   const composer = page.getByTestId('composer');
   await expect(composer).toBeVisible();
-  await expect(composer.locator('.agent-sees')).toContainText('Agent will see: L51');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /^Claude will see: L51 /);
   await expect(composer.locator('.agent-sees')).toContainText('rotated on every use');
   await expect(page.getByTestId('composer-textarea')).toBeFocused();
   await page.getByTestId('composer-textarea').fill('Rotation on **every** use breaks concurrent clients.');
-  await composer.getByRole('radio', { name: 'Blocking' }).click();
+  await composer.getByRole('button', { name: 'Must fix' }).click();
   await page.getByTestId('composer-add').click();
 
   await expect(composer).toBeHidden();
@@ -103,7 +103,7 @@ test('Send now submits a one-item review with verdict comment', async ({ page, u
   await page.locator('[data-selection-comment]').click();
   await page.getByTestId('composer-textarea').fill('When?');
   await page.getByTestId('composer-send-now').click();
-  await expect(page.getByTestId('toast').filter({ hasText: 'Sent to the agent' })).toBeVisible();
+  await expect(page.getByTestId('toast').filter({ hasText: 'Saved for Claude. It gets it when it connects.' })).toBeVisible();
   const d = mock.doc('kitchen-sink');
   expect(d.reviews).toHaveLength(1);
   expect(d.reviews[0]).toMatchObject({ verdict: 'comment', newThreads: ['t1'] });
@@ -112,7 +112,7 @@ test('Send now submits a one-item review with verdict comment', async ({ page, u
   await expect(ui.card('t1')).toContainText('When?');
 });
 
-test('submit review with Request changes', async ({ page, ui, mock }) => {
+test('send a review with Needs changes', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   await ui.selectText('Prototype the issuer.');
   await page.keyboard.press('q');
@@ -125,7 +125,7 @@ test('submit review with Request changes', async ({ page, ui, mock }) => {
   await page.getByTestId('submit-review-open').click();
   const dialog = page.getByTestId('submit-review-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('No agent is listening');
+  await expect(dialog).toContainText('Claude isn\'t connected');
   await expect(dialog).toContainText('Which language?');
   await expect(dialog.getByRole('button', { name: 'Copy prompt' })).toBeVisible();
   await dialog.locator('[data-testid="submit-verdict"] input[value="changes_requested"]').check();
@@ -133,18 +133,18 @@ test('submit review with Request changes', async ({ page, ui, mock }) => {
   await page.getByTestId('submit-confirm').click();
 
   await expect(dialog).toBeHidden();
-  await expect(page.getByTestId('toast').filter({ hasText: 'Changes requested (rv1)' })).toBeVisible();
+  await expect(page.getByTestId('toast').filter({ hasText: 'Saved for Claude: needs changes (rv1). It gets it when it connects.' })).toBeVisible();
   const d = mock.doc('kitchen-sink');
   expect(d.reviews[0]).toMatchObject({ id: 'rv1', verdict: 'changes_requested', body: 'Please answer before we continue.', newThreads: ['t1'] });
   expect(d.drafts.items).toHaveLength(0);
   await expect(ui.card('t1')).toContainText('Which language?');
-  await expect(page.locator('.drafts-count')).toContainText('0');
-  await expect(page.locator('.review-progress')).toContainText('Submitted');
+  await expect(page.getByTestId('submit-review-open')).toHaveText('Approve');
+  await expect(page.locator('.review-progress')).toHaveText(/^Sent \d\d:\d\d$/);
 
   // Delivery (a background `wait` picking the review up) moves the chip and the presence along.
   d.deliver('rv1', 'claude');
-  await expect(page.locator('.review-progress')).toContainText('Delivered to claude');
-  await expect(page.getByTestId('presence')).toHaveText(/claude is revising/);
+  await expect(page.locator('.review-progress')).toHaveText(/^Claude has it · \d\d:\d\d$/);
+  await expect(page.getByTestId('presence')).toHaveText(/Claude is working/);
 });
 
 test('approve with the final options', async ({ page, ui, mock }) => {
@@ -152,21 +152,30 @@ test('approve with the final options', async ({ page, ui, mock }) => {
   await page.keyboard.press('f');
   const dialog = page.getByTestId('submit-review-dialog');
   await expect(dialog).toBeVisible();
+  // nothing to send: it is the Approve dialog, on Approve v1 (Send feedback without a summary sends nothing)
+  await expect(dialog.locator('input[value="approved"]')).toBeChecked();
+  await dialog.locator('input[value="comment"]').check();
   await expect(page.getByTestId('submit-confirm')).toBeDisabled();
   await dialog.locator('input[value="approved"]').check();
-  await expect(dialog.getByLabel('Mark v1 final')).toBeChecked();
+  await expect(page.getByTestId('submit-confirm')).toHaveText('Approve v1');
+  // no round answered yet: "Mark v1 final" starts unticked; the reviewer ticks it
+  await expect(dialog.getByLabel('Mark v1 final')).not.toBeChecked();
+  await dialog.getByLabel('Mark v1 final').check();
   await page.getByTestId('submit-confirm').click();
   await expect(page.locator('.banner-ok')).toContainText('Approved at v1');
   expect(mock.doc('kitchen-sink').doc.final).toMatchObject({ version: 1 });
-  await expect(page.locator('.statusbar')).toContainText('FINAL: v1');
+  // the turn pill says it, and the version's label
+  await expect(page.getByTestId('turn-pill')).toHaveAttribute('aria-label', /^Approved v1/);
+  await expect(page.getByTestId('turn-pill')).toContainText('Approved v1');
+  await expect(page.getByTestId('version-picker').locator('option[value="1"]')).toHaveText('v1 · latest · final');
 });
 
 test('pasting an image into the comment attaches it', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
-  await page.getByRole('button', { name: 'General comment' }).click();
+  await ui.generalComment();
   const ta = page.getByTestId('composer-textarea');
   await expect(ta).toBeFocused();
-  await expect(page.getByTestId('composer').locator('.agent-sees')).toContainText('GENERAL');
+  await expect(page.getByTestId('composer').locator('.agent-sees')).toContainText('General comment');
   // A paste event carrying a PNG file (what the browser produces for a pasted screenshot).
   await ta.evaluate(async (el) => {
     const canvas = document.createElement('canvas');
@@ -213,15 +222,18 @@ test('a draft can be edited (autosaved through PATCH) and deleted', async ({ pag
   await page.getByTestId('composer-textarea').fill('Second thought.');
   // Typing in an existing draft autosaves it (debounced) before the explicit save.
   await expect.poll(() => mock.doc('kitchen-sink').drafts.items[0]?.body, { timeout: 5000 }).toBe('Second thought.');
-  await composer.getByRole('radio', { name: 'Nit' }).click();
+  // key 3 (outside the text) makes it a nit
+  await composer.getByRole('radio', { name: 'Comment' }).focus();
+  await page.keyboard.press('3');
+  await expect(composer.locator('.nit-chip')).toBeVisible();
   await page.getByTestId('composer-add').click();
   await expect(composer).toBeHidden();
   await expect(draft).toContainText('Second thought.');
   expect(mock.doc('kitchen-sink').drafts.items).toMatchObject([{ id: 'd1', body: 'Second thought.', severity: 'nit' }]);
   expect(mock.requests.filter((r) => r.method === 'PATCH').length).toBeGreaterThanOrEqual(2);
 
-  await draft.getByRole('button', { name: 'Delete' }).click();
+  await ui.cardMenu(draft, 'delete');
   await expect(draft).toHaveCount(0);
   expect(mock.doc('kitchen-sink').drafts.items).toEqual([]);
-  await expect(page.locator('.drafts-count')).toContainText('0');
+  await expect(page.getByTestId('submit-review-open')).toHaveText('Approve');
 });

@@ -178,9 +178,9 @@ describe('open', () => {
     const lines = r.stdout.split('\n');
     assert.equal(lines[0], 'suiko: tracking design.md as "design" (markdown, 5 lines) · recorded v1');
     assert.equal(lines[1], `review UI: http://127.0.0.1:5801/d/${store.wsId}/design?k=tok123`);
-    assert.match(lines[2], /^external hosts loaded live by the doc: cdn\.example\.com, img\.example\.org/);
+    assert.equal(lines[2], 'the doc loads content from cdn.example.com, img.example.org when viewed');
     assert.match(r.stdout, /run `suiko wait design` in the background/);
-    assert.match(r.stdout, /Recommended \.gitattributes lines/);
+    assert.match(r.stdout, /^created .*\.specreview\/ \(commit it with the doc\)\. Recommended \.gitattributes lines:$/m);
     assert.equal(engine.calls[0].create, true);
     assert.equal(engine.calls[0].root, root);
     assert.deepEqual(opened, [[`http://127.0.0.1:5801/d/${store.wsId}/design?k=tok123`]]);

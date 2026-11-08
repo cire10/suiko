@@ -7,7 +7,7 @@ import * as z from 'zod/v4';
 import { UsageError } from '../core/store/errors.js';
 import { parseLinesArg } from '../core/util/lines-arg.js';
 import { isCodeAt, isCodeOtherAt } from '../core/util/code-at.js';
-import { AGENT_REPLY_STATUS } from '../shared/protocol.js';
+import { AGENT_REPLY_STATUS, LIMITS } from '../shared/protocol.js';
 
 const THREAD_ID = z.string().regex(/^t\d+$/, 'expected a thread id like t3');
 const LOCK_ID = z.string().regex(/^L\d+$/, 'expected a lock id like L1');
@@ -36,11 +36,21 @@ function isLinesList(s) {
   }
 }
 
+/**
+ * One reply of a revise. `status` planned (batched edits): what you will change, applied later; `attachments`:
+ * images or HTML previews you made, attached to the reply (paths relative to the cwd or absolute; the engine checks
+ * the files, core/review/attachments.js).
+ */
 export const ThreadReplySchema = z
   .object({
     status: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_REPLY_STATUS])),
     reply: z.string().refine((s) => s.trim().length > 0, { message: 'reply must not be empty' }),
     at: LinesAt.optional(),
+    attachments: z
+      .array(z.string().refine((s) => s.trim().length > 0, { message: 'a file path must not be empty' }))
+      .max(LIMITS.maxReplyAttachments, `at most ${LIMITS.maxReplyAttachments} files per reply`)
+      .optional()
+      .describe(`Files to attach: images (.png .jpg .jpeg .gif .webp .svg) or HTML previews (.html .htm), at most ${LIMITS.maxReplyAttachments}`),
   })
   .strict();
 

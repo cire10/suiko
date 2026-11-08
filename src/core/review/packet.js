@@ -2,7 +2,13 @@
 // Text formatters for everything the engine reports to agents and terminals (design 1.3 "one formatter",
 // 3.6 / 3.8 / 3.11 / 3.12 / 9.6). The CLI, the MCP server and the hooks print these strings verbatim; `--json`
 // prints the objects they are made from.
-//   formatPacket(packet)          feedback packet (wait / feedback), capped at LIMITS.packetChars
+//   formatPacket(packet)          feedback packet (wait / feedback), capped at LIMITS.packetChars. Under the counts
+//                                 line: `APPLY: ...` when the reviewer applied planned changes (items labelled APPLY:
+//                                 the reviewer's original request, then the planned reply) and `EDITS: batch. ...`
+//                                 when threads are batched (PacketThread.edits; `EDITS: batch for t2, t5 ...` when
+//                                 only some are), whose suggestions say "plan it now" instead of `suiko apply`; a
+//                                 reviewer reply's `use` prints `use: <abs path> (<name>) — ...` lines (in a packet
+//                                 that approves a final version: say whether it goes into a next version)
 //   formatReviseReport(report)    revise result, dry run, refusal (with fix hints), replies-only
 //   formatStatus(status)          `suiko status`
 //   formatLog(log)                `suiko log`
@@ -47,9 +53,49 @@ export function attachmentLine(absPath, kind) {
 }
 
 const PROTOCOL = [
-  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
-  "  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.",
+  'PROTOCOL: change only what the threads ask for; src> lines are exact Edit old_string (for a built doc, change its sources and rebuild); edit bottom-up. Suggestions: `suiko apply` (for a doc built from sources: put the text into the sources and rebuild).',
+  "  Questions: answer in the thread's reply; edit only if the answer belongs in the doc. Unsure: status needs_input.",
 ];
+
+/**
+ * The APPLY header line: the reviewer applies planned changes (batched edits) together, so they become one version,
+ * recorded the way NEXT says for this kind of doc (`suiko revise`, or `suiko snapshot` for a page built from sources).
+ */
+const APPLY_LINE = 'APPLY: make every planned change below in one pass, then record ONE version as NEXT says (status addressed).';
+
+/** What a batched suggestion item says instead of `apply verbatim: suiko apply ...` (it is applied in the APPLY round). */
+const PLAN_SUGGESTION = 'suggestion: plan it now; it is applied in the APPLY round';
+
+/**
+ * The EDITS line of a packet with batched threads (PacketThread.edits 'batch'). With `apply` (the packet also has
+ * APPLY threads) it is narrowed to the other threads, and with `only` (some threads are to be edited now) to the
+ * batched ones; `target` is what the agent edits ('the doc', 'the files').
+ * @param {{ apply: boolean, target: string, only?: string[] | null }} o
+ * @returns {string}
+ */
+function editsLine({ apply, target, only = null }) {
+  const head = only
+    ? `EDITS: batch for ${only.join(', ')} only (the other threads: edit now). Answer ${only.length === 1 ? 'it' : 'them'} now.`
+    : apply
+      ? 'EDITS: batch for every thread not marked APPLY. Answer them now.'
+      : 'EDITS: batch. Answer every thread now.';
+  return `${head} For a change you agree to make${only ? ' there' : ''}, do not edit ${target} yet: reply with status "planned" and say exactly what you will change; questions get "answered". The edits come later in one APPLY packet.`;
+}
+
+/**
+ * The `use:` line of a reviewer reply that asks for one of the thread's attachments to go into the doc. In a packet
+ * that approves a final version (`final`: its number) nothing may change: the agent says in its reply whether the
+ * file should go into a next version.
+ * @param {{ path: string, name: string }} u
+ * @param {{ code?: boolean, final?: number | null }} [o] code: a code review (the attachment goes into a repo file)
+ * @returns {string}
+ */
+export function useLine(u, { code = false, final = null } = {}) {
+  if (final != null) return `  use: ${u.path} (${u.name}) — the ${code ? 'review' : 'doc'} is final (v${final}); say in your reply whether this should go into a next version`;
+  return code
+    ? `  use: ${u.path} (${u.name}) — put this into the file at this thread's place (copy it into the repo or inline it)`
+    : `  use: ${u.path} (${u.name}) — put this into the doc at this thread's place (copy it next to the doc or inline it)`;
+}
 
 /**
  * Every packet with threads to act on (not a plan's: plan mode answers in the plan or the chat): replies belong on
@@ -135,7 +181,7 @@ export function formatPacket(packet, opts = {}) {
   /** @type {string[]} */
   const head = [packetHeader(p)];
   const snapshot = p.kind === 'snapshot';
-  // The workspace root is not the agent's cwd (a non-git project whose .specreview/ sits next to the spec):
+  // The workspace root is not the agent's cwd (a non-git project whose .specreview/ sits next to the doc):
   // name the file as it is reached from there. A snapshot has no working file; a plan snapshot names its plan file.
   if (snapshot) {
     if (p.origin === 'plan' && p.file) head.push(`Plan file: ${p.file}`);
@@ -148,8 +194,9 @@ export function formatPacket(packet, opts = {}) {
     head.push(`Reviewer summary${tag}: ${indentBody(r.body, '  ')}`);
   }
   head.push(countsLine(p));
+  head.push(...editingLines(p));
   if (p.reviews.length === 0 && p.drafts) {
-    head.push(`0 submitted reviews pending; ${plural(p.drafts.length, 'DRAFT comment')} not yet submitted (ask the reviewer to click Submit review)`);
+    head.push(`0 submitted reviews pending; ${plural(p.drafts.length, 'DRAFT comment')} not yet submitted (ask the reviewer to click Send)`);
   }
 
   /** @type {string[]} */
@@ -163,12 +210,12 @@ export function formatPacket(packet, opts = {}) {
     footer.push('DRAFTS (not submitted - do not act on them):');
     for (const d of p.drafts) footer.push(`  ${draftLine(/** @type {any} */ (d))}`);
   }
-  if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the spec (it must stay identical to the final version).`);
+  if (p.replyOnly) footer.push(`APPROVED with FINAL = v${p.final?.version}: reply to each thread; do not edit the doc (it must stay identical to the final version).`);
   else if (p.firstPacket && !approvedDone && items.length) footer.push(...protocolLines(p));
   if (!p.replyOnly && !approvedDone && p.counts.actionable > 0 && !(snapshot && p.origin === 'plan')) footer.push(REPLIES);
   footer.push(`NEXT: ${nextText(p)}`);
 
-  return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
+  return assemble(head, items, footer, maxChars, p.ref ?? p.doc, itemOptions(p));
 }
 
 /**
@@ -190,8 +237,9 @@ function formatCodePacket(p, maxChars) {
     head.push(`Reviewer summary${tag}: ${indentBody(r.body, '  ')}`);
   }
   head.push(countsLine(p));
+  head.push(...editingLines(p));
   if (p.reviews.length === 0 && p.drafts) {
-    head.push(`0 submitted reviews pending; ${plural(p.drafts.length, 'DRAFT comment')} not yet submitted (ask the reviewer to click Submit review)`);
+    head.push(`0 submitted reviews pending; ${plural(p.drafts.length, 'DRAFT comment')} not yet submitted (ask the reviewer to click Send)`);
   }
 
   /** @type {string[]} */
@@ -206,7 +254,17 @@ function formatCodePacket(p, maxChars) {
   else if (p.firstPacket && !approvedDone && items.length) footer.push(...CODE_PROTOCOL);
   if (!p.replyOnly && !approvedDone && p.counts.actionable > 0) footer.push(REPLIES);
   footer.push(`NEXT: ${nextText(p)}`);
-  return assemble(head, items, footer, maxChars, p.ref ?? p.doc);
+  return assemble(head, items, footer, maxChars, p.ref ?? p.doc, itemOptions(p));
+}
+
+/**
+ * How the items of a packet are printed (formatPacketThread): `final`, the version a reply-only packet approved as
+ * final (its `use:` lines ask whether the file goes into a next version instead of into the doc).
+ * @param {Packet} p
+ * @returns {{ final: number | null }}
+ */
+function itemOptions(p) {
+  return { final: p.replyOnly ? p.final?.version ?? null : null };
 }
 
 /**
@@ -217,9 +275,10 @@ function formatCodePacket(p, maxChars) {
  * @param {string[]} footer
  * @param {number} maxChars
  * @param {string} ref the doc as commands name it
+ * @param {{ final?: number | null }} [opts] formatPacketThread options
  * @returns {string}
  */
-function assemble(head, items, footer, maxChars, ref) {
+function assemble(head, items, footer, maxChars, ref, opts = {}) {
   const headText = head.join('\n');
   const footText = footer.join('\n');
   let budget = maxChars - headText.length - footText.length - 4;
@@ -232,7 +291,7 @@ function assemble(head, items, footer, maxChars, ref) {
       overflow.push(t);
       continue;
     }
-    const block = formatPacketThread(t, ref);
+    const block = formatPacketThread(t, ref, opts);
     if (block.length + 2 > budget && blocks.length) {
       overflow.push(t);
       continue;
@@ -313,6 +372,30 @@ function packetHeader(p) {
 }
 
 /**
+ * The header lines about when to edit: APPLY when the reviewer applied planned changes, EDITS when threads to answer
+ * are batched (all the threads not marked APPLY, or only some of them: then it names them). Neither for an approval
+ * that leaves nothing to do, a reply-only approval, a plan (the plan gate wants the plan edited) or a public web page
+ * (nothing to edit).
+ * @param {Packet} p
+ * @returns {string[]}
+ */
+function editingLines(p) {
+  if (p.replyOnly || (p.verdict === 'approved' && p.counts.actionable === 0)) return [];
+  if (p.kind === 'snapshot' && (p.origin === 'plan' || (p.origin === 'url' && p.page && !p.page.private))) return [];
+  const apply = (p.counts.apply ?? 0) > 0;
+  /** @type {string[]} */
+  const out = [];
+  if (apply) out.push(APPLY_LINE);
+  const others = p.threads.filter((t) => t.why !== 'awaiting' && t.why !== 'apply');
+  const batched = others.filter((t) => t.edits === 'batch');
+  if (batched.length) {
+    const only = batched.length < others.length ? batched.map((t) => t.id) : null;
+    out.push(editsLine({ apply, target: p.kind === 'code' ? 'the files' : 'the doc', only }));
+  }
+  return out;
+}
+
+/**
  * The protocol reminder for the kind of doc.
  * @param {Packet} p
  * @returns {string[]}
@@ -359,7 +442,8 @@ function countsLine(p) {
   }
   const resolved = c.resolvedThisRound ? `   (${c.resolvedThisRound} resolved this round)` : '';
   if (c.actionable === 0) {
-    const waiting = c.awaitingReviewer ? ` · ${plural(c.awaitingReviewer, 'thread')} awaiting the reviewer` : '';
+    const planned = c.planned ? ` (${c.planned} planned, waiting for the reviewer's APPLY)` : '';
+    const waiting = c.awaitingReviewer ? ` · ${plural(c.awaitingReviewer, 'thread')} awaiting the reviewer${planned}` : '';
     return `${need}${waiting}${resolved}`;
   }
   const actionable = p.threads.filter((t) => t.why !== 'awaiting');
@@ -370,6 +454,7 @@ function countsLine(p) {
   if (c.reopened) parts.push(`${c.reopened} reopened`);
   if (c.reply) parts.push(plural(c.reply, 'reply', 'replies'));
   if (c.answer) parts.push(c.answer === 1 ? '1 answer to your question' : `${c.answer} answers to your questions`);
+  if (c.apply) parts.push(`${c.apply} to apply`);
   if (c.open) parts.push(`${c.open} still open`);
   return `${need}: ${parts.join(' · ')}${resolved}`;
 }
@@ -405,6 +490,8 @@ function whyLabel(t) {
       return 'REPLY';
     case 'answer':
       return 'ANSWER';
+    case 'apply':
+      return 'APPLY';
     case 'open':
       return 'STILL OPEN';
     case 'awaiting':
@@ -415,7 +502,8 @@ function whyLabel(t) {
 }
 
 /**
- * '[t1] blocking · comment · L42-43 · §3 Tokens > 3.2 Token refresh'.
+ * '[t1] blocking · comment · L42-43 · §3 Tokens > 3.2 Token refresh'. A pending suggestion ends with how it is
+ * applied: `apply verbatim: suiko apply <doc> tN`, or, batched (PacketThread.edits), PLAN_SUGGESTION.
  * @param {PacketThread} t
  */
 export function itemHeader(t) {
@@ -425,9 +513,10 @@ export function itemHeader(t) {
   if (why) parts.push(why);
   if (t.severity && t.severity !== 'normal') parts.push(t.severity);
   parts.push(t.type);
+  const apply = t.apply ? (t.edits === 'batch' ? PLAN_SUGGESTION : `apply verbatim: ${t.apply}`) : null;
   if (isCodeItem(t)) {
     parts.push(codeLocation(t));
-    if (t.apply) parts.push(`apply verbatim: ${t.apply}`);
+    if (apply) parts.push(apply);
     return `[${t.id}] ${parts.join(' · ')}`;
   }
   if (t.target === 'doc') parts.push('GENERAL');
@@ -435,7 +524,7 @@ export function itemHeader(t) {
   else if (t.note) parts.push(t.note);
   if (t.sectionLabel) parts.push(`§${t.sectionLabel}`);
   if (t.label && t.label !== 'text' && t.target !== 'doc' && t.target !== 'section') parts.push(t.label);
-  if (t.apply) parts.push(`apply verbatim: ${t.apply}`);
+  if (apply) parts.push(apply);
   return `[${t.id}] ${parts.join(' · ')}`;
 }
 
@@ -477,9 +566,10 @@ const FILE_STATE_LINE = /** @type {Record<string, string>} */ ({
 /**
  * @param {PacketThread} t
  * @param {string} docId
+ * @param {{ final?: number | null }} [opts] final: the version a reply-only packet approved as final (useLine)
  * @returns {string}
  */
-export function formatPacketThread(t, docId) {
+export function formatPacketThread(t, docId, opts = {}) {
   const out = [itemHeader(t)];
   const code = isCodeItem(t);
   const sug = /** @type {any} */ (t.suggestion);
@@ -501,9 +591,14 @@ export function formatPacketThread(t, docId) {
   }
   const kind = t.attachmentKind ?? (t.label.includes('region') ? 'region' : 'image');
   for (const a of t.attachments ?? []) out.push(attachmentLine(a, kind));
-  // One older comment is the reviewer's original request, which the agent already acted on (design 3.11).
-  if (t.earlier >= 2) out.push(`  (+${t.earlier} earlier, suiko show ${docId} ${t.id})`);
+  // One older comment is the reviewer's original request, which the agent already acted on (design 3.11). An APPLY
+  // item shows that request (the agent only planned), so any comment between it and the plan is pointed to, below it.
+  const shownRequest = t.comments.some((c) => /** @type {any} */ (c).request);
+  const pointer = t.earlier >= (shownRequest ? 1 : 2) ? `  (+${t.earlier} earlier, suiko show ${docId} ${t.id})` : null;
+  if (pointer && !shownRequest) out.push(pointer);
   for (const c of t.comments) {
+    // the reviewer's "Apply this change." request: the APPLY label in the header says it
+    if (/** @type {any} */ (c).apply) continue;
     const body = String(c.body ?? '').trim() ? `: ${indentBody(c.body, '    ')}` : '';
     if (c.kind === 'agent') {
       // a reply without a message (status only) still says what the agent did; the default status is elided only
@@ -513,6 +608,8 @@ export function formatPacketThread(t, docId) {
     } else if (body) {
       out.push(`  ${c.by}${body}`);
     }
+    for (const u of /** @type {any} */ (c).use ?? []) out.push(useLine(u, { code, final: opts.final ?? null }));
+    if (pointer && /** @type {any} */ (c).request) out.push(pointer);
   }
   return out.join('\n');
 }
@@ -551,7 +648,9 @@ export function formatReviseReport(r) {
   const out = [];
   if (r.repliesOnly) {
     out.push(`suiko: ${same}; ${r.dryRun ? 'would post' : 'posted'} ${plural(r.replies.length, 'reply', 'replies')} (no new version)`);
-    for (const rep of r.replies) out.push(`  ${rep.thread} ${rep.status}`);
+    for (const rep of r.replies) out.push(`  ${rep.thread} ${rep.status}${filesNote(rep)}`);
+    // an `addressed` reply with nothing recorded (ops/revise.js notRecorded)
+    for (const w of r.guards?.warnings ?? []) out.push(`  WARN ${w.message}`);
     out.push(r.dryRun ? 'dry run: nothing posted.' : `next: suiko wait ${ref} (background)`);
     return `${out.join('\n')}\n`;
   }
@@ -575,7 +674,7 @@ export function formatReviseReport(r) {
   const linked = new Set((r.hunks ?? []).flatMap((/** @type {any} */ h) => h.threads));
   const assetThreads = new Set((r.assets ?? []).flatMap((/** @type {any} */ a) => a.threads ?? []));
   for (const rep of r.replies) {
-    if (!linked.has(rep.thread) && !assetThreads.has(rep.thread)) out.push(`  ${rep.thread} ${rep.status} (reply only)`);
+    if (!linked.has(rep.thread) && !assetThreads.has(rep.thread)) out.push(`  ${rep.thread} ${rep.status} (reply only)${filesNote(rep)}`);
   }
   out.push(guardsLine(r));
   for (const e of r.guards.errors) out.push(`  ERR (forced) ${e.code}: ${e.message}`);
@@ -588,6 +687,15 @@ export function formatReviseReport(r) {
   else if (r.git?.error) out.push(`git: auto-commit failed: ${oneLine(r.git.error, 200)}`);
   if (!r.dryRun) out.push(`reviewer notified. next: suiko wait ${ref} (background)`);
   return `${out.join('\n')}\n`;
+}
+
+/**
+ * ' (+2 files)' for a reply row that attached files, else ''.
+ * @param {{ files?: number }} rep
+ * @returns {string}
+ */
+function filesNote(rep) {
+  return rep.files ? ` (+${plural(rep.files, 'file')})` : '';
 }
 
 /**
@@ -658,7 +766,8 @@ export function formatStatus(s) {
     out.push(`${d.doc}  ${where}  ${head}  ${d.state}${final}`);
     if (d.kind !== 'snapshot' && d.pathFromCwd && d.pathFromCwd !== d.path) out.push(`  file: ${d.pathFromCwd} (from your working directory)`);
     const c = d.counts;
-    out.push(`  threads: open ${c.open} · addressed ${c.addressed} · answered ${c.answered} · declined ${c.declined} · needs_input ${c.needs_input} · resolved ${c.resolved} · outdated ${c.outdated}   locks: ${d.locks.length ? d.locks.join(' ') : 'none'}`);
+    const planned = c.planned ? ` · planned ${c.planned}` : '';
+    out.push(`  threads: open ${c.open} · addressed ${c.addressed} · answered ${c.answered} · declined ${c.declined} · needs_input ${c.needs_input}${planned} · resolved ${c.resolved} · outdated ${c.outdated}   locks: ${d.locks.length ? d.locks.join(' ') : 'none'}`);
     const last = d.lastReview ? `last review ${d.lastReview.id} on v${d.lastReview.version}` : 'no reviews yet';
     const und = d.undelivered.length ? d.undelivered.join(', ') : 'none';
     out.push(`  reviewer: ${last} · drafts ${d.drafts} · undelivered reviews: ${und}`);
@@ -684,7 +793,8 @@ export function formatLog(l) {
     }
     const resolved = e.resolved.length ? `${e.resolved.join(', ')} resolved` : '';
     const decisions = e.decisions.length ? e.decisions.join(', ') : '';
-    const detail = [resolved, decisions].filter(Boolean).join('; ');
+    const applied = e.apply?.length ? `${e.apply.join(', ')} to apply` : '';
+    const detail = [applied, resolved, decisions].filter(Boolean).join('; ');
     const locks = e.locksAdded.length ? `, lock${e.locksAdded.length > 1 ? 's' : ''} ${e.locksAdded.join(' ')}` : '';
     const final = e.markFinal ? ', FINAL' : '';
     return { a: '', b: `${e.id}  ${e.by}`, c: hhmm(e.at), d: verdictLabel(e.verdict).replace(/ /g, '_'), e: `${plural(e.threads, 'thread')}${detail ? ` (${detail})` : ''}${locks}${final}`, f: '' };
@@ -737,9 +847,11 @@ export function formatThread(s) {
   if (s.on) out.push(`  on: "${s.on}"`);
   for (const e of s.timeline) {
     const body = String(e.body ?? '').trim() ? `: ${indentBody(e.body, '    ')}` : '';
-    if (!body && !(e.kind === 'agent' && e.status)) continue; // nothing to show (e.g. a suggestion without a comment)
+    const files = [...(e.attachments ?? []).map((/** @type {any} */ a) => `    attached: ${a.path} (${a.name})`), ...(e.use ?? []).map((/** @type {any} */ u) => `    use: ${u.path} (${u.name})`)];
+    // nothing to show (e.g. a suggestion without a comment)
+    if (!body && !(e.kind === 'agent' && e.status) && !files.length) continue;
     const meta = e.kind === 'agent' ? [e.status, e.hunk].filter(Boolean).join(', ') : e.review ?? '';
-    out.push(`  v${e.version} ${e.by}${meta ? ` (${meta})` : ''}${body}`);
+    out.push(`  v${e.version} ${e.by}${meta ? ` (${meta})` : ''}${body}`, ...files);
   }
   for (const ch of s.changes ?? []) {
     out.push(`  change v${ch.from}->v${ch.to} ${ch.hunk}:  - ${oneLine(ch.before, 100) || '(nothing)'}  + ${oneLine(ch.after, 100) || '(nothing)'}`);
@@ -829,7 +941,9 @@ export function formatReply(r) {
   const open = !r.status && r.thread.status === 'open'
     ? ` · ${r.thread.id} is still open: reply with --status answered, addressed, declined or needs_input to answer it`
     : '';
-  return `replied on ${r.thread.id}${r.status ? ` (${r.status})` : ''} · no version recorded${open}\n`;
+  const n = r.comment?.attachments?.length ?? 0;
+  const files = n ? ` · attached ${plural(n, 'file')}` : '';
+  return `replied on ${r.thread.id}${r.status ? ` (${r.status})` : ''}${files} · no version recorded${open}\n`;
 }
 
 /**

@@ -532,7 +532,8 @@ describe('content origin', () => {
     assert.equal(r.headers['content-type'], 'text/html; charset=utf-8');
     assert.equal(r.headers['cache-control'], 'no-store');
     assert.equal(r.headers['x-content-type-options'], 'nosniff');
-    assert.equal(r.headers['content-security-policy'], `frame-ancestors http://127.0.0.1:${uport} http://localhost:${uport}`);
+    // the UI frames the doc; 'self' lets the doc frame its own pages (a widget beside it)
+    assert.equal(r.headers['content-security-policy'], `frame-ancestors 'self' http://127.0.0.1:${uport} http://localhost:${uport}`);
     const assetTag = /\/__sr\/([^/]+)\/guest\.js/.exec(r.text)?.[1] ?? '';
     assert.match(assetTag, new RegExp(`^${RENDERER_VERSION}-[0-9a-f]{12}$`), 'asset URLs carry a content hash');
     const tag = `<script src="http://127.0.0.1:${cport}/__sr/${assetTag}/guest.js" data-sr-ui="http://127.0.0.1:${uport} http://localhost:${uport}" data-sr-target="${store1.wsId}/spec/live" data-sr-ignore></script>`;
@@ -630,7 +631,8 @@ describe('content origin', () => {
     const raw = await content(`/c/${k}/live/docs/app.html`);
     assert.ok(!raw.text.includes('guest.js'), 'raw pages get no guest');
     assert.equal(raw.text, APP_HTML);
-    assert.equal(raw.headers['content-security-policy'], `frame-ancestors http://127.0.0.1:${uport} http://localhost:${uport}`);
+    // a page the doc frames (same origin) is allowed in that frame
+    assert.equal(raw.headers['content-security-policy'], `frame-ancestors 'self' http://127.0.0.1:${uport} http://localhost:${uport}`);
   });
 
   test('version assets come from the manifest blobs; unlisted ones fall back to the live rules', async () => {
@@ -684,7 +686,7 @@ describe('content origin', () => {
     assert.equal(r.status, 200);
     assert.equal(
       r.headers['content-security-policy'],
-      `frame-ancestors http://127.0.0.1:${uport} http://localhost:${uport}; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'`,
+      `frame-ancestors 'self' http://127.0.0.1:${uport} http://localhost:${uport}; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'`,
     );
   });
 
@@ -850,6 +852,38 @@ describe('API', () => {
     assert.equal(calls.findLast((c) => c[0] === 'submitReview')?.[1].expectHead, 3);
     assert.equal((await api(p, { verdict: 'approved', expectHead: 4, reviewedVersion: 3 })).status, 200);
     assert.equal(calls.findLast((c) => c[0] === 'submitReview')?.[1].expectHead, 4);
+    assert.equal('edits' in calls.findLast((c) => c[0] === 'submitReview')?.[1], false, 'no edits given: the engine default');
+    assert.equal('apply' in calls.findLast((c) => c[0] === 'submitReview')?.[1], false);
+  });
+
+  test('reviews take instant (a boolean: a one-item send), validated before the engine', async () => {
+    const p = `/api/docs/${store1.wsId}/spec/reviews`;
+    const before = calls.filter((c) => c[0] === 'submitReview').length;
+    for (const bad of [{ instant: 'yes' }, { instant: 1 }, { instant: [] }]) {
+      assert.equal((await api(p, { verdict: 'comment', body: 'x', ...bad })).status, 422, JSON.stringify(bad));
+    }
+    assert.equal(calls.filter((c) => c[0] === 'submitReview').length, before, 'nothing reached the engine');
+    assert.equal((await api(p, { verdict: 'comment', draftIds: ['d1'], instant: true })).status, 200);
+    assert.equal(calls.findLast((c) => c[0] === 'submitReview')?.[1].instant, true);
+    // false or absent: not passed on (the engine moves "since your last review" as before)
+    assert.equal((await api(p, { verdict: 'comment', body: 'x', instant: false })).status, 200);
+    assert.equal('instant' in calls.findLast((c) => c[0] === 'submitReview')?.[1], false);
+  });
+
+  test('reviews take edits (now | batch) and apply (planned thread ids), validated before the engine', async () => {
+    const p = `/api/docs/${store1.wsId}/spec/reviews`;
+    const before = calls.filter((c) => c[0] === 'submitReview').length;
+    for (const bad of [{ edits: 'later' }, { edits: 1 }, { apply: 't1' }, { apply: ['t1', 'x'] }, { apply: [1] }, { apply: Array(1001).fill('t1') }]) {
+      assert.equal((await api(p, { verdict: 'comment', ...bad })).status, 422, JSON.stringify(bad).slice(0, 60));
+    }
+    assert.equal((await api(p, { verdict: 'approved', apply: ['t1'] })).status, 422, 'apply asks for changes: never with an approval');
+    assert.equal(calls.filter((c) => c[0] === 'submitReview').length, before, 'nothing reached the engine');
+    assert.equal((await api(p, { verdict: 'comment', draftIds: [], edits: 'batch', apply: ['t2', 't2', 't5'] })).status, 200);
+    const input = calls.findLast((c) => c[0] === 'submitReview')?.[1];
+    assert.deepEqual([input.edits, input.apply, input.draftIds], ['batch', ['t2', 't5'], []]);
+    // an empty apply is the same as none
+    assert.equal((await api(p, { verdict: 'comment', body: 'x', apply: [] })).status, 200);
+    assert.equal('apply' in calls.findLast((c) => c[0] === 'submitReview')?.[1], false);
   });
 
   test('Accept all (threads/resolve) and its Undo (threads/unresolve): ids validated, deduplicated, as the reviewer', async () => {

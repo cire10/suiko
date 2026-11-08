@@ -89,6 +89,27 @@ describe('drafts and submit', () => {
     await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'about v1', expectHead: 1 });
     assert.equal((await ctx.store.getDoc(DOC))?.lastReviewedVersion, 2);
   });
+
+  test('a one-item send (instant) is stored as such and leaves "since your last review"; the Send dialog and Approve move it', async () => {
+    const { ctx, v1 } = await opened();
+    await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'first look', expectHead: 1 });
+    editFile(ws.file(FILE), '## 1 Goals\n', '## 1 Goals\n\nNew intro.\n');
+    await ops.recordReviewerVersion(ctx, DOC, { summary: 'v2' });
+    // a comment sent right away on v2: v2's changes stay new
+    const d = await ops.saveDraft(ctx, DOC, { kind: 'thread', type: 'comment', capture: textCapture(v1, 'Load test the issuer'), body: 'which load?' });
+    const instant = await ops.submitReview(ctx, DOC, { verdict: 'comment', body: '', draftIds: [d.id], expectHead: 2, instant: true });
+    assert.equal(instant.instant, true);
+    assert.equal((await ctx.store.getDoc(DOC))?.lastReviewedVersion, 1, 'v2 still shows as new');
+    assert.equal((await ctx.store.getReview(DOC, instant.id))?.instant, true, 'stored on the review');
+    await assert.rejects(ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'x', instant: /** @type {any} */ ('yes') }), UsageError);
+    // a review from the Send dialog moves it (and is not marked instant)
+    const dialog = await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'the whole review', expectHead: 2, instant: false });
+    assert.equal('instant' in dialog, false);
+    assert.equal((await ctx.store.getDoc(DOC))?.lastReviewedVersion, 2);
+    // an approval is never instant
+    const approved = await ops.submitReview(ctx, DOC, { verdict: 'approved', body: '', expectHead: 2, instant: true });
+    assert.equal('instant' in approved, false);
+  });
 });
 
 describe('locks and threads', () => {
@@ -359,6 +380,9 @@ describe('doc state, status, log, source, attachments, close', () => {
     const mine = listed.find((d) => d.id === DOC && d.root === ws.root);
     assert.ok(mine, JSON.stringify(listed));
     assert.equal(mine.undelivered, 1);
+    // whose turn, for the doc list (doc-list.test.js has the rule), and the agent's name
+    assert.equal(mine.yourTurn + mine.withAgent, mine.openThreads + /** @type {any} */ (await ctx.store.getDrafts(DOC)).items.filter((/** @type {any} */ d) => d.kind === 'thread').length);
+    assert.equal(mine.agent, 'claude');
 
     const closed = await ops.closeSession(ctx, DOC);
     assert.equal(closed.state, 'closed');

@@ -25,12 +25,20 @@ import { createRuntime } from '../cli/runtime.js';
 import { EXIT } from '../shared/protocol.js';
 import { TOOLS } from './tools.js';
 
+/**
+ * Always in the client's context: how to handle the reviewer's feedback, nothing about how to write the document.
+ */
 const INSTRUCTIONS = [
-  'Suiko: an iterative review loop for HTML/Markdown specs.',
-  'Loop: write the spec once -> suiko_open (show the URL to the user) -> suiko_wait (call again while it returns {"status":"waiting"}) ->',
-  'read the packet; read the file; targeted edits (Edit tool or suiko_edit), then suiko_apply for suggestions ->',
-  'suiko_revise with one reply per thread -> suiko_wait again. On APPROVED: suiko_final (if the packet still lists threads, answer each with suiko_reply first, without editing).',
-  'Never rewrite the whole spec; never touch LOCKED text; never act on drafts.',
+  'Suiko: a review loop for an existing HTML or Markdown document.',
+  'Loop: suiko_open (show the URL to the user) -> suiko_wait (call again while it returns {"status":"waiting"}) ->',
+  'read the packet and the cited lines; change what each thread asks for (Edit or suiko_edit; for a built doc, its sources, then rebuild), suiko_apply for suggestions',
+  '(for a doc built from sources, put the suggested text into the sources and rebuild: suiko_apply changes only the built file) ->',
+  'suiko_revise with one reply per thread ("at": the lines you changed for it) -> suiko_wait again.',
+  'A refusal records nothing: follow its fix lines (undo an unasked change where you made it: for a built doc in its sources, then rebuild; suiko_revert restores only the built file).',
+  'A packet with "EDITS: batch": answer every thread now and reply planned with exactly what you will change, without editing; an APPLY packet: make every planned change in one pass and record one version (status addressed).',
+  'A reply may attach images or an HTML preview you made (attachments); a use: line asks you to put that file into the doc at the thread\'s place.',
+  'On APPROVED: suiko_final (if the packet still lists threads, answer each with suiko_reply first, without editing).',
+  'Never rewrite parts no thread asked about; never touch LOCKED text; never act on drafts.',
 ].join(' ');
 
 /**

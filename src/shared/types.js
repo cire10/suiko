@@ -16,9 +16,16 @@ export {};
 /** @typedef {'thread' | 'comment' | 'review' | 'lock' | 'decision' | 'draft' | 'attachment'} IdKind */
 /** @typedef {'comment' | 'question' | 'suggestion' | 'agent-question'} ThreadType */
 /** @typedef {'blocking' | 'normal' | 'nit'} Severity */
-/** @typedef {'open' | 'addressed' | 'answered' | 'declined' | 'needs_input' | 'resolved'} ThreadStatus */
-/** @typedef {'addressed' | 'answered' | 'declined' | 'needs_input'} AgentReplyStatus */
+/** @typedef {'open' | 'addressed' | 'answered' | 'declined' | 'needs_input' | 'planned' | 'resolved'} ThreadStatus */
+/** @typedef {'addressed' | 'answered' | 'declined' | 'needs_input' | 'planned'} AgentReplyStatus */
 /** @typedef {'comment' | 'changes_requested' | 'approved'} Verdict */
+/** @typedef {'now' | 'batch'} ReviewEdits when the agent edits the doc for a review's threads (protocol.js REVIEW_EDITS) */
+/**
+ * A file an agent attached to a reply (Comment.attachments): `path` is doc-relative ('attachments/a7.html'; the UI's
+ * URL is DocState.attachmentBase + basename(path)), `name` the file's original name ('chart.html'), `kind` 'image'
+ * (png, jpg, gif, webp, svg) or 'html' (a sandboxed preview).
+ * @typedef {{ path: string, name: string, kind: 'image' | 'html' }} CommentAttachment
+ */
 /** @typedef {'text' | 'element' | 'cell' | 'code' | 'section' | 'source' | 'doc' | 'snip'} AnchorKind */
 /** @typedef {'exact' | 'moved' | 'edited' | 'changed' | 'orphaned'} AnchorState */
 /** @typedef {'textmap' | 'narrowed' | 'raw-source' | 'element' | 'block' | 'lines' | 'override'} AnchorMappedBy */
@@ -35,7 +42,8 @@ export {};
  * @property {{ name: string }} reviewer default: git config user.name, then the OS user name
  * @property {{ enforceLocks: boolean, maxRewriteRatio: number, unexplainedWords: number,
  *   unexplainedDeletionLines: number, unexplainedDeletion: 'refuse' | 'warn' | 'off',
- *   writeHook: 'deny' | 'warn' | 'off', writeHookRatio: number }} guards
+ *   writeHook: 'warn' | 'ask' | 'deny' | 'off', writeHookRatio: number }} guards writeHook: the pre-write hook's
+ *   answer to a near-total Write ('warn', the default, and its synonym 'ask': ask the user; 'deny'; 'off')
  * @property {{ minScore: number, minQuoteSim: number, contextChars: number }} anchoring
  * @property {{ network: 'allow' | 'block', mermaid: boolean, math: boolean, highlight: boolean }} render
  * @property {{ autoCommit: boolean }} git
@@ -77,7 +85,8 @@ export {};
  * @property {Actor} createdBy
  * @property {'in_review' | 'approved' | 'closed'} state
  * @property {number} head latest committed version (0 before v1)
- * @property {number | null} lastReviewedVersion version of the newest submitted review
+ * @property {number | null} lastReviewedVersion version of the newest submitted review that reviewed the doc ("since
+ *   your last review"; a one-item send, Review.instant, leaves it)
  * @property {number | null} [acceptedVersion] the newest version whose revisions the reviewer accepted all at once
  *   (Accept all revisions); absent until then
  * @property {DocFinal | null} final
@@ -118,6 +127,9 @@ export {};
  * @property {string} sha256 of the source bytes
  * @property {number} bytes
  * @property {number} lines
+ * @property {number} [textChars] visible text characters of the version (render/index.js textCharsOf: the rendered
+ *   text, scripts and styles excluded, whitespace runs collapsed); absent on versions recorded before 0.4 and on
+ *   code rounds
  * @property {string} createdAt
  * @property {Actor} author
  * @property {string} summary
@@ -299,7 +311,8 @@ export {};
  * @property {string} id
  * @property {number} num display number
  * @property {AnchorKind} kind
- * @property {'open' | 'addressed' | 'resolved' | 'outdated' | 'orphaned' | 'draft' | 'lock' | 'needs_input'} state
+ * @property {'open' | 'addressed' | 'declined' | 'resolved' | 'outdated' | 'orphaned' | 'draft' | 'lock' | 'needs_input' |
+ *   'planned'} state
  * @property {number | null} srid
  * @property {number | null} endSrid
  * @property {string | null} quote rendered text to look for (whitespace-insensitive)
@@ -327,6 +340,11 @@ export {};
  * @property {LineRange} [atLines] agent replies: where the change landed (ReviseInput `at`)
  * @property {string} [atFile] code docs: the repo file of `atLines`
  * @property {true} [auto] written by Suiko, not typed by the agent (e.g. "changed in v3 (L14-18)")
+ * @property {CommentAttachment[]} [attachments] agent replies: images and HTML previews the agent attached
+ * @property {string[]} [use] reviewer replies ("Use in doc"): attachment paths of this thread ('attachments/a7.html')
+ *   the agent is asked to put into the doc at the thread's place
+ * @property {true} [apply] reviewer comments: the "Apply this change." request of a review's `apply` (the thread was
+ *   planned); the UI shows it compactly, the packet labels the thread APPLY instead of printing it
  */
 
 /**
@@ -388,9 +406,14 @@ export {};
  * @property {Verdict} verdict
  * @property {string} body
  * @property {boolean} markFinal
+ * @property {ReviewEdits} [edits] when the agent edits for this review ('now' when absent; always 'now' on approvals)
+ * @property {boolean} [instant] a one-item send from the UI (a comment or reply sent right away, a draft's Send, Use
+ *   in doc, Apply): it did not move the doc's lastReviewedVersion; absent on other reviews (never on an approval)
  * @property {string[]} newThreads
  * @property {Array<{ thread: string, comment: string }>} replies
  * @property {string[]} reopened
+ * @property {string[]} [apply] planned threads this review asked the agent to apply now (reopened, each with an
+ *   "Apply this change." comment marked `apply`); absent when none
  * @property {string[]} resolved
  * @property {string[]} locksAdded
  * @property {string} submittedAt
@@ -417,7 +440,7 @@ export {};
 /**
  * @typedef {{ id: string, kind: 'thread', type: ThreadType, severity: Severity, anchor: Anchor, body: string,
  *   suggestion: Suggestion | null, attachments: string[], updatedAt: string, version?: number }
- *   | { id: string, kind: 'reply', thread: string, body: string, reopen?: boolean, updatedAt: string }
+ *   | { id: string, kind: 'reply', thread: string, body: string, reopen?: boolean, use?: string[], updatedAt: string }
  *   | { id: string, kind: 'resolve', thread: string, decision?: string, updatedAt: string }} DraftItem
  */
 
@@ -550,7 +573,9 @@ export {};
  * @typedef {object} DocState
  * @property {string} ws
  * @property {Doc} doc
- * @property {Array<Pick<VersionManifest, 'v' | 'author' | 'summary' | 'createdAt' | 'stats' | 'guards' | 'respondsTo'>>} versions
+ * @property {Array<Pick<VersionManifest, 'v' | 'author' | 'summary' | 'createdAt' | 'stats' | 'guards' | 'respondsTo'
+ *   | 'lines' | 'textChars'>>} versions `lines`: source lines of the version; `textChars`: its visible text characters
+ *   (absent on older versions and code rounds: fall back to lines)
  * @property {Thread[]} threads
  * @property {Lock[]} locks
  * @property {Review[]} reviews
@@ -558,8 +583,9 @@ export {};
  * @property {Array<{ agent: string, since: string, pid?: number }>} waiters
  * @property {{ dirty: boolean, sha256: string }} working
  * @property {string} contentBase 'http://127.0.0.1:<cport>/c/<docKey>' (a doc URL is `${contentBase}/${ver}/${doc.path}`)
- * @property {string} attachmentBase '<contentBase>/__att/': an attachment's image URL is attachmentBase + basename(path)
- *   (images only; served to the UI origin, refused to the doc's own origin)
+ * @property {string} attachmentBase '<contentBase>/__att/': an attachment's URL is attachmentBase + basename(path)
+ *   (images, SVG under a no-script CSP, and agents' HTML previews under a sandboxing CSP for
+ *   <iframe sandbox="allow-scripts">; served to the UI origin, refused to the doc's own origin)
  * @property {{ name: string }} reviewer
  * @property {Decision[]} decisions
  */
@@ -569,7 +595,8 @@ export {};
 /**
  * @typedef {object} PacketThread
  * @property {string} id
- * @property {'new' | 'reopened' | 'reply' | 'answer' | 'open'} why
+ * @property {'new' | 'reopened' | 'reply' | 'answer' | 'open' | 'apply'} why ('apply': a planned thread the reviewer
+ *   asked to apply now)
  * @property {ThreadType} type
  * @property {Severity} severity
  * @property {ThreadStatus} status
@@ -620,7 +647,9 @@ export {};
  * `revise` input (zod ReviseInput in WP4).
  * @typedef {object} ReviseInput
  * @property {string} summary
- * @property {Record<string, { status: AgentReplyStatus, reply: string, at?: string }>} threads
+ * @property {Record<string, { status: AgentReplyStatus, reply: string, at?: string, attachments?: string[] }>} threads
+ *   attachments: files to attach to the reply (paths relative to the agent's cwd, or absolute; see LIMITS and
+ *   protocol.js AGENT_ATTACHMENT_KINDS)
  * @property {Array<{ at: string, why: string }>} [other] at: 'L12' | 'L12-14' | 'del:h6' | 'h6'
  * @property {Record<string, string>} [breakLocks] lock id -> reason
  * @property {boolean} [allowRewrite]

@@ -6,8 +6,13 @@
 //
 // A command: { id, title, category, description?, keywords?, keys?, help?, scope?, palette?, inline?, when?, run?,
 // items? }
-//   - keys: shortcut combos for keyLabel ('c', 'shift+B', 'mod+k'); the help groups commands by category and merges
-//     the keys of commands that share a help row (c / s / q / a, j / k, 1-4, ...).
+//   - title / description: a string, or a function of the state (wording that names the agent: "Show threads with
+//     Claude"; agentTitle, never "the agent").
+//   - help.label: a string, or a function of the agent's name (the help overlay passes it: "Agree when Claude didn't
+//     change it").
+//   - keys: shortcut combos for keyLabel ('c', 'shift+B', 'mod+k'), or a function of the preferences (the
+//     composer's keys follow Settings > Send comments); the help groups commands by category and merges the keys of
+//     commands that share a help row (c / s / q / a, j / k, 1-4, ...).
 //   - when(s) -> true | 'why it cannot run now': the palette shows the reason on a dimmed row and does not run it.
 //   - items(s) -> PaletteItem[]: a sub-list (Go to thread…, Compare versions…); an item can have items of its own
 //     (the next step). With `inline`, the items also show up in the palette's top-level search under that heading,
@@ -17,17 +22,17 @@
 // The palette's "Recent" group (the last commands run) is kept in localStorage.
 
 import {
-  acceptAll, acceptDecline, acceptFocused, acceptRevisions, applyTheme, closeSession, compareVersions, copyAgentPrompt,
-  copyReviewLink, copySpecPath, cycleTheme, docPath, focusItem, focusedThread, markAllChangesSeen, navChange, navigate,
-  navThread, openComposer, openDialog, openSubmit, readSeen, reloadFrame, reopenFocused, scrollToSrid, seenStorageKey,
-  selectionAction, setCompareLayout, setMode, showChanges, showThreads, snipScreen, startRecording, startReply, stepVersion,
-  submitComposer, submitWithVerdict, switchVersion, toggleBaseKind, toggleHidden, toggleNav, togglePick, toggleSidebar,
-  toggleSingleKeys, toggleSnip,
+  acceptAll, acceptDecline, acceptFocused, acceptRevisions, applyPlanned, applyTheme, closeSession, compareVersions,
+  copyAgentPrompt, copyReviewLink, copySpecPath, cycleTheme, docPath, focusItem, focusedThread, markAllChangesSeen, navChange,
+  navigate, navThread, openComposer, openDialog, openSubmit, readSeen, reloadFrame, reopenFocused, scrollToSrid,
+  seenStorageKey, selectionAction, setCompareLayout, setMode, showChanges, showThreads, snipScreen, startRecording,
+  startReply, stepVersion, submitComposer, submitWithVerdict, switchVersion, toggleBaseKind, toggleHidden, toggleNav,
+  togglePick, toggleSidebar, toggleSingleKeys, toggleSnip,
 } from './actions.js';
 import {
-  acceptableThreads, actorLabel, agentName, baseTag, canSendNow, declinedToVerify, filterCounts, FILTERS, hasMode, kindCaps,
-  modesFor, numericVersion, panelItems, plainMode, relTime, revisionsToAccept, showsDoc, staleApproveText, statusInfo,
-  threadRowTitle, versionNumbers,
+  acceptableThreads, actorLabel, agentName, agentTitle, baseTag, canSendNow, declinedToVerify, filterCounts, hasMode,
+  kindCaps, modesFor, normalizeFilter, numericVersion, panelItems, plainMode, plannedThreads, relTime, revisionsToAccept,
+  showsDoc, staleApproveText, statusInfo, threadRowTitle, turnInfo, versionNumbers,
 } from './model.js';
 
 /** @typedef {import('./state.js').UiState} UiState */
@@ -49,12 +54,12 @@ import {
 /**
  * @typedef {object} Command
  * @property {string} id
- * @property {string} title
+ * @property {string|((s: UiState) => string)} title
  * @property {'Comment'|'Review'|'Navigate'|'View'|'App'} category
  * @property {string|((s: UiState) => string)} [description]
  * @property {string[]} [keywords]
- * @property {string[]} [keys]
- * @property {{ row?: string, label?: string, codeLabel?: string }} [help] the help row this command's keys go in
+ * @property {string[]|((prefs: any) => string[])} [keys]
+ * @property {{ row?: string, label?: string|((agent: string) => string), codeLabel?: string }} [help] the help row this command's keys go in
  *   (default: its own, labelled with `label` or the title; `codeLabel` in a code review, whose view binds the key
  *   to something else)
  * @property {'doc'|'any'} [scope]
@@ -66,7 +71,11 @@ import {
  * @property {string} [placeholder]
  */
 
-/** The shortcuts shown on buttons (titles and kbd hints), in the help and in the palette; handleKey implements them. */
+/**
+ * The shortcuts shown on buttons (titles and kbd hints), in the help and in the palette; handleKey implements them.
+ * add / sendNow are the composer's two keys: which one sends follows Settings > Send comments (model.js
+ * composerKeyAction; composerKeys below).
+ */
 export const KEYS = Object.freeze({
   snip: 'b',
   snipScreen: 'shift+B',
@@ -82,6 +91,30 @@ export const KEYS = Object.freeze({
   settings: 'mod+,',
   help: 'mod+/',
 });
+
+/**
+ * The composer's keys by Settings > Send comments: right away, Cmd/Ctrl+Enter sends and Cmd/Ctrl+Shift+Enter saves a
+ * draft; when I click Send, the other way round.
+ * @param {any} prefs
+ * @returns {{ send: string, save: string }}
+ */
+export function composerKeys(prefs) {
+  return prefs?.sendMode === 'batch' ? { send: KEYS.sendNow, save: KEYS.add } : { send: KEYS.add, save: KEYS.sendNow };
+}
+
+/** A command's keys for these preferences. @param {Command} c @param {any} prefs @returns {string[]} */
+export function commandKeys(c, prefs) {
+  return (typeof c.keys === 'function' ? c.keys(prefs) : c.keys) || [];
+}
+
+/** A command's title in this state. @param {Command} c @param {UiState|null} s */
+export function commandTitle(c, s) {
+  try {
+    return typeof c.title === 'function' ? (s ? c.title(s) : c.title(/** @type {any} */ ({ ds: null }))) : c.title;
+  } catch {
+    return c.id;
+  }
+}
 
 /** Help groups and palette categories, in order. */
 export const CATEGORIES = /** @type {const} */ (['Comment', 'Review', 'Navigate', 'View', 'App']);
@@ -119,7 +152,8 @@ function selectionWhen(s, key) {
 }
 
 /**
- * @param {string} id @param {'c'|'s'|'q'|'a'} key @param {string} title @param {string} description
+ * @param {string} id @param {'c'|'s'|'q'|'a'} key @param {string} title
+ * @param {string|((s: UiState) => string)} description
  * @param {string[]} keywords
  * @returns {Command}
  */
@@ -154,11 +188,11 @@ function threadItems(s) {
   const agent = agentName(s.ds);
   return panelItems(s.ds, 'all', s.version).map((it) => {
     const { title, body } = threadRowTitle(it);
-    const status = it.kind === 'thread' ? statusInfo(it.item, agent).label : 'Draft (not sent yet)';
+    const status = it.kind === 'thread' ? statusInfo(it.item, agent, { drafts: s.ds.drafts, version: s.version }).label : 'Draft (not sent yet)';
     return {
       id: it.id,
       title,
-      description: [status, it.item?.severity === 'blocking' ? 'Blocking' : ''].filter(Boolean).join(' · '),
+      description: [status, it.item?.severity === 'blocking' ? 'Must fix' : ''].filter(Boolean).join(' · '),
       keywords: [body],
       exact: [it.id],
       group: it.kind === 'draft' ? 'Drafts' : 'Threads',
@@ -214,7 +248,7 @@ function versionItems(s) {
     const meta = (ds.versions || []).find((/** @type {any} */ x) => Number(x.v) === v);
     out.push({
       id: String(v),
-      title: `v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' · FINAL' : ''}`,
+      title: `v${v}${v === head ? ' (latest)' : ''}${ds.doc.final?.version === v ? ' · final' : ''}`,
       description: [actorLabel(meta?.author), meta?.summary || '', relTime(meta?.createdAt)].filter(Boolean).join(' · '),
       exact: [`v${v}`, String(v)],
       when: s.version === v ? 'shown now' : busy || true,
@@ -317,16 +351,24 @@ const MODE_COMMANDS = modesFor(null).map((m) => /** @type {Command} */ ({
   run: () => setMode(m.key),
 }));
 
-const FILTER_COMMANDS = FILTERS.map((f) => /** @type {Command} */ ({
-  id: `filter-${f.key}`,
-  title: `Filter threads: ${f.label}`,
+/** @param {UiState} s */
+const agentOf = (s) => agentTitle(agentName(s.ds));
+
+// The thread panel's filters besides Your turn (the 'my-turn' command, key v): the agent's, Done, All.
+const FILTER_COMMANDS = /** @type {const} */ ([
+  ['agent', (/** @type {UiState} */ s) => `Show threads with ${agentOf(s)}`, ['agent', 'claude', 'waiting', 'open', 'planned', 'sent']],
+  ['done', () => 'Show done threads', ['done', 'resolved', 'closed', 'finished']],
+  ['all', () => 'Show all threads', ['all', 'every', 'everything']],
+]).map(([key, title, words]) => /** @type {Command} */ ({
+  id: `filter-${key}`,
+  title,
   category: 'Navigate',
   description: (s) => {
-    const n = s.ds ? filterCounts(s.ds, s.version)[f.key] || 0 : 0;
-    return `${n} thread${n === 1 ? '' : 's'}${s.filter === f.key ? ' · shown now' : ''}`;
+    const n = s.ds ? filterCounts(s.ds, s.version)[key] || 0 : 0;
+    return `${n} thread${n === 1 ? '' : 's'}${normalizeFilter(s.filter, s.ds, s.version) === key ? ' · shown now' : ''}`;
   },
-  keywords: ['filter', 'show', 'list', 'threads', f.key],
-  run: () => showThreads(f.key),
+  keywords: ['filter', 'show', 'list', 'threads', ...words],
+  run: () => showThreads(key),
 }));
 
 const THEMES = /** @type {const} */ (['system', 'light', 'dark']);
@@ -345,8 +387,8 @@ const THEME_COMMANDS = THEMES.map((theme) => /** @type {Command} */ ({
 export const COMMANDS = Object.freeze([
   // ------------------------------------------------------------------------------------------- Comment
   selectionCommand('comment', 'c', 'Comment on the selection', 'Comment on the selected text, or the selected lines in Source', ['note', 'annotate']),
-  selectionCommand('suggest', 's', 'Suggest a change to the selection', 'Propose replacement text for the agent to apply', ['edit', 'rewrite', 'suggestion']),
-  selectionCommand('question', 'q', 'Ask a question about the selection', 'A question the agent answers', ['ask', 'why']),
+  selectionCommand('suggest', 's', 'Suggest a change to the selection', (s) => `Propose replacement text for ${agentOf(s)} to apply`, ['edit', 'rewrite', 'suggestion']),
+  selectionCommand('question', 'q', 'Ask a question about the selection', (s) => `A question ${agentOf(s)} answers`, ['ask', 'why']),
   selectionCommand('agree', 'a', 'Mark the selection agreed', 'Lock it: revisions that change it are refused', ['lock', 'approve part', 'freeze']),
   {
     id: 'general-comment',
@@ -400,12 +442,12 @@ export const COMMANDS = Object.freeze([
   },
   {
     id: 'add',
-    title: 'Add the comment to the review',
+    title: 'Save the comment as a draft',
     category: 'Comment',
-    description: 'Save the open comment as a draft; it goes out with Submit review',
-    keywords: ['save', 'draft', 'add to review'],
-    keys: [KEYS.add],
-    help: { label: 'Add the comment to the review (in the composer)' },
+    description: 'Keep the open comment in your review; it goes out with Send',
+    keywords: ['save', 'draft', 'add to review', 'later'],
+    keys: (prefs) => [composerKeys(prefs).save],
+    help: { label: 'Save the comment as a draft / Add to review (in the composer)' },
     when: (s) => (!s.composer ? 'no comment is open' : s.composer.busy ? 'saving…' : true),
     run: () => {
       submitComposer();
@@ -415,10 +457,10 @@ export const COMMANDS = Object.freeze([
     id: 'send-now',
     title: 'Send the comment now',
     category: 'Comment',
-    description: 'Just this comment, to the agent, right away',
-    keywords: ['send now', 'submit comment', 'immediately'],
-    keys: [KEYS.sendNow],
-    help: { label: 'Send now: this comment alone, right away (in the composer)' },
+    description: (s) => `Just this comment, to ${agentOf(s)}, right away`,
+    keywords: ['send now', 'submit comment', 'immediately', 'send'],
+    keys: (prefs) => [composerKeys(prefs).send],
+    help: { label: 'Send the comment now, on its own (in the composer)' },
     when: (s) => {
       if (!s.composer) return 'no comment is open';
       if (!canSendNow(s.composer)) return 'only a new comment can be sent on its own';
@@ -440,36 +482,36 @@ export const COMMANDS = Object.freeze([
   // ------------------------------------------------------------------------------------------- Review
   {
     id: 'submit',
-    title: 'Submit review…',
+    title: 'Send or approve…',
     category: 'Review',
-    description: 'Everything in the review goes to the agent',
-    keywords: ['send', 'finish', 'review', 'done'],
+    description: (s) => `Your drafts and a verdict go to ${agentOf(s)}; or approve this version`,
+    keywords: ['send', 'submit', 'finish', 'review', 'done', 'approve'],
     keys: [KEYS.submit, KEYS.sendNow],
-    help: { label: 'Submit review: everything in it (the second key while no new comment is open)' },
+    help: { label: 'Send dialog: your drafts and a verdict, or Approve (the second key while no comment is open)' },
     run: () => openSubmit(),
   },
   {
     id: 'submit-comment',
-    title: 'Submit review as Comment',
+    title: 'Send feedback…',
     category: 'Review',
-    description: 'Feedback without a decision',
-    keywords: ['verdict', 'send'],
+    description: (s) => `Your drafts go to ${agentOf(s)}; no decision yet`,
+    keywords: ['verdict', 'send', 'submit', 'comment'],
     run: () => submitWithVerdict('comment'),
   },
   {
     id: 'submit-changes',
-    title: 'Submit review as Request changes',
+    title: 'Send as Needs changes…',
     category: 'Review',
-    description: 'The agent should revise before you approve',
-    keywords: ['verdict', 'request changes', 'reject', 'send'],
+    description: (s) => `${agentOf(s)} should revise before you approve`,
+    keywords: ['verdict', 'request changes', 'reject', 'send', 'submit'],
     run: () => submitWithVerdict('changes_requested'),
   },
   {
     id: 'submit-approve',
-    title: 'Submit review as Approve',
+    title: 'Approve this version…',
     category: 'Review',
-    description: 'The spec is good to go',
-    keywords: ['verdict', 'approve', 'lgtm', 'accept', 'final', 'send'],
+    description: 'This version is good to go',
+    keywords: ['verdict', 'approve', 'lgtm', 'accept', 'final', 'send', 'submit'],
     when: (s) => {
       if (!s.ds) return 'open a document first';
       const head = Number(s.ds.doc.head);
@@ -491,16 +533,16 @@ export const COMMANDS = Object.freeze([
   },
   {
     id: 'accept',
-    title: 'Resolve the focused thread',
+    title: 'Mark the focused thread done',
     category: 'Review',
-    description: 'Accept what the agent did and close the thread',
-    keywords: ['accept', 'resolve', 'close', 'done', 'ok'],
+    description: (s) => `Looks good: accept what ${agentOf(s)} did and close the thread`,
+    keywords: ['accept', 'resolve', 'close', 'done', 'ok', 'looks good'],
     keys: ['x'],
-    help: { label: 'Resolve / accept the focused thread' },
+    help: { label: 'Mark the focused thread done (Looks good / Done)' },
     when: (s) => {
       const w = threadWhen(s);
       if (w !== true) return w;
-      return focusedThread()?.status === 'resolved' ? 'the focused thread is already resolved' : true;
+      return focusedThread()?.status === 'resolved' ? 'the focused thread is already done' : true;
     },
     run: () => {
       acceptFocused();
@@ -510,7 +552,8 @@ export const COMMANDS = Object.freeze([
     id: 'reopen',
     title: 'Reopen the focused thread',
     category: 'Review',
-    keywords: ['unresolve', 'not done'],
+    description: 'Not yet: with a reply saying what still needs to change',
+    keywords: ['unresolve', 'not done', 'not yet'],
     keys: ['o'],
     when: (s) => threadWhen(s),
     run: () => {
@@ -519,16 +562,16 @@ export const COMMANDS = Object.freeze([
   },
   {
     id: 'accept-decline',
-    title: 'Accept the decline of the focused thread',
+    title: 'Leave the focused thread as it is',
     category: 'Review',
-    description: 'Agree with the agent not to make the change',
-    keywords: ['declined', 'won\'t fix'],
+    description: (s) => `${agentOf(s)} didn't change it, and you agree`,
+    keywords: ['declined', 'won\'t fix', 'accept decline', 'agree'],
     keys: ['y'],
-    help: { label: 'Accept a decline' },
+    help: { label: (agent) => `Agree when ${agent} didn't change it` },
     when: (s) => {
       const w = threadWhen(s);
       if (w !== true) return w;
-      return focusedThread()?.status === 'declined' ? true : 'the focused thread is not declined';
+      return focusedThread()?.status === 'declined' ? true : `the focused thread is not one ${agentOf(s)} left unchanged`;
     },
     run: () => {
       acceptDecline();
@@ -536,20 +579,20 @@ export const COMMANDS = Object.freeze([
   },
   {
     id: 'accept-all',
-    title: 'Accept all addressed threads',
+    title: 'Accept all',
     category: 'Review',
     description: (s) => {
       const n = acceptableThreads(s.ds).length;
       const d = declinedToVerify(s.ds).length;
-      return `${n} addressed or answered in Verify${d ? `; ${d} declined stay for you to decide` : ''}. You can undo it`;
+      return `${n} changed or answered by ${agentOf(s)}${d ? `; ${d} it didn't change stay for you to decide` : ''}. You can undo it`;
     },
-    keywords: ['accept', 'resolve', 'all', 'everything', 'bulk', 'verify', 'addressed', 'answered'],
+    keywords: ['accept', 'resolve', 'all', 'everything', 'bulk', 'verify', 'addressed', 'answered', 'looks good', 'done'],
     keys: ['shift+X'],
-    help: { label: 'Accept all addressed or answered threads in Verify (Undo in the toast)' },
+    help: { label: (agent) => `Accept all: every thread ${agent} changed or answered (Undo in the toast)` },
     when: (s) => {
       if (!s.ds) return 'open a document first';
       if (s.version === 'live') return READ_ONLY;
-      return acceptableThreads(s.ds).length ? true : 'nothing addressed or answered is waiting in Verify';
+      return acceptableThreads(s.ds).length ? true : `nothing ${agentOf(s)} changed or answered waits for your check`;
     },
     run: () => {
       acceptAll();
@@ -561,9 +604,9 @@ export const COMMANDS = Object.freeze([
     category: 'Review',
     description: (s) => {
       const todo = revisionsToAccept(s.ds);
-      if (!todo) return 'The latest version\'s changes stop showing as new, and the threads the agent addressed or answered are resolved';
+      if (!todo) return `The latest version's changes stop showing as new, and the threads ${agentOf(s)} changed or answered are done`;
       const n = acceptableThreads(s.ds).length;
-      return `v${todo.version}: its changes stop showing as new${n ? `, and ${n} addressed or answered thread${n === 1 ? ' is' : 's are'} resolved` : ''}. You can undo it`;
+      return `v${todo.version}: its changes stop showing as new${n ? `, and ${n} thread${n === 1 ? '' : 's'} ${agentOf(s)} changed or answered ${n === 1 ? 'is' : 'are'} done` : ''}. You can undo it`;
     },
     keywords: ['accept', 'revisions', 'changes', 'all', 'track changes', 'accept changes', 'markup', 'resolve', 'done', 'version'],
     when: acceptRevisionsWhen,
@@ -572,13 +615,33 @@ export const COMMANDS = Object.freeze([
     },
   },
   {
-    id: 'verify',
-    title: 'Verify queue',
+    id: 'my-turn',
+    title: 'Show your turn',
     category: 'Review',
-    description: 'Threads the agent addressed, waiting for you to accept or reopen',
-    keywords: ['check', 'addressed', 'answered', 'queue'],
+    description: (s) => (s.ds ? `${turnInfo(s.ds, s.version).label}: answers to check, questions, drafts` : 'What waits for you'),
+    keywords: ['my turn', 'your turn', 'verify', 'check', 'addressed', 'answered', 'queue', 'waiting', 'for me', 'todo', 'inbox',
+      'filter', 'pill', 'status'],
     keys: ['v'],
-    run: () => showThreads('verify', { review: true }),
+    help: { label: 'Show your turn (what waits for you)' },
+    run: () => showThreads('mine', { review: true }),
+  },
+  {
+    id: 'apply-planned',
+    title: 'Apply planned changes',
+    category: 'Review',
+    description: (s) => {
+      const n = plannedThreads(s.ds).length;
+      return `${n} planned by ${agentOf(s)}: it makes them in one pass and records one version`;
+    },
+    keywords: ['apply', 'planned', 'batch', 'batched', 'edits', 'make the changes', 'will change'],
+    when: (s) => {
+      if (!s.ds) return 'open a document first';
+      if (s.version === 'live') return READ_ONLY;
+      return plannedThreads(s.ds).length ? true : `${agentOf(s)} has no planned changes`;
+    },
+    run: () => {
+      applyPlanned();
+    },
   },
   {
     id: 'record',
@@ -606,12 +669,12 @@ export const COMMANDS = Object.freeze([
     id: 'close-session',
     title: 'Close the review session…',
     category: 'Review',
-    description: 'End the review; a waiting agent stops waiting (like suiko close)',
+    description: (s) => `End the review; ${agentOf(s)} stops waiting for feedback (like suiko close)`,
     keywords: ['end', 'stop', 'finish', 'close'],
     when: (s) => (s.ds?.doc?.state === 'closed' ? 'the session is already closed' : true),
     placeholder: 'Close the review session?',
-    items: () => [
-      { id: 'confirm', title: 'Close the review session', description: 'The agent is told the review is over', run: () => closeSession() },
+    items: (s) => [
+      { id: 'confirm', title: 'Close the review session', description: `${agentOf(s)} is told the review is over`, run: () => closeSession() },
       { id: 'cancel', title: 'Keep it open', run: () => {} },
     ],
   },
@@ -803,7 +866,7 @@ export const COMMANDS = Object.freeze([
     id: 'toggle-outline',
     title: 'Toggle the outline rail',
     category: 'View',
-    description: 'The outline and history beside the document',
+    description: 'The outline beside the document (the ≡ button)',
     keywords: ['outline', 'rail', 'navigation', 'left', 'toc', 'contents'],
     run: () => toggleNav(),
   },
@@ -842,7 +905,7 @@ export const COMMANDS = Object.freeze([
     id: 'settings',
     title: 'Open settings',
     category: 'App',
-    description: 'Theme, layout, keyboard and behaviour',
+    description: (s) => `General, reading, sending, ${agentOf(s)} and its context`,
     keywords: ['preferences', 'options', 'config'],
     keys: [KEYS.settings],
     help: { label: 'Settings' },
@@ -908,9 +971,9 @@ export const COMMANDS = Object.freeze([
   },
   {
     id: 'copy-prompt',
-    title: 'Copy the "tell the agent" prompt',
+    title: (s) => `Copy the prompt for ${agentOf(s)}`,
     category: 'App',
-    description: 'What to paste into your agent\'s chat after submitting',
+    description: (s) => `What to paste into ${agentOf(s)}'s chat after sending`,
     keywords: ['clipboard', 'agent', 'feedback', 'instruction'],
     run: () => {
       copyAgentPrompt();
@@ -925,6 +988,14 @@ export const COMMANDS = Object.freeze([
     run: () => {
       copySpecPath();
     },
+  },
+  {
+    id: 'doc-info',
+    title: 'Document info',
+    category: 'App',
+    description: 'Path, versions, working copy, page errors, threads that lost their place',
+    keywords: ['status', 'details', 'about', 'path', 'errors', 'final', 'working copy', 'resources', 'orphans'],
+    run: () => openDialog('info'),
   },
 ]);
 
@@ -972,23 +1043,28 @@ export function describe(c, s) {
 /**
  * The keyboard shortcuts overlay, grouped by category: one row per command with keys, except that commands naming
  * the same help row share it (their keys listed together). In a code review (`kind` 'code') a row takes its
- * `codeLabel`: the code view binds j / k to the next / previous file.
+ * `codeLabel`: the code view binds j / k to the next / previous file. The composer's keys follow `prefs` (Send
+ * comments). Labels that name the agent get `agent` (agentTitle of the doc's agent).
  * @param {string} [kind] the doc kind shown (docKindOf)
+ * @param {any} [prefs] the reviewer's preferences (state.js Prefs)
+ * @param {string} [agent] the agent's name as the UI writes it ('Claude')
  * @returns {KeyGroup[]}
  */
-export function helpGroups(kind) {
+export function helpGroups(kind, prefs = null, agent = 'Claude') {
   return CATEGORIES.map((group) => {
     /** @type {Map<string, KeyRow>} */
     const rows = new Map();
     for (const c of COMMANDS) {
-      if (c.category !== group || !c.keys?.length) continue;
+      const keys = commandKeys(c, prefs);
+      if (c.category !== group || !keys.length) continue;
       const id = c.help?.row || c.id;
       const row = rows.get(id);
       if (row) {
-        row.keys.push(...c.keys);
+        row.keys.push(...keys);
         row.commands.push(c.id);
       } else {
-        rows.set(id, { id, keys: [...c.keys], label: (kind === 'code' && c.help?.codeLabel) || c.help?.label || c.title, commands: [c.id] });
+        const label = (kind === 'code' && c.help?.codeLabel) || c.help?.label || commandTitle(c, null);
+        rows.set(id, { id, keys: [...keys], label: typeof label === 'function' ? label(agent) : label, commands: [c.id] });
       }
     }
     return { group, rows: [...rows.values()] };

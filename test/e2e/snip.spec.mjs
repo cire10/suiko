@@ -76,13 +76,13 @@ test('b snips an area of the doc: drag a box, the composer shows the crop, Cmd/C
   const composer = page.getByTestId(TESTID.composer);
   await expect(composer).toBeVisible();
   await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveAttribute('src', /^data:image\/png;base64,/);
-  await expect(composer.locator('.agent-sees')).toContainText('L29');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /L29/);
   // One snip per press: back to select.
   await expect(snipTool).toHaveAttribute('aria-pressed', 'false');
 
   await page.getByTestId(TESTID.composerTextarea).fill('The diagram does not show the token cache.');
   await page.keyboard.press('ControlOrMeta+Shift+Enter');
-  await expect(toastWith(page, 'Sent to the agent')).toBeVisible();
+  await expect(toastWith(page, 'Saved for Claude')).toBeVisible();
   await expect(composer).toBeHidden();
   const d = mock.doc('kitchen-sink');
   expect(d.reviews).toHaveLength(1);
@@ -119,7 +119,7 @@ test('the UI side of a doc snip: the guest enters snip mode, its action opens th
   const composer = page.getByTestId(TESTID.composer);
   await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveAttribute('src', CROP);
   await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveAttribute('alt', /area over "2 Architecture"/);
-  await expect(composer.locator('.agent-sees')).toContainText('L29');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /L29/);
   await expect(composer.locator('.agent-sees')).toContainText('snip (2 blocks)');
   await expect(page.getByTestId(TESTID.snipTool)).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByTestId(TESTID.composerTextarea)).toBeFocused();
@@ -163,7 +163,7 @@ test('b toggles snip mode and Esc cancels it; f and Cmd/Ctrl+Shift+Enter outside
   await page.keyboard.press('b');
   await expect(snipTool).toHaveAttribute('aria-pressed', 'false');
   // From Source mode, b goes back to the rendered doc to snip it.
-  await modeTab(page, 'source').click();
+  await ui.menu('source');
   await focusUi(page);
   await page.keyboard.press('b');
   await expect(modeTab(page, 'review')).toHaveAttribute('aria-selected', 'true');
@@ -201,7 +201,7 @@ test('in the composer Cmd/Ctrl+Enter adds to the review and Cmd/Ctrl+Shift+Enter
   await page.keyboard.press('c');
   await page.getByTestId(TESTID.composerTextarea).fill('When?');
   await page.keyboard.press('ControlOrMeta+Shift+Enter');
-  await expect(toastWith(page, 'Sent to the agent')).toBeVisible();
+  await expect(toastWith(page, 'Saved for Claude')).toBeVisible();
   await expect(page.getByTestId(TESTID.submitReviewDialog)).toHaveCount(0);
   expect(d.reviews).toHaveLength(1);
   expect(d.reviews[0]).toMatchObject({ verdict: 'comment', newThreads: ['t1'] });
@@ -232,7 +232,7 @@ test('Shift+B snips the screen: a hint while the picker waits, then a composer w
   await expect(composer).toBeVisible();
   await expect(hint).toHaveCount(0);
   await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveAttribute('src', /^data:image\/png;base64,/);
-  await expect(composer.locator('.agent-sees')).toContainText('GENERAL');
+  await expect(composer.locator('.agent-sees')).toContainText('General comment');
   await expect(page.getByTestId(TESTID.composerTextarea)).toBeFocused();
   // A screenshot alone is a comment.
   await page.keyboard.press('ControlOrMeta+Enter');
@@ -254,7 +254,7 @@ test('Shift+B snips the screen: a hint while the picker waits, then a composer w
   mock.setScreenSnip({ delayMs: 0 });
   await ui.selectText('rotated on every use');
   await page.getByTestId(TESTID.snipScreen).click();
-  await expect(composer.locator('.agent-sees')).toContainText('"rotated on every use"');
+  await expect(composer.locator('.agent-sees')).toContainText('“rotated on every use”');
   await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveCount(1);
   // Another screen snip while the comment is open is added to it.
   await page.getByTestId(TESTID.composerTextarea).fill('Compare these two.');
@@ -295,14 +295,14 @@ test('Shift+B: Esc in the picker cancels quietly, a busy picker says so, and wit
   await page.getByTestId(TESTID.snipScreen).click();
   await expect(toastWith(page, 'Snipping the screen needs macOS')).toBeVisible();
   await expect(page.getByTestId(TESTID.snipScreen)).toHaveCount(0);
-  // The key says so again without asking the daemon.
+  // The key says so again without asking the daemon (the same toast again replaces the first: one on screen).
   await focusUi(page);
   await page.keyboard.press('Shift+B');
-  await expect(toastWith(page, 'Snipping the screen needs macOS')).toHaveCount(2);
+  await expect(toastWith(page, 'Snipping the screen needs macOS')).toHaveCount(1);
   expect(screenRequests()).toBe(4);
 });
 
-test('the help overlay groups the keys and lists b, Shift+B and Send now; buttons show their keys', async ({ page, ui }) => {
+test('the help overlay groups the keys and lists b, Shift+B and Send now; buttons name their keys', async ({ page, ui }) => {
   await ui.open('kitchen-sink');
   await focusUi(page);
   await page.keyboard.press('?');
@@ -312,7 +312,7 @@ test('the help overlay groups the keys and lists b, Shift+B and Send now; button
   await expect(help.locator('[data-key-row="snip"] kbd')).toHaveText('b');
   await expect(help.locator('[data-key-row="snip-screen"]')).toContainText('Snip anywhere on your screen');
   await expect(help.locator('[data-key-row="snip-screen"] kbd')).toHaveText(/^(⇧B|Shift\+B)$/);
-  await expect(help.locator('[data-key-row="send-now"]')).toContainText('Send now');
+  await expect(help.locator('[data-key-row="send-now"]')).toContainText('Send the comment now');
   await expect(help.locator('[data-key-row="send-now"] kbd')).toHaveText(/^(⌘⇧↵|Ctrl\+Shift\+Enter)$/);
   await expect(help.locator('[data-key-row="add"] kbd')).toHaveText(/^(⌘↵|Ctrl\+Enter)$/);
   await expect(help.locator('[data-key-row="submit"] kbd').first()).toHaveText('f');
@@ -320,14 +320,17 @@ test('the help overlay groups the keys and lists b, Shift+B and Send now; button
   await expect(help).toHaveCount(0);
 
   await expect(page.getByTestId(TESTID.snipTool)).toHaveAttribute('title', /\(b\)$/);
-  await expect(page.getByTestId(TESTID.snipTool).locator('kbd')).toHaveText('b');
+  // the dock's tools name their keys in their tooltips, without key badges
+  await expect(page.getByTestId(TESTID.toolDock).locator('kbd')).toHaveCount(0);
   await expect(page.getByTestId(TESTID.snipScreen)).toHaveAttribute('title', /\((⇧B|Shift\+B)\)$/);
   await expect(page.getByTestId(TESTID.pickTool)).toHaveAttribute('title', /\(e\)$/);
   await expect(page.getByTestId(TESTID.submitReviewOpen)).toHaveAttribute('title', /\(f, or (⌘⇧↵|Ctrl\+Shift\+Enter) when no comment is open\)/);
-  await page.getByRole('button', { name: 'General comment' }).click();
+  await ui.generalComment();
+  // the composer's main button shows its key; the other names it in its tooltip (the row stays one line)
   await expect(page.getByTestId(TESTID.composerAdd).locator('kbd')).toHaveText(/^(⌘↵|Ctrl\+↵)$/);
-  await expect(page.getByTestId(TESTID.composerSendNow).locator('kbd')).toHaveText(/^(⌘⇧↵|Ctrl\+⇧\+↵)$/);
-  await expect(page.getByTestId(TESTID.composerSendNow)).toHaveAttribute('title', /Send just this comment/);
+  await expect(page.getByTestId(TESTID.composerSendNow).locator('kbd')).toHaveCount(0);
+  await expect(page.getByTestId(TESTID.composerSendNow)).toHaveAttribute('title', /^Send this comment to Claude now \((⌘⇧↵|Ctrl\+Shift\+Enter)\)$/);
+  await expect(page.getByTestId(TESTID.composerSendNow)).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+Enter Control+Shift+Enter');
 });
 
 test('`suiko snip` from a terminal: the draft appears with a toast, [Edit] opens it; with --send it goes straight out', async ({ page, ui, mock }) => {
@@ -356,6 +359,8 @@ test('`suiko snip` from a terminal: the draft appears with a toast, [Edit] opens
   await expect(sent).toHaveCount(1);
   await expect(sent.getByRole('button', { name: 'Edit' })).toHaveCount(0);
   expect(d.reviews).toHaveLength(1);
+  // the thread waits for Claude: listed under All (the panel shows Your turn, where the draft d1 is)
+  await page.locator('.thread-panel .filter[data-filter="all"]').click();
   await expect.poll(() => naturalWidth(ui.card('t1').locator('.card-attachments img'))).toBe(64);
   expect(d.drafts.items.map((x) => x.id)).toEqual(['d1']);
 });
@@ -377,9 +382,9 @@ test('b against the REAL daemon and engine: the snip becomes a snip anchor with 
     await page.mouse.up();
     const composer = page.getByTestId(TESTID.composer);
     await expect(composer.getByTestId(TESTID.composerAttachment)).toHaveAttribute('src', /^data:image\/png;base64,/);
-    await expect(composer.locator('.agent-sees')).toContainText('L29');
+    await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /L29/);
     await page.keyboard.press('ControlOrMeta+Shift+Enter'); // no text: the snip speaks for itself
-    await expect(toastWith(page, 'Sent to the agent')).toBeVisible();
+    await expect(toastWith(page, 'Saved for Claude')).toBeVisible();
 
     const st = /** @type {any} */ (await real.state('kitchen-sink'));
     expect(st.reviews).toHaveLength(1);
@@ -412,7 +417,7 @@ test('Shift+B against the REAL daemon with a fake screencapture: the screenshot 
     await expect(composer.locator('.agent-sees')).not.toContainText('Locating');
     await page.getByTestId(TESTID.composerTextarea).fill('This is what I see on my screen.');
     await page.keyboard.press('ControlOrMeta+Shift+Enter');
-    await expect(toastWith(page, 'Sent to the agent')).toBeVisible();
+    await expect(toastWith(page, 'Saved for Claude')).toBeVisible();
 
     const st = /** @type {any} */ (await real.state('kitchen-sink'));
     expect(st.reviews).toHaveLength(1);

@@ -605,8 +605,8 @@ describe('the real agent loop (CLI processes + daemon API)', () => {
       stdin: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: wsFile(MD), content: '# Rewritten\n' }, cwd: WS }),
     });
     const deny = JSON.parse(pw.stdout).hookSpecificOutput;
-    assert.equal(deny.permissionDecision, 'deny');
-    assert.match(deny.permissionDecisionReason, /docs\/kitchen-sink\.md is under Suiko/);
+    assert.equal(deny.permissionDecision, 'ask', 'by default the user decides (guards.writeHook "warn")');
+    assert.match(deny.permissionDecisionReason, /^Suiko: this Write would replace \d+% of the text of docs\/kitchen-sink\.md, which is under review/);
     // outside a workspace: silent, exit 0
     const none = await ok(['hook', 'prompt'], { stdin: JSON.stringify({ prompt: 'x', cwd: USER_HOME }) });
     assert.equal(none.stdout, '');

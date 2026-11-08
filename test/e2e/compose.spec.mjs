@@ -45,22 +45,22 @@ test.describe('the side panel width', () => {
     await ui.open('kitchen-sink');
     const before = await panelWidth(page);
     const doc = await docWidth(page);
-    expect(before).toBe(384);
+    expect(before).toBe(360);
 
     await dragBy(page, -200);
-    expect(await panelWidth(page)).toBe(584);
+    expect(await panelWidth(page)).toBe(560);
     expect(await docWidth(page)).toBe(doc - 200);
     await expect(page.locator('html.is-resizing-panel')).toHaveCount(0);
 
     await page.reload();
     await ui.ready();
-    expect(await panelWidth(page)).toBe(584);
+    expect(await panelWidth(page)).toBe(560);
 
     await resizer(page).dblclick();
-    expect(await panelWidth(page)).toBe(384);
+    expect(await panelWidth(page)).toBe(360);
     await page.reload();
     await ui.ready();
-    expect(await panelWidth(page)).toBe(384);
+    expect(await panelWidth(page)).toBe(360);
     expect(ui.errors).toEqual([]);
   });
 
@@ -80,7 +80,8 @@ test.describe('the side panel width', () => {
     await dragBy(page, -1000);
     expect(await docWidth(page)).toBe(360);
     const wide = await panelWidth(page);
-    expect(wide).toBe(800);
+    // the outline rail is behind ≡ at 1400 px: the panel and the doc share the whole width
+    expect(wide).toBe(1040);
 
     // Between 900 and 1199 px: the panel gives way, and comes back with the room.
     await page.setViewportSize({ width: 1000, height: 800 });
@@ -99,15 +100,15 @@ test.describe('the side panel width', () => {
     await ui.open('kitchen-sink');
     const handle = resizer(page);
     await handle.focus();
-    await expect(handle).toHaveAttribute('aria-valuenow', '384');
+    await expect(handle).toHaveAttribute('aria-valuenow', '360');
     await page.keyboard.press('ArrowLeft');
-    expect(await panelWidth(page)).toBe(416);
-    await expect(handle).toHaveAttribute('aria-valuenow', '416');
+    expect(await panelWidth(page)).toBe(392);
+    await expect(handle).toHaveAttribute('aria-valuenow', '392');
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowRight');
-    expect(await panelWidth(page)).toBe(352);
+    expect(await panelWidth(page)).toBe(328);
     await expect(handle).toHaveAttribute('aria-valuemin', '280');
-    await expect(handle).toHaveAttribute('aria-valuemax', '800');
+    await expect(handle).toHaveAttribute('aria-valuemax', '1040');
     expect(ui.errors).toEqual([]);
   });
 
@@ -281,9 +282,10 @@ test.describe('the comment box', () => {
     expect(ui.errors).toEqual([]);
   });
 
-  test('the reply box and the Submit dialog have the same tools', async ({ page, ui }) => {
+  test('the reply box and the Send dialog have the same tools', async ({ page, ui }) => {
     await ui.open('kitchen-sink');
     await page.locator(`[data-testid="${TESTID.modeTab}"][data-mode="review"]`).click();
+    await page.locator('.thread-panel .filter[data-filter="all"]').click();
     const card = ui.card('t3');
     await card.getByRole('button', { name: 'Reply', exact: true }).click();
     const reply = page.getByTestId(TESTID.replyTextarea);

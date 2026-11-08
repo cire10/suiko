@@ -1,11 +1,15 @@
 // @ts-check
 // Pure rules about thread state shared by packets, guards, status and the UI state (design 9.3):
 // - A thread is ACTIONABLE (the agent must act) when its status is `open`, or when its newest comment is the
-//   reviewer's and comes after the newest agent comment and it is not `resolved`.
-// - `why` labels an actionable thread in a packet: `new` (the agent has not received it before), `reopened`,
-//   `answer` (the reviewer replied to the agent's needs_input), `reply` (a reviewer reply on an addressed,
-//   answered or declined thread) or `open` (still open from an earlier packet).
-// - AWAITING REVIEWER: not actionable and not resolved (the agent replied; the reviewer has to verify).
+//   reviewer's and comes after the newest agent comment and it is not `resolved`. A `planned` thread (batched edits:
+//   the agent said what it will change and waits for the reviewer's APPLY) is therefore not actionable, so `wait`
+//   never counts it as unanswered; a review's `apply` reopens it with an "Apply this change." comment.
+// - `why` labels an actionable thread in a packet: `new` (the agent has not received it before), `apply` (the
+//   reviewer asked to apply a planned change now: a comment marked `apply` after the agent's last reply),
+//   `reopened`, `answer` (the reviewer replied to the agent's needs_input), `reply` (a reviewer reply on an
+//   addressed, answered, declined or planned thread) or `open` (still open from an earlier packet).
+// - AWAITING REVIEWER: not actionable and not resolved (the agent replied; the reviewer has to verify, or, for a
+//   planned thread, to apply it).
 // - The packet conversation shows the last agent reply and every reviewer comment after it; older comments are
 //   collapsed into a count. Comments without content (an empty body, e.g. a suggestion submitted without a
 //   comment) are left out everywhere they are printed.
@@ -14,7 +18,7 @@
  * @typedef {import('../../shared/types.js').Thread} Thread
  * @typedef {import('../../shared/types.js').Comment} Comment
  * @typedef {import('../../shared/types.js').Anchor} Anchor
- * @typedef {'new' | 'reopened' | 'reply' | 'answer' | 'open'} Why
+ * @typedef {'new' | 'reopened' | 'reply' | 'answer' | 'open' | 'apply'} Why
  */
 
 /**
@@ -66,12 +70,25 @@ export function whyOf(thread, ctx) {
   }
   if (lastHuman > lastAgent) {
     const agentStatus = thread.comments[lastAgent]?.status;
+    if (applyRequested(thread)) return 'apply';
     if (ctx.reopenedIn?.has(thread.id)) return 'reopened';
     if (agentStatus === 'needs_input') return 'answer';
     if (thread.status === 'open' && agentStatus && agentStatus !== 'needs_input') return 'reopened';
     return 'reply';
   }
   return 'open';
+}
+
+/**
+ * Whether the reviewer asked to apply the thread's planned change and the agent has not replied since: a reviewer
+ * comment marked `apply` (submit.js, a review's `apply`) after the agent's last comment.
+ * @param {Thread} thread
+ * @returns {boolean}
+ */
+export function applyRequested(thread) {
+  if (!thread || thread.status === 'resolved') return false;
+  const { lastAgent } = lastIndexes(thread);
+  return (thread.comments ?? []).slice(lastAgent + 1).some((c) => c?.by?.kind !== 'agent' && c?.apply === true);
 }
 
 /**

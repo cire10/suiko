@@ -288,11 +288,11 @@ const VERDICT_TEXT = /** @type {Record<string, string>} */ ({
   approved: 'APPROVED',
 });
 
-const WHY_LABEL = /** @type {Record<string, string>} */ ({ reopened: 'REOPENED', reply: 'REPLY', answer: 'ANSWER' });
+const WHY_LABEL = /** @type {Record<string, string>} */ ({ reopened: 'REOPENED', reply: 'REPLY', answer: 'ANSWER', apply: 'APPLY' });
 
 const PROTOCOL_LINES = [
-  'PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.',
-  "  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.",
+  'PROTOCOL: change only what the threads ask for; src> lines are exact Edit old_string (for a built doc, change its sources and rebuild); edit bottom-up. Suggestions: `suiko apply` (for a doc built from sources: put the text into the sources and rebuild).',
+  "  Questions: answer in the thread's reply; edit only if the answer belongs in the doc. Unsure: status needs_input.",
   'REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).',
 ];
 
@@ -369,14 +369,14 @@ function formatPacket(p) {
   if (Array.isArray(p.drafts)) {
     out.push(
       p.drafts.length
-        ? `DRAFTS (not submitted - do not act on them; ask the reviewer to click Submit review): ${p.drafts.length}`
+        ? `DRAFTS (not submitted - do not act on them; ask the reviewer to click Send): ${p.drafts.length}`
         : 'DRAFTS: none',
     );
     for (const d of p.drafts) {
       out.push(`  [${d.id}] ${d.kind === 'reply' ? `reply on ${d.thread}` : d.type ?? 'comment'}: ${excerpt(d.body, 100)}`);
     }
   }
-  if (p.replyOnly) out.push('APPROVED with a final version: reply to each thread; do not edit the spec.');
+  if (p.replyOnly) out.push('APPROVED with a final version: reply to each thread; do not edit the doc.');
   else if (threads.length) out.push(...PROTOCOL_LINES);
   if (p.next) out.push(`NEXT: ${p.next}`);
   return out.join('\n');
@@ -415,7 +415,8 @@ function packetThreadHeader(p, t) {
   if (section) parts.push(section);
   if (t.target && t.target !== 'text' && t.label) parts.push(t.label);
   if (t.type === 'suggestion' && t.suggestion && t.suggestion.status !== 'applied') {
-    parts.push(`apply verbatim: ${t.apply ?? `suiko apply ${p.doc} ${t.id}`}`);
+    // batched edits: the suggestion is planned now and applied in the APPLY round
+    parts.push(t.edits === 'batch' ? 'suggestion: plan it now; it is applied in the APPLY round' : `apply verbatim: ${t.apply ?? `suiko apply ${p.doc} ${t.id}`}`);
   }
   return parts.join(' · ');
 }
@@ -454,6 +455,15 @@ function formatReviseReport(r) {
   const hunks = Array.isArray(r?.hunks) ? r.hunks : [];
   const errors = r?.guards?.errors ?? [];
   const warnings = r?.guards?.warnings ?? [];
+  const text = (/** @type {any} */ x) => (typeof x === 'string' ? x : x?.message ?? JSON.stringify(x));
+  if (r?.repliesOnly) {
+    const replies = Array.isArray(r.replies) ? r.replies : [];
+    out.push(`suiko: working copy matches v${r.from ?? '?'}; ${r.dryRun ? 'would post' : 'posted'} ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} (no new version)`);
+    for (const rep of replies) out.push(`  ${rep.thread} ${rep.status}`);
+    for (const w of warnings) out.push(`  WARN ${text(w)}`);
+    out.push(r.dryRun ? 'dry run: nothing posted.' : `next: suiko wait ${r.doc ?? '<doc>'} (background)`);
+    return out.join('\n');
+  }
   if (r?.refused) {
     out.push('suiko: REFUSED - nothing recorded (exit 3)');
     for (const e of errors) out.push(`  ERR ${typeof e === 'string' ? e : e.message ?? JSON.stringify(e)}`);
@@ -475,7 +485,7 @@ function formatReviseReport(r) {
     const linked = hunks.some((/** @type {any} */ h) => h.threads?.includes(rep.thread));
     if (!linked) out.push(`  ${rep.thread} ${rep.status} (reply only)`);
   }
-  out.push(`guards: ${errors.length || warnings.length ? '' : 'ok'}${[...errors.map((/** @type {any} */ e) => `ERR ${e}`), ...warnings.map((/** @type {any} */ w) => `WARN ${w}`)].join(' · ')}`);
+  out.push(`guards: ${errors.length || warnings.length ? '' : 'ok'}${[...errors.map((/** @type {any} */ e) => `ERR ${text(e)}`), ...warnings.map((/** @type {any} */ w) => `WARN ${text(w)}`)].join(' · ')}`);
   const a = r?.anchors;
   if (a) out.push(`anchors: ${a.exact ?? 0} exact, ${a.moved ?? 0} moved, ${a.edited ?? 0} edited, ${a.changed ?? 0} changed, ${a.orphaned ?? 0} orphaned`);
   if (r?.version && !r?.dryRun) out.push(`reviewer notified${r.notified ? '' : ' (no UI open)'}. next: suiko wait ${r.doc ?? '<doc>'} (background)`);

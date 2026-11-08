@@ -1,7 +1,7 @@
 // @ts-check
 // Source mode (design 8.7 / 11.3): the numbered source of the shown version, or a diff table against the base
 // (unified or split, word highlights, hunk ids, thread chips). Click a line number (shift-click for a range) and
-// press C, or use the bar, to comment on source lines (capture {kind:'source', startLine, endLine}).
+// press c, or use the bar, to comment on source lines (capture {kind:'source', startLine, endLine}).
 
 import { html, useEffect, useMemo, useRef, useState } from 'preact-htm';
 import { docApi } from '../api.js';
@@ -139,7 +139,7 @@ export function SourceView() {
       ${s.sel ? html`<span class="sel-bar"><strong>${linesLabel([s.sel.from, s.sel.to])}</strong> selected
         <button type="button" class="btn btn-sm btn-primary" onClick=${comment} title="Comment on these lines (c)">Comment</button>
         <button type="button" class="btn btn-sm" onClick=${() => store.set({ sourceSel: null })}>Clear</button></span>`
-        : canComment ? html`<span class="small muted">Click a line number (shift-click for a range), then press C.</span>`
+        : canComment ? html`<span class="small muted">Click a line number (shift-click for a range), then press c.</span>`
           : html`<span class="small muted">Working copy preview: read-only.</span>`}
     </div>
     ${data.loading && !data.source ? html`<p class="muted pad">Loading source…</p>` : null}

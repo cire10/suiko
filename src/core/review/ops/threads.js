@@ -3,10 +3,12 @@
 //   reviewer: resolveThread (Accept, optional decision), unresolveThread, resolveThreads / unresolveThreads (Accept
 //             all, and its Undo), acceptRevisions / unacceptRevisions (Accept all revisions, and its Undo),
 //             moveThread ("Move here")
-//   agent:    reply (no version), ask (agent-question thread, status needs_input), reanchorThread (override;
+//   agent:    reply (no version; optional `attachments`: files the agent made, copied into the store, see
+//             ../attachments.js), ask (agent-question thread, status needs_input), reanchorThread (override;
 //             applied to head when the working copy is clean, else staged until the next revise)
 //   readers:  threads (one line per thread), show (a thread's timeline, or exact old source lines)
-// Agent ops acknowledge delivered reviews (amendments 2.4).
+// Agent ops acknowledge delivered reviews (amendments 2.4). A reply's status may be `planned` (batched edits: what
+// the agent will change, applied later in an APPLY round).
 
 import { AGENT_REPLY_STATUS, SSE } from '../../../shared/protocol.js';
 import { RefusedError, UsageError } from '../../store/errors.js';
@@ -20,6 +22,7 @@ import { kindOf } from '../kinds.js';
 import { askCode, reanchorCode } from '../../code/threads.js';
 import { codeFileSource } from '../../code/files.js';
 import { anchorForCapture, describe, envOf, forwardAnchor, label as anchorLabel, overrideAnchor } from '../anchoring.js';
+import { loadAttachments, storeAttachments, useTargets } from '../attachments.js';
 import { sectionPath, truncate } from '../labels.js';
 import { anchorAt, hasContent, isActionable, isOutdated, lastIndexes } from '../threadstate.js';
 import { resolveInPlace } from './submit.js';
@@ -340,20 +343,25 @@ async function moveCodeThread(ctx, doc, t, v, input) {
 }
 
 /**
- * Agent reply without recording a version.
+ * Agent reply without recording a version. `attachments`: files to attach (paths relative to ctx.cwd, or absolute;
+ * checked before anything changes, see ../attachments.js).
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {string} tid
- * @param {{ body: string, status?: string | null, at?: string | null, decision?: string | null }} input
+ * @param {{ body: string, status?: string | null, at?: string | null, decision?: string | null, attachments?: string[] | null }} input
  * @returns {Promise<{ thread: Thread, comment: object, status: string | null }>}
  */
 export async function reply(ctx, ref, tid, input) {
+  const files = await loadAttachments(ctx, input?.attachments ?? null, { what: `reply to ${tid}` });
   return withDoc(
     ctx,
     ref,
     async (doc) => {
       const t = await requireThread(ctx, doc.id, tid);
-      const comment = addAgentReply(ctx, doc, t, input);
+      const { attachments: _paths, ...rest } = input ?? {};
+      const comment = addAgentReply(ctx, doc, t, rest);
+      // copied only once the reply itself is valid; the ids are saved with doc.json below
+      if (files.length) /** @type {any} */ (comment).attachments = await storeAttachments(ctx, doc, files);
       await ctx.store.saveDoc(doc);
       await ctx.store.saveThread(doc.id, t);
       await emit(ctx, doc.id, SSE.THREAD_UPDATED, { thread: t.id, status: t.status });
@@ -365,10 +373,12 @@ export async function reply(ctx, ref, tid, input) {
 
 /**
  * Appends an agent reply to a thread in memory and updates its status (a resolved thread stays resolved).
+ * `attachments`: CommentAttachment records of files already stored (attachments.js storeAttachments).
  * @param {Ctx} ctx
  * @param {Doc} doc
  * @param {Thread} t
- * @param {{ body?: string, reply?: string, status?: string | null, at?: string | null, decision?: string | null }} input
+ * @param {{ body?: string, reply?: string, status?: string | null, at?: string | null, decision?: string | null,
+ *   attachments?: import('../../../shared/types.js').CommentAttachment[] | null }} input
  * @param {number} [version] version the reply refers to (default head)
  * @returns {import('../../../shared/types.js').Comment}
  */
@@ -384,11 +394,13 @@ export function addAgentReply(ctx, doc, t, input, version = doc.head) {
       if (isCode(doc)) Object.assign(c, codeAt(t, String(input.at), version));
       else c.atLines = parseLinesArg(input.at);
     } catch (err) {
-      const hint = !isCode(doc) && /[^,\s]:L?\d/i.test(String(input.at)) ? ' (file paths are for code reviews; give lines of the spec, e.g. "L42-46")' : '';
+      const hint = !isCode(doc) && /[^,\s]:L?\d/i.test(String(input.at)) ? ' (file paths are for code reviews; give lines of the doc, e.g. "L42-46")' : '';
       throw new UsageError(`reply to ${t.id}: invalid "at" ${JSON.stringify(input.at)}: ${/** @type {Error} */ (err).message}${hint}`);
     }
   }
   if (input.decision) c.decision = String(input.decision);
+  const files = (Array.isArray(input.attachments) ? input.attachments : []).filter((a) => a && typeof a.path === 'string');
+  if (files.length) c.attachments = files.map((a) => ({ path: a.path, name: String(a.name ?? a.path), kind: a.kind === 'html' ? 'html' : 'image' }));
   t.comments.push(c);
   if (status && t.status !== 'resolved') t.status = status;
   t.updatedAt = c.at;
@@ -430,7 +442,7 @@ export async function ask(ctx, ref, input) {
         if (input.quote) throw new UsageError('ask: code reviews take --file and --lines, not --quote');
         return askCode(ctx, doc, { file: input.file ? String(input.file) : null, lines: toRange(input.lines), body });
       }
-      if (input.file) throw new UsageError(`ask: --file is for code reviews; ${doc.id} is a spec (use --lines or --quote)`);
+      if (input.file) throw new UsageError(`ask: --file is for code reviews; ${doc.id} is a document (use --lines or --quote)`);
       const head = await readHead(ctx, doc);
       const working = await readWorkingState(ctx, doc, head);
       const lines = toRange(input.lines);
@@ -498,7 +510,7 @@ export async function reanchorThread(ctx, ref, tid, input) {
         await requireThread(ctx, doc.id, tid);
         return reanchorCode(ctx, doc, tid, { file: input.file ? String(input.file) : null, lines });
       }
-      if (input?.file) throw new UsageError(`reanchor: --file is for code reviews; ${doc.id} is a spec`);
+      if (input?.file) throw new UsageError(`reanchor: --file is for code reviews; ${doc.id} is a document`);
       const t = await requireThread(ctx, doc.id, tid);
       const head = await readHead(ctx, doc);
       const working = await readWorkingState(ctx, doc, head);
@@ -525,8 +537,8 @@ export async function reanchorThread(ctx, ref, tid, input) {
 }
 
 /**
- * One row per thread, optionally filtered: open | addressed | answered | declined | needs_input | resolved |
- * outdated | actionable | all (default: every unresolved thread).
+ * One row per thread, optionally filtered: open | addressed | answered | declined | needs_input | planned |
+ * resolved | outdated | actionable | all (default: every unresolved thread).
  * @param {Ctx} ctx
  * @param {string | Doc} ref
  * @param {{ status?: string }} [opts]
@@ -605,7 +617,7 @@ export async function show(ctx, ref, { thread, version, lines, file, side } = {}
     ref,
     async (doc) => {
       if (!thread && file) {
-        if (!isCode(doc)) throw new UsageError(`show: --file is for code reviews; ${doc.id} is a spec`);
+        if (!isCode(doc)) throw new UsageError(`show: --file is for code reviews; ${doc.id} is a document`);
         const v = /** @type {number} */ (parseVersionArg(version, { fallback: doc.head }));
         return { kind: 'code-source', doc: doc.id, ...(await codeFileSource(ctx, doc, { path: String(file), v, side: side === 'old' ? 'old' : 'new' })) };
       }
@@ -662,6 +674,7 @@ async function showThread(ctx, doc, t) {
     hunk: c.by?.kind === 'agent' ? (t.changes ?? []).filter((ch) => ch.version === c.version).map((ch) => ch.hunk).join(' ') || null : null,
     body: c.body ?? '',
     at: c.at,
+    ...commentFiles(ctx, doc, t, c),
   }));
   const { lastAgent, lastHuman } = lastIndexes(t);
   let statusLabel = t.status.toUpperCase();
@@ -715,6 +728,7 @@ async function showCodeThread(ctx, doc, t) {
     hunk: c.by?.kind === 'agent' ? (t.changes ?? []).filter((ch) => ch.version === c.version).map((ch) => ch.hunk).join(' ') || null : null,
     body: c.body ?? '',
     at: c.at,
+    ...commentFiles(ctx, doc, t, c),
   }));
   const { lastAgent, lastHuman } = lastIndexes(t);
   let statusLabel = t.status.toUpperCase();
@@ -741,6 +755,34 @@ async function showCodeThread(ctx, doc, t) {
     timeline,
     changes: [],
   };
+}
+
+/**
+ * The files of a comment for `show`: an agent reply's attachments and a reviewer reply's `use` (absolute paths with
+ * their names), and the `apply` marker of an "Apply this change." request. {} when it has none.
+ * @param {Ctx} ctx
+ * @param {Doc} doc
+ * @param {Thread} t
+ * @param {import('../../../shared/types.js').Comment} c
+ * @returns {{ attachments?: Array<{ path: string, name: string, kind: string }>, use?: Array<{ path: string, name: string }>, apply?: true }}
+ */
+function commentFiles(ctx, doc, t, c) {
+  /** @type {ReturnType<typeof commentFiles>} */
+  const out = {};
+  const abs = (/** @type {string} */ rel) => {
+    try {
+      return ctx.store.attachmentPath(doc.id, rel);
+    } catch {
+      return rel; // not a stored attachment name (hand-edited data): shown as recorded
+    }
+  };
+  if (c.attachments?.length) out.attachments = c.attachments.map((a) => ({ path: abs(a.path), name: a.name, kind: a.kind }));
+  if (c.use?.length) {
+    const known = useTargets(t);
+    out.use = c.use.map((rel) => ({ path: abs(rel), name: known.get(rel)?.name ?? rel.replace(/^attachments\//, '') }));
+  }
+  if (c.apply) out.apply = true;
+  return out;
 }
 
 /**

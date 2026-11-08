@@ -21,7 +21,7 @@ import { CODE_TESTID } from 'protocol';
 import {
   focusItem, openComposer, registerKindFocus, registerKindSelection, setSourceLayout, toast, toggleNav,
 } from '../../actions.js';
-import { agentName, anchorAt, numericVersion } from '../../model.js';
+import { agentName, agentTitle, anchorAt, numericVersion } from '../../model.js';
 import { store, useStore } from '../../state.js';
 import { isEditable } from '../../util.js';
 import { Chip, Icon } from '../common.js';
@@ -250,10 +250,10 @@ export function CodeReviewView({ ds }) {
     <div ref=${barRef} class="source-toolbar code-toolbar">
       ${s.narrow ? html`<button type="button" class="btn btn-sm" onClick=${toggleNav} aria-label="Show the file tree"><${Icon} name="menu" /> Files</button>` : null}
       <span class="code-summary small">
-        ${noBase ? html`<strong>v${v}</strong> <span class="muted">is the first round</span>`
+        ${noBase ? html`<strong>v${v}</strong> <span class="muted">is the first version</span>`
           : list?.status === 'ok' ? html`
             ${changes ? html`<strong>v${base} → v${v}</strong> ` : null}
-            <strong>${files.length} file${files.length === 1 ? '' : 's'}</strong> ${changes ? 'changed between rounds' : 'changed'}
+            <strong>${files.length} file${files.length === 1 ? '' : 's'}</strong> ${changes ? 'changed between versions' : 'changed'}
             <span class="ins-text">+${totals.added}</span> <span class="del-text">−${totals.removed}</span>
             ${code.filter ? html`<span class="muted">· showing ${shown.length}</span>
               <button type="button" class="link-btn" onClick=${() => setFilter('')}>Clear filter</button>` : null}`
@@ -266,7 +266,7 @@ export function CodeReviewView({ ds }) {
             title=${sel.side === 'old' ? 'Suggestions replace lines of the new side' : 'Suggest replacement lines (s)'}
             onClick=${() => openComposer({ capture: selectionCapture(sel), action: 'suggest' })}>Suggest</button>
           <button type="button" class="btn btn-sm" onClick=${() => setSelection(null)}>Clear</button>`
-          : !noBase ? html`<span class="small muted">Click a line number to select it, shift-click to extend, then press C.</span>` : null}
+          : !noBase ? html`<span class="small muted">Click a line number to select it, shift-click to extend, then press c.</span>` : null}
       </span>
       <span class="seg" role="group" aria-label="Diff layout">
         <button type="button" class=${layout === 'unified' ? 'active' : ''} aria-pressed=${layout === 'unified' ? 'true' : 'false'}
@@ -276,12 +276,12 @@ export function CodeReviewView({ ds }) {
           onClick=${() => setSourceLayout('split')}>Split</button>
       </span>
     </div>
-    ${noBase ? html`<div class="empty code-empty"><p><strong>This is the first round.</strong></p>
-      <p>After the agent records a new round, the changes between rounds show here, file by file.</p></div>` : null}
+    ${noBase ? html`<div class="empty code-empty"><p><strong>This is the first version.</strong></p>
+      <p>After ${agentTitle(agent)} records a new version, the changes between versions show here, file by file.</p></div>` : null}
     ${list?.status === 'error' ? html`<div class="empty code-empty" role="alert">
       <p><strong>Cannot load the files of this review.</strong></p><p class="small">${list.error}</p>
       <button type="button" class="btn btn-sm" onClick=${() => loadList(v, base, { retry: true })}>Retry</button></div>` : null}
-    ${list?.status === 'ok' && !files.length ? html`<div class="empty code-empty"><p>${changes ? `No files changed between v${base} and v${v}.` : 'No changed files in this round.'}</p></div>` : null}
+    ${list?.status === 'ok' && !files.length ? html`<div class="empty code-empty"><p>${changes ? `No files changed between v${base} and v${v}.` : 'No changed files in this version.'}</p></div>` : null}
     ${list?.status === 'ok' && files.length && !shown.length ? html`<div class="empty code-empty"><p>No file matches the filter.</p></div>` : null}
     <div class="code-files">
       ${!noBase ? shown.map((f) => html`<${FileCard} key=${`${listKey}|${f.path}`} file=${f} v=${v} base=${base} listKey=${listKey}

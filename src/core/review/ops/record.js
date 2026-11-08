@@ -5,7 +5,8 @@
 // prepareRecord: hunks head -> working, precise mapper, attribution (tagged / hint / overlap / other), the working
 //   render, changed assets (+ threads linked through them), lock integrity, decisions, and (optionally) guards.
 //   Nothing is written.
-// commitRecord: asset blobs + version source, then - still before the commit point - re-anchoring of every thread
+// commitRecord: asset blobs + version source (the manifest also records the version's visible text characters,
+//   textChars, from the working render), then - still before the commit point - re-anchoring of every thread
 //   and lock one version forward (staged overrides first), replies, staged suggestions -> applied when their text
 //   is really in the version at a linked hunk (with the automatic reply "Applied the suggestion verbatim." when
 //   the agent gave none) else back to pending, broken locks, doc state back to in_review, all written as a redo
@@ -15,7 +16,7 @@
 
 import { SSE } from '../../../shared/protocol.js';
 import { lineHunks } from '../../diff/index.js';
-import { deepestBlockAt, renderSource, sectionAt } from '../../render/index.js';
+import { deepestBlockAt, renderSource, sectionAt, textCharsOf } from '../../render/index.js';
 import { formatLines } from '../../util/lines-arg.js';
 import { lineIndex } from '../../text/index.js';
 import { envOf, sectionExtent, stepAnchor } from '../anchoring.js';
@@ -43,7 +44,9 @@ import { isVirtual } from '../../store/snapshot.js';
  * @typedef {import('../../diff/hunks.js').Hunk} Hunk
  * @typedef {import('./common.js').HeadState} HeadState
  * @typedef {import('./common.js').WorkingState} WorkingState
- * @typedef {Record<string, { status: string, reply: string, at?: string }>} Replies
+ * @typedef {Record<string, { status: string, reply: string, at?: string,
+ *   attachments?: import('../../../shared/types.js').CommentAttachment[] }>} Replies attachments: files already stored
+ *   (attachments.js storeReplyAttachments), put on the reply's comment
  *
  * @typedef {object} Prepared
  * @property {HeadState} head
@@ -180,6 +183,10 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
       .map((t) => ({ t, a: anchorAt(t, head.v) }))
       .filter(({ a }) => a && a.kind !== 'doc' && a.state !== 'orphaned')
       .map(({ t, a }) => ({ id: /** @type {any} */ (t.decision).id, thread: t.id, start: /** @type {Anchor} */ (a).src.start, end: /** @type {Anchor} */ (a).src.end }));
+    // suggestions an earlier version applied, whose thread is done with them (the `reverted` check)
+    const applied = threads
+      .filter((t) => t.suggestion?.status === 'applied' && (t.status === 'addressed' || t.status === 'resolved') && typeof t.suggestion.new === 'string')
+      .map((t) => ({ thread: t.id, text: /** @type {any} */ (t.suggestion).new, appliedIn: /** @type {any} */ (t.suggestion).appliedIn ?? null }));
     guardResult = runGuards({
       docId: doc.id,
       headVersion: head.v,
@@ -187,6 +194,8 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
       headSource: head.source,
       workingSource: working.text,
       hunks: attribution.hunks,
+      format: doc.format,
+      scopes,
       sections,
       config: ctx.config.guards,
       locks: activeLocks,
@@ -197,6 +206,7 @@ export async function prepareRecord(ctx, doc, { head, working, replies = {}, oth
       assetLinks: links,
       threadLines,
       decisions,
+      applied,
       mapper,
       unusedOther: attribution.unusedOther,
       badHints: attribution.badHints,
@@ -259,6 +269,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
   const assetFiles = prep.assetFiles ? { ...prep.assetFiles } : {};
   if (!prep.assetFiles && !isVirtual(doc)) for (const rel of render.assets) assetFiles[rel] = null;
   const counts = { threads: 0, locks: 0, exact: 0, moved: 0, edited: 0, changed: 0, orphaned: 0 };
+  const textChars = textCharsOf(render);
   for (const tid of Object.keys(replies)) {
     if (prep.threads.some((t) => t.id === tid)) continue;
     const t = await ctx.store.getThread(doc.id, tid);
@@ -278,6 +289,7 @@ export async function commitRecord(ctx, doc, prep, { author, summary, capturedBy
       summary,
       respondsTo,
       capturedBy,
+      ...(textChars != null ? { textChars } : {}),
       stats,
       hunks: attribution.hunks.map((h) => ({
         id: h.id,
@@ -404,7 +416,7 @@ function versionJournal(ctx, doc, prep, final, { author, summary, replies, autoR
   for (const [tid, r] of Object.entries(replies)) {
     const t = byId.get(tid);
     if (!t) continue;
-    /** @type {any} */ (addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at }, newV)).recordedWith = newV;
+    /** @type {any} */ (addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at, attachments: r.attachments }, newV)).recordedWith = newV;
   }
   // After this version no tagged edit is pending, so no suggestion stays `staged`: it is `applied` when its new text
   // really is in the version at a hunk linked to its thread, else (undone, reverted, rewritten, or a stale tag)
@@ -480,7 +492,9 @@ const SCOPE_BLOCKS = new Set(['p', 'li', 'dt', 'dd', 'td', 'th', 'tr', 'pre', 'b
 /**
  * Head source ranges a link to a thread explains (attribution `scopes`): the anchor's range, plus the paragraph-level
  * block holding a text / code anchor (a comment on one sentence of a hard-wrapped paragraph explains rewording the
- * paragraph) - for a heading, the section it opens; a GENERAL (doc) thread explains the whole doc.
+ * paragraph) - for a heading, the section it opens; a GENERAL (doc) thread explains the whole doc. Exact character
+ * ranges: attribution and the guards widen them to whole lines only where those lines are short (attribution
+ * widenToLines), so in a one-line report a thread explains its block, not the whole line.
  * @param {Anchor} a head anchor
  * @param {import('../../render/index.js').RenderResult | null} render head render
  * @param {string} source head source

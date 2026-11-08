@@ -3,7 +3,9 @@
 //   wordDiff(a, b)          -> [{ op: 'eq'|'ins'|'del', text, aStart, aEnd, bStart, bEnd }]  (jsdiff diffWordsWithSpace)
 //   hunkStats(a, b, hunk)   -> { removedChars, insertedChars, removedWords, insertedWords,
 //                                changedOldRanges: [[s,e]], changedNewRanges: [[s,e]] }   (absolute offsets)
-//   rewriteRatio(a, b, hunks) -> removed-or-replaced OLD chars / max(1, a.length); insertions excluded
+//   rewriteRatio(a, b, hunks) -> removed-or-replaced OLD chars / max(1, a.length); insertions excluded (the raw source
+//                                measure; the revision guards measure the text a reviewer reads instead, through
+//                                hunkWordOps of each hunk's visible text: review/guards.js)
 // Offsets in wordDiff ops are relative to the strings passed in; an 'ins' op has aStart === aEnd (the insertion
 // point in a) and a 'del' op has bStart === bEnd. Very large rewrites (more than MAX_EDITS token edits) fall back
 // to a prefix/suffix diff so callers never stall.

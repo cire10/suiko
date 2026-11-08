@@ -6,7 +6,7 @@
 
 import { test as base } from '@playwright/test';
 import { TESTID } from '../../src/shared/protocol.js';
-import { expect, test, Ui } from './fixtures.mjs';
+import { expect, pinnedPage, test, Ui } from './fixtures.mjs';
 import { startRealDaemon } from './real-daemon.mjs';
 
 /** @typedef {import('@playwright/test').Page} Page */
@@ -38,7 +38,9 @@ test.describe('fresh doc', () => {
     await page.getByTestId(TESTID.submitReviewOpen).click();
     const dialog = page.getByTestId(TESTID.submitReviewDialog);
     await dialog.locator('input[value="approved"]').check();
-    await expect(dialog.getByLabel('Mark v1 final')).toBeChecked();
+    // no round answered yet: "Mark v1 final" starts unticked; the reviewer ticks it
+    await expect(dialog.getByLabel('Mark v1 final')).not.toBeChecked();
+    await dialog.getByLabel('Mark v1 final').check();
     const d = mock.doc('kitchen-sink');
     d.revise({ source: d.source(1).replace('Last revised 2026-10-10.', 'Last revised 2026-10-12.'), summary: 'late edit' });
     await page.getByTestId(TESTID.submitConfirm).click();
@@ -68,7 +70,7 @@ test.describe('fresh doc', () => {
     await page.keyboard.press('ControlOrMeta+Shift+Enter');
     await page.getByTestId(TESTID.submitConfirm).click();
     await expect(page.getByTestId(TESTID.submitReviewDialog)).toBeHidden();
-    await expect(toastWith(page, 'Review submitted (rv1)')).toBeVisible();
+    await expect(toastWith(page, 'Saved for Claude (rv1). It gets it when it connects.')).toBeVisible();
     const d = mock.doc('kitchen-sink');
     expect(d.thread('t1').comments[0].body).toBe('Edited text, not yet saved');
     expect(d.drafts.items).toEqual([]);
@@ -129,7 +131,7 @@ test.describe('fresh doc', () => {
     await expect(page.getByTestId(TESTID.composerSendNow)).toBeEnabled();
 
     await page.getByTestId(TESTID.composerSendNow).click();
-    await expect(toastWith(page, 'Sent to the agent')).toBeVisible();
+    await expect(toastWith(page, 'Saved for Claude')).toBeVisible();
     await expect(composer).toBeHidden();
     expect(d.drafts.items).toEqual([]);
     expect(d.reviews).toHaveLength(1);
@@ -137,7 +139,7 @@ test.describe('fresh doc', () => {
     expect(d.thread('t1').comments[0].body).toBe('Send this right now');
     const posts = mock.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/reviews'));
     expect(posts.map((r) => r.body.draftIds)).toEqual([['d1'], ['d1']]);
-    await expect(page.locator('.drafts-count')).toContainText('0');
+    await expect(page.getByTestId(TESTID.submitReviewOpen)).toHaveText('Approve');
   });
 
   test('UIR-11: the Submit dialog keeps the summary and verdict through Esc and a backdrop click, until submitted', async ({ page, ui, mock }) => {
@@ -217,6 +219,7 @@ test.describe('round 2', () => {
   test('UIR-3: an edited reply draft goes out with the review; deleting it while editing keeps the text as a new reply', async ({ page, ui, mock }) => {
     await ui.open('kitchen-sink');
     await modeTab(page, 'review').click();
+    await page.locator('.thread-panel .filter[data-filter="all"]').click();
     const t3 = ui.card('t3');
     await t3.getByRole('button', { name: 'Reply' }).click();
     await t3.getByTestId(TESTID.replyTextarea).fill('Old reply text');
@@ -254,6 +257,7 @@ test.describe('round 2', () => {
   test('UIR-5: a typed reply survives Reply on another thread and Esc in the doc; Cancel offers Undo', async ({ page, ui }) => {
     await ui.open('kitchen-sink');
     await modeTab(page, 'review').click();
+    await page.locator('.thread-panel .filter[data-filter="all"]').click();
     const t3 = ui.card('t3');
     await t3.getByRole('button', { name: 'Reply' }).click();
     const box = t3.getByTestId(TESTID.replyTextarea);
@@ -289,15 +293,15 @@ test.describe('round 2', () => {
     await expect(page.getByTestId(TESTID.composerTextarea)).toHaveValue('Overall the rollout section needs owners.');
   });
 
-  test('UIR-12: a double click on Resolve sends one request and shows one toast', async ({ page, ui, mock }) => {
+  test('UIR-12: a double click on Done sends one request and shows one toast', async ({ page, ui, mock }) => {
     await ui.open('kitchen-sink');
     await modeTab(page, 'review').click();
-    await ui.card('t3').getByRole('button', { name: 'Resolve' }).dblclick();
-    await expect(toastWith(page, 't3 resolved.')).toHaveCount(1);
-    await expect.poll(() => mock.doc('kitchen-sink').thread('t3').status).toBe('resolved');
+    await ui.card('t6').getByRole('button', { name: 'Done', exact: true }).dblclick();
+    await expect(toastWith(page, 't6 is done.')).toHaveCount(1);
+    await expect.poll(() => mock.doc('kitchen-sink').thread('t6').status).toBe('resolved');
     await page.waitForTimeout(300);
-    expect(mock.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/threads/t3/resolve'))).toHaveLength(1);
-    await expect(toastWith(page, 't3 resolved.')).toHaveCount(1);
+    expect(mock.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/threads/t6/resolve'))).toHaveLength(1);
+    await expect(toastWith(page, 't6 is done.')).toHaveCount(1);
   });
 });
 
@@ -306,6 +310,8 @@ test.describe('round 2', () => {
 /** @typedef {Awaited<ReturnType<typeof startRealDaemon>>} Real */
 
 const realTest = base.extend(/** @type {any} */ ({
+  // the preferences these specs were written for (fixtures.mjs LEGACY_PREFS)
+  page: pinnedPage,
   // eslint-disable-next-line no-empty-pattern -- Playwright requires a destructuring pattern here
   real: async ({}, /** @type {(r: Real) => Promise<void>} */ use) => {
     const real = await startRealDaemon();
@@ -325,13 +331,15 @@ realTest('UIR-1 (real daemon): a revision recorded while the Submit dialog is op
   const dialog = page.getByTestId(TESTID.submitReviewDialog);
   await dialog.getByLabel('Summary').fill('Looks good to me.');
   await dialog.locator('input[value="approved"]').check();
-  await expect(dialog.getByLabel('Mark v1 final')).toBeChecked();
+  // no round answered yet: "Mark v1 final" starts unticked; the reviewer ticks it (kept for v2 below)
+  await expect(dialog.getByLabel('Mark v1 final')).not.toBeChecked();
+  await dialog.getByLabel('Mark v1 final').check();
 
   const ks = r.read('docs/kitchen-sink.md');
   r.write('docs/kitchen-sink.md', ks.replace('Rotate refresh tokens safely.', 'Rotate refresh tokens UNSAFELY (changed by agent).'));
   await r.revise('kitchen-sink', { summary: 'late edit' });
 
-  await expect(toastWith(page, 'v2 ready')).toBeVisible();
+  await expect(toastWith(page, 'v2 is ready')).toBeVisible();
   await expect(dialog.locator('.stale-warning')).toContainText('v2 arrived while you were reviewing v1. Review v2 before approving.');
   await expect(dialog.getByLabel('Mark v1 final')).toBeVisible();
   await expect(page.getByTestId(TESTID.submitConfirm)).toBeDisabled();
@@ -388,9 +396,10 @@ realTest('UIR-7 (real daemon): drafts written on v1 are carried forward to v2 wh
   // d1: carried forward and painted on v2 (the chip only says where it was written).
   const chip1 = card1.locator('.draft-version');
   await expect(chip1).toHaveText('On v1');
-  await expect(chip1).not.toHaveClass(/tone-warn/);
+  await expect(chip1).not.toHaveClass(/is-warn/);
   await expect(chip1).not.toHaveAttribute('title', /not shown/);
-  await expect(card1.locator('.target-lines')).toHaveText(/^v1 L\d+/);
+  // its line numbers are v1's: in the anchor's tooltip
+  await expect(card1.locator('.card-target')).toHaveAttribute('data-lines', /^v1 L\d+/);
   await card1.locator('.comment-body').click();
   await expect.poll(async () => (await ui.inspect()).activeId).toBe('d1');
   await expect(toastWith(page, 'was written on v1')).toHaveCount(0);
@@ -399,7 +408,7 @@ realTest('UIR-7 (real daemon): drafts written on v1 are carried forward to v2 wh
   // d2: its text is gone on v2, so it is not painted; its card leads back to v1.
   const chip2 = card2.locator('.draft-version');
   await expect(chip2).toHaveText('On v1');
-  await expect(chip2).toHaveClass(/tone-warn/);
+  await expect(chip2).toHaveClass(/is-warn/);
   await expect(chip2).toHaveAttribute('title', /not shown on v2/);
   await card2.locator('.comment-body').click();
   const toast = toastWith(page, 'd2 was written on v1 and is not shown on v2');

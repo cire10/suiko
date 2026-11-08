@@ -75,7 +75,7 @@ test('approved + final with a reopened thread: NEXT says reply with a status, th
   assert.match(w.text, /^SPECREVIEW FEEDBACK · kitchen-sink · review rv2 on v2 · APPROVED · FINAL = v2$/m);
   assert.match(w.text, /^\[t1\] REOPENED /m);
   assert.doesNotMatch(w.text, /suiko revise|^PROTOCOL:/m, w.text);
-  assert.match(w.text, /^APPROVED with FINAL = v2: reply to each thread; do not edit the spec/m);
+  assert.match(w.text, /^APPROVED with FINAL = v2: reply to each thread; do not edit the doc/m);
   assert.match(w.text, REPLY_NEXT);
   assert.equal(w.packets[0].replyOnly, true);
 

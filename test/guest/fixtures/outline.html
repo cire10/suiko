@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design doc with tabs</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 30px 60px; max-width: 700px; color: #222; background: #fff; }
+  [role=tabpanel][hidden], .collapsed { display: none; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Design doc</h1>
+<h2 data-srid="3">Options</h2>
+<div role="tablist" data-srid="4"><button role="tab" type="button" data-srid="5">Option A</button> <button role="tab" type="button" data-srid="6">Option B</button></div>
+<div role="tabpanel" id="a" data-srid="7"><h3 data-srid="8">Pros of A</h3><p data-srid="9">Simple.</p></div>
+<div role="tabpanel" id="b" hidden data-srid="10"><h3 data-srid="11">Pros of B</h3><p data-srid="12">Fast.</p></div>
+<div class="collapsed" data-srid="13"><h3 data-srid="14">Hidden by a class</h3></div>
+<details data-srid="15"><summary data-srid="16">Appendix</summary><h3 data-srid="17">Closed details</h3></details>
+<details open data-srid="18"><summary data-srid="19">Notes</summary><h3 data-srid="20">Open details</h3></details>
+<h2 data-srid="21">Rollout</h2>
+</body>
+</html>

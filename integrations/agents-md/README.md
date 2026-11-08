@@ -6,7 +6,7 @@
 
 ## Install
 
-From the workspace where your specs live:
+From the workspace where your documents live:
 
 ```bash
 suiko install agents-md          # prints what it would add to AGENTS.md
@@ -27,6 +27,8 @@ The snippet is wrapped in `<!-- specreview:begin … -->` / `<!-- specreview:end
 ## Choosing a mode
 
 - **Wait mode** suits agents whose shell tool can block for minutes. Pass a `--timeout` shorter than the shell tool's own limit (for example `suiko wait <doc> --timeout 10m`); exit 2 means it timed out and can simply be run again.
-- **Done mode** suits agents with short shell timeouts. The reviewer clicks **Submit review**, then tells the agent "done"; the agent runs `suiko feedback <doc> --include-drafts`. If the reviewer forgot to submit, the output says how many draft comments are still unsent.
+- **Done mode** suits agents with short shell timeouts. The reviewer sends their comments, then tells the agent "done"; the agent runs `suiko feedback <doc> --include-drafts`. If some comments are still drafts, the output says how many are unsent.
 
-Either way, the UI shows whether an agent is listening. When none is, the Submit dialog offers a **Copy prompt** button with the exact `suiko feedback <doc>` instruction to paste into the agent's chat.
+Either way, the UI shows whether an agent is listening. When none is, it offers a **Copy prompt** button with the exact `suiko feedback <doc>` instruction to paste into the agent's chat.
+
+The block says which Suiko wrote it (`<!-- installed by suiko <version> -->`); after upgrading Suiko, run the install again. `suiko open` reminds you when the block is older than the CLI and names the command to run: `suiko install agents-md --apply` for a block that command wrote, or `suiko install --project --only <agents> --apply` for one that `suiko install --project` wrote.

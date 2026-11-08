@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pricing explorer</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 30px 60px; max-width: 700px; color: #222; background: #fff; }
+  [role=listbox] { border: 1px solid #999; padding: 4px; width: 200px; }
+  [role=option][aria-selected=true] { background: #def; }
+  .spacer { height: 1200px; }
+</style>
+</head>
+<body data-srid="1">
+<h1 data-srid="2">Pricing explorer</h1>
+<p data-srid="3">Press r to reset the model; the page handles its own keys, like many interactive reports do.</p>
+<p data-srid="4">The seat price scales with the number of active projects in the workspace.</p>
+<div role="listbox" tabindex="0" aria-label="Plan" id="plans" data-srid="5">
+  <div role="option" aria-selected="true" data-srid="6">Team</div>
+  <div role="option" aria-selected="false" data-srid="7">Business</div>
+</div>
+<p data-srid="8"><label data-srid="9"><input type="checkbox" id="annual" data-srid="10"> Annual billing</label></p>
+<p id="resets" data-srid="11">resets: 0</p>
+<div class="spacer" data-srid="12"></div>
+<p data-srid="13">The end.</p>
+<script>
+  // Author script: its own keyboard shortcuts on the document (r resets; Esc closes its own "modal" when one is open)
+  // and typeahead in the listbox.
+  window.__resets = 0;
+  window.__modal = false;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'r') {
+      window.__resets++;
+      document.getElementById('resets').textContent = 'resets: ' + window.__resets;
+    }
+    if (e.key === 'Escape' && window.__modal) {
+      window.__modal = false;
+      e.preventDefault();
+    }
+  });
+  document.getElementById('plans').addEventListener('keydown', (e) => {
+    const opts = [...document.querySelectorAll('[role=option]')];
+    const hit = opts.find((o) => o.textContent.toLowerCase().startsWith(e.key.toLowerCase()));
+    if (hit) for (const o of opts) o.setAttribute('aria-selected', String(o === hit));
+  });
+</script>
+</body>
+</html>

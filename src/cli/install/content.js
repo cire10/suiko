@@ -5,11 +5,13 @@
 //   - the agent-neutral skill (integrations/agent-skills/suiko-review/SKILL.md + the protocol);
 //   - per-agent command files (Gemini CLI TOML, OpenCode Markdown) and the Kiro steering file;
 //   - the Codex config.toml block registering the MCP server.
-// Every builder returns { template, content }: `template` is the text without the invocation note (used to recognise
-// our own copies whatever node/script path they mention), `content` is what gets written on this machine.
+// Every builder returns { template, content }: `template` is the text without the invocation note and the install
+// mark (used to recognise our own copies whatever node/script path or Suiko version they mention), `content` is what
+// gets written on this machine: every instruction file and block carries the install mark (install.js installMark),
+// which install/freshness.js compares with the running CLI.
 
 import path from 'node:path';
-import { AGENTS_SNIPPET, INTEGRATIONS_DIR, invocationNote, readText, withInvocationNote } from '../install.js';
+import { AGENTS_SNIPPET, INTEGRATIONS_DIR, invocationNote, markBlock, readText, withInstallMark, withInvocationNote } from '../install.js';
 import { TOML_BEGIN, TOML_END } from './files.js';
 
 export const SKILL_NAME = 'suiko-review';
@@ -22,7 +24,8 @@ export { AGENTS_SNIPPET };
 export const CODEX_TOOL_TIMEOUT_SEC = 660;
 
 /**
- * @typedef {{ cliOnPath: boolean, invocation: string, execPath: string, binPath: string }} ContentCtx
+ * @typedef {{ cliOnPath: boolean, invocation: string, execPath: string, binPath: string, version?: string }} ContentCtx
+ *   `version`: the Suiko version the install marks name (default: this package's)
  * @typedef {{ template: string, content: string }} Built
  */
 
@@ -33,15 +36,15 @@ export function protocolSnippet() {
 
 /**
  * The protocol block for a global instructions file; when `suiko` is not on PATH, the invocation note follows
- * the begin marker (inside the block, so reinstall/uninstall handle it too).
+ * the begin marker (inside the block, so reinstall/uninstall handle it too). The install mark sits above the end marker.
  * @param {ContentCtx} c
  * @returns {Built}
  */
 export function protocolBlock(c) {
   const template = protocolSnippet();
-  if (c.cliOnPath) return { template, content: template };
   const nl = template.indexOf('\n');
-  return { template, content: `${template.slice(0, nl + 1)}${invocationNote(c.invocation)}\n${template.slice(nl + 1)}` };
+  const local = c.cliOnPath ? template : `${template.slice(0, nl + 1)}${invocationNote(c.invocation)}\n${template.slice(nl + 1)}`;
+  return { template, content: markBlock(local, c.version) };
 }
 
 /** @returns {string} the protocol without its marker lines (for files we own entirely) */
@@ -57,18 +60,19 @@ export function protocolBody() {
  */
 export function agentSkill(c) {
   const template = readText(SKILL_TEMPLATE).replace(/^<!-- specreview:protocol[^\n]*-->[^\n]*$/m, () => protocolBody());
-  return { template, content: c.cliOnPath ? template : withInvocationNote(template, c.invocation) };
+  return { template, content: withInstallMark(c.cliOnPath ? template : withInvocationNote(template, c.invocation), c.version) };
 }
 
 /**
- * Gemini CLI custom command (TOML); the invocation note goes at the top of the prompt.
+ * Gemini CLI custom command (TOML); the invocation note goes at the top of the prompt, the install mark is a TOML
+ * comment at the end.
  * @param {ContentCtx} c
  * @returns {Built}
  */
 export function geminiCommand(c) {
   const template = readText(GEMINI_COMMAND);
-  if (c.cliOnPath) return { template, content: template };
-  return { template, content: template.replace(/^prompt = '''\n/m, (m) => `${m}${invocationNote(c.invocation)}\n`) };
+  const local = c.cliOnPath ? template : template.replace(/^prompt = '''\n/m, (m) => `${m}${invocationNote(c.invocation)}\n`);
+  return { template, content: withInstallMark(local, c.version, { toml: true }) };
 }
 
 /**
@@ -78,7 +82,7 @@ export function geminiCommand(c) {
  */
 export function opencodeCommand(c) {
   const template = readText(OPENCODE_COMMAND);
-  return { template, content: c.cliOnPath ? template : withInvocationNote(template, c.invocation) };
+  return { template, content: withInstallMark(c.cliOnPath ? template : withInvocationNote(template, c.invocation), c.version) };
 }
 
 /**

@@ -17,10 +17,10 @@ import { html, useLayoutEffect, useMemo, useRef, useState } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { closeDialog } from '../actions.js';
 import {
-  CATEGORIES, describe, paletteCommands, recentCommandIds, rememberCommand, unavailable,
+  CATEGORIES, commandKeys, commandTitle, describe, paletteCommands, recentCommandIds, rememberCommand, unavailable,
 } from '../commands.js';
 import { shortcut } from '../keys.js';
-import { highlightParts, isSingleKeyCombo, matchRow } from '../model.js';
+import { highlightParts, isSingleKeyCombo, matchRow, sendModeOf } from '../model.js';
 import { useStore } from '../state.js';
 import { Icon, useDialogFocus } from './common.js';
 
@@ -62,17 +62,19 @@ const HOME_PLACEHOLDER = 'Type a command…';
  */
 function commandRow(c, s, query) {
   const description = describe(c, s);
-  const m = matchRow(query, { title: c.title, description, keywords: c.keywords });
+  const title = commandTitle(c, s);
+  const m = matchRow(query, { title, description, keywords: c.keywords });
   if (!m) return null;
   return {
     key: c.id,
     rootId: c.id,
-    title: c.title,
+    title,
     positions: m.positions,
     description,
     reason: unavailable(c, s),
-    keys: (c.keys || []).filter((k) => s.prefs.singleKeys || !isSingleKeyCombo(k)).slice(0, 2),
-    next: c.items ? { id: c.id, rootId: c.id, title: c.title.replace(/…$/, ''), placeholder: c.placeholder, items: c.items } : null,
+    // the composer's keys as they work here (a plan collects comments whatever Settings > Send comments says)
+    keys: commandKeys(c, { ...s.prefs, sendMode: sendModeOf(s) }).filter((k) => s.prefs.singleKeys || !isSingleKeyCombo(k)).slice(0, 2),
+    next: c.items ? { id: c.id, rootId: c.id, title: title.replace(/…$/, ''), placeholder: c.placeholder, items: c.items } : null,
     run: c.run ? () => /** @type {NonNullable<Command['run']>} */ (c.run)(s) : null,
     score: m.score,
   };
@@ -178,7 +180,7 @@ function buildSections(s, level, query, recent) {
     const row = commandRow(c, s, q);
     if (row) add(map, c.category, row);
     if (c.inline && c.items && !unavailable(c, s)) {
-      const lv = { id: c.id, rootId: c.id, title: c.title, items: c.items };
+      const lv = { id: c.id, rootId: c.id, title: commandTitle(c, s), items: c.items };
       for (const it of levelItems(lv, s)) {
         const r = itemRow(it, lv, s, q);
         if (r) add(map, c.inline, r);

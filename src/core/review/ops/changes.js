@@ -352,6 +352,11 @@ function threadState(t, a) {
   if (a.state === 'orphaned') return 'orphaned';
   if (a.state === 'changed') return 'outdated';
   if (t.status === 'needs_input' && !isActionable(t)) return 'needs_input';
-  if (t.status === 'addressed' || t.status === 'answered' || t.status === 'declined') return isActionable(t) ? 'open' : 'addressed';
+  if (t.status === 'addressed' || t.status === 'answered') return isActionable(t) ? 'open' : 'addressed';
+  // declined: the agent did not change it ("Claude didn't change it", the warn tone of its card's chip)
+  if (t.status === 'declined') return isActionable(t) ? 'open' : 'declined';
+  // planned: the agent will make the change once the reviewer applies it ("Will change", like its card's chip)
+  if (t.status === 'planned') return 'planned';
+  // open: the change it asks for is still to be made in the doc
   return 'open';
 }

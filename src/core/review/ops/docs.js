@@ -1,9 +1,12 @@
 // @ts-check
 // Doc-level operations (design 3.2, 9.2, 9.6, 10.2):
 //   openDoc(ctx, { path, title })              -> { doc, version, created, workingDirty, lines, externals }
-//   docState(ctx, doc)                          -> DocState (without contentBase; the daemon adds it)
+//   docState(ctx, doc)                          -> DocState (without contentBase; the daemon adds it); each version
+//                                                  carries `lines` and, when recorded, `textChars` (visible text)
 //   listDocsAcrossWorkspaces(ctx?)              -> [{ ws, root, id, path, title, format, head, state, openThreads,
-//                                                    undelivered, listening, final }]
+//                                                    yourTurn, withAgent, agent, undelivered, listening, final }]
+//                                                  (yourTurn / withAgent: turnCounts, the doc list's "Your turn N" /
+//                                                  "With Claude N"; agent: the name the doc talks to)
 //   docsByActivity(ctx?, { roots? })            -> [{ ws, root, id, path, title, state, head, activeAt }], most
 //                                                  recently active first (`suiko snip` without a doc)
 //   status(ctx, doc?)                           -> { docs: [...] } (`suiko status`)
@@ -19,7 +22,7 @@ import { NotFoundError, RefusedError, UsageError } from '../../store/errors.js';
 import { ALL_DOCS, Store, compareIds } from '../../store/store.js';
 import { listWorkspaces } from '../../store/home.js';
 import { readLastJsonLine } from '../../store/jsonl.js';
-import { renderSource } from '../../render/index.js';
+import { renderSource, textCharsOf } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { autoCommit } from '../git.js';
 import { docKind, docOriginType, docRefFor, isCode, isSnapshot, originType, planFileOf } from '../../store/snapshot.js';
@@ -67,6 +70,7 @@ export async function openDoc(ctx, { path: file, title }) {
       const assetFiles = {};
       for (const rel of render.assets) assetFiles[rel] = null;
       const lines = lineIndex(w.text).count;
+      const textChars = textCharsOf(render);
       const manifest = await ctx.store.commitVersion(d, {
         source: w.buf,
         manifest: {
@@ -74,6 +78,7 @@ export async function openDoc(ctx, { path: file, title }) {
           summary: 'initial draft',
           respondsTo: null,
           capturedBy: 'open',
+          ...(textChars != null ? { textChars } : {}),
           stats: { added: lines, removed: 0, hunks: 0, rewriteRatio: 0 },
           hunks: [],
           guards: { errors: [], warnings: [], forced: false, brokenLocks: [] },
@@ -135,6 +140,9 @@ export async function docState(ctx, ref) {
       author: m.author,
       summary: m.summary ?? '',
       createdAt: m.createdAt,
+      lines: m.lines,
+      // visible text characters (render textCharsOf), recorded since 0.4: the UI's "long doc" measure
+      ...(typeof m.textChars === 'number' ? { textChars: m.textChars } : {}),
       stats: m.stats ?? null,
       guards: m.guards ?? null,
       respondsTo: m.respondsTo ?? null,
@@ -172,7 +180,9 @@ export async function listDocsAcrossWorkspaces(_ctx) {
     }
     const all = await store.listWaiters(ALL_DOCS);
     for (const doc of await store.listDocs()) {
-      const [threads, reviews, waiters] = await Promise.all([store.listThreads(doc.id), store.listReviews(doc.id), store.listWaiters(doc.id)]);
+      const [threads, reviews, waiters, drafts] = await Promise.all([
+        store.listThreads(doc.id), store.listReviews(doc.id), store.listWaiters(doc.id), store.getDrafts(doc.id),
+      ]);
       out.push({
         ws: ws.wsId,
         root: ws.root,
@@ -185,6 +195,8 @@ export async function listDocsAcrossWorkspaces(_ctx) {
         head: doc.head,
         state: doc.state,
         openThreads: threads.filter((t) => t.status !== 'resolved').length,
+        ...turnCounts(threads, drafts, doc.head),
+        agent: waiters.find((w) => w.agent)?.agent ?? all.find((w) => w.agent)?.agent ?? lastDeliveredTo(reviews) ?? 'claude',
         undelivered: reviews.filter((r) => !Object.keys(r.deliveredTo ?? {}).length).length,
         listening: waiters.length > 0 || all.length > 0,
         final: doc.final ?? null,
@@ -192,6 +204,40 @@ export async function listDocsAcrossWorkspaces(_ctx) {
     }
   }
   return out;
+}
+
+/**
+ * Whose turn the unresolved threads of a doc are, for the doc list: the rule of the doc's own turn pill and thread
+ * panel (ui/model.js turnReason) at the head version. yourTurn: new-thread drafts, plus threads with a reply or
+ * resolve draft, the agent's questions and the answers it waits for the reviewer to check (the agent spoke last;
+ * a planned change stays with the agent) and threads that lost their place; withAgent: every other unresolved thread.
+ * @param {any[]} threads
+ * @param {{ items?: any[] } | null | undefined} drafts
+ * @param {number} head
+ * @returns {{ yourTurn: number, withAgent: number }}
+ */
+export function turnCounts(threads, drafts, head) {
+  const items = drafts?.items ?? [];
+  let yourTurn = items.filter((d) => d?.kind === 'thread').length;
+  let withAgent = 0;
+  for (const t of threads) {
+    if (t.status === 'resolved') continue;
+    const pending = items.some((d) => d?.kind !== 'thread' && d?.thread === t.id);
+    const answered = ['addressed', 'answered', 'declined', 'needs_input'].includes(t.status) && !isActionable(t);
+    if (pending || answered || isOutdated(anchorAt(t, head))) yourTurn += 1;
+    else withAgent += 1;
+  }
+  return { yourTurn, withAgent };
+}
+
+/** The agent the newest delivered review went to, or null. @param {any[]} reviews */
+function lastDeliveredTo(reviews) {
+  const sorted = [...reviews].sort((a, b) => String(a.submittedAt ?? '').localeCompare(String(b.submittedAt ?? '')));
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const names = Object.keys(sorted[i].deliveredTo ?? {});
+    if (names.length) return names[0];
+  }
+  return null;
 }
 
 /**
@@ -277,7 +323,7 @@ export async function status(ctx, ref = null) {
     ]);
     const headM = versions.find((m) => m.v === doc.head) ?? null;
     /** @type {Record<string, number>} */
-    const counts = { open: 0, addressed: 0, answered: 0, declined: 0, needs_input: 0, resolved: 0, outdated: 0, actionable: 0 };
+    const counts = { open: 0, addressed: 0, answered: 0, declined: 0, needs_input: 0, planned: 0, resolved: 0, outdated: 0, actionable: 0 };
     for (const t of threads) {
       counts[t.status] = (counts[t.status] ?? 0) + 1;
       if (t.status !== 'resolved' && isOutdated(anchorAt(t, doc.head))) counts.outdated += 1;
@@ -371,8 +417,10 @@ export async function log(ctx, ref) {
       by: r.by?.name ?? '',
       version: r.version,
       verdict: r.verdict,
-      threads: new Set([...(r.newThreads ?? []), ...(r.replies ?? []).map((x) => x.thread)]).size,
+      threads: new Set([...(r.newThreads ?? []), ...(r.replies ?? []).map((x) => x.thread), ...(r.apply ?? [])]).size,
       newThreads: r.newThreads ?? [],
+      // planned threads this review applied (batched edits)
+      apply: r.apply ?? [],
       resolved: r.resolved ?? [],
       decisions,
       locksAdded: r.locksAdded ?? [],

@@ -1,6 +1,7 @@
 [
   "00-protocol.js",
   "05-env.js",
+  "07-page.js",
   "10-textwalk.js",
   "20-channel.js",
   "25-scheduler.js",
@@ -15,5 +16,6 @@
   "85-keys.js",
   "87-navigation.js",
   "90-errors.js",
+  "92-reflow.js",
   "99-main.js"
 ]

@@ -11,12 +11,17 @@
 // hosts (Safari, the Claude desktop app) keep the Cmd combos for themselves. The browser's own action for these
 // combos is prevented. Dialogs are exclusive, and Esc closes the one that is open.
 // Forwarded keys may only trigger non-mutating actions (navigation, opening a composer, toggling panels). So x / o /
-// y / X (resolve, reopen, accept a decline, accept all), Cmd+Enter (add a draft) and Send now are honoured only from
-// the UI itself.
+// y / X (resolve, reopen, accept a decline, accept all), Cmd+Enter (send or save the comment) and Cmd+Shift+Enter
+// in the composer are honoured only from the UI itself.
 // b (snip an area of the doc) and Shift+B (snip the screen) work from both: they only start a capture the reviewer
 // completes (dragging a box, or picking an area in the macOS picker) and open a composer; nothing is sent.
-// Cmd/Ctrl+Shift+Enter is Send now (this comment alone, as a one-item review) while a new comment is open in the
-// composer, and Submit review (the whole review) otherwise; f is always Submit review.
+// In the composer, Cmd/Ctrl+Enter and Cmd/Ctrl+Shift+Enter follow Settings > Send comments (model.js
+// composerKeyAction): right away, Enter sends the comment alone (a one-item review) and Shift saves it as a draft;
+// when I click Send, Enter adds it to the review and Shift sends it now. Without a new comment open,
+// Cmd/Ctrl+Shift+Enter opens the Send dialog (the whole review); f always does.
+// A held key acts once: auto-repeat is ignored here (except j / k / n / p, which step through a list), and the
+// composer, the reply box and the Send dialog's summary ignore a repeated Cmd/Ctrl+Enter themselves, so holding it
+// can never answer "Ask before sending" or send twice.
 // c / s / q / a typed in the doc with a selection are handled by the guest, which posts `action` (like its toolbar)
 // instead of forwarding the key; a forwarded key that still races such an action for the same selection is dropped
 // by openComposer (same capture and type within DUPLICATE_OPEN_MS), so the composer never opens twice.
@@ -31,7 +36,7 @@ import {
   togglePick, toggleSidebar, toggleSnip,
 } from './actions.js';
 import { helpGroups, KEYS } from './commands.js';
-import { appCombo, canSendNow, isComposerDirty, isReplyDirty, keyLabel, modesFor } from './model.js';
+import { appCombo, composerKeyAction, isComposerDirty, isReplyDirty, keyLabel, modesFor, sendModeOf } from './model.js';
 import { store } from './state.js';
 import { IS_MAC, isEditable } from './util.js';
 
@@ -80,14 +85,14 @@ export function handleKey(k, fromGuest) {
     return false;
   }
   if (mod && key === 'Enter') {
-    if (k.shift) {
-      // Send now while a new comment is open (from the UI only: it submits); otherwise the whole review.
-      if (!fromGuest && canSendNow(s.composer)) submitComposer({ sendNow: true });
-      else openSubmit();
+    // The composer's keys (from the UI only: they save or send); otherwise Shift is the whole review's Send dialog.
+    const act = s.composer ? composerKeyAction(s.composer, !!k.shift, sendModeOf(s)) : k.shift ? 'review' : null;
+    if (k.shift && (fromGuest || act === 'review')) {
+      openSubmit();
       return true;
     }
-    if (fromGuest || !s.composer) return false;
-    submitComposer();
+    if (fromGuest || !act || act === 'review') return false;
+    submitComposer(act === 'send' ? { sendNow: true } : {});
     return true;
   }
   if (mod || k.alt) return false;
@@ -148,7 +153,8 @@ export function handleKey(k, fromGuest) {
       else acceptFocused();
       return true;
     case 'v':
-      showThreads('verify', { review: true });
+      // what waits for the reviewer (formerly the Verify queue)
+      showThreads('mine', { review: true });
       return true;
     case 'f':
       openSubmit();

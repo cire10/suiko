@@ -1,16 +1,21 @@
 // @ts-check
 // Home: every tracked doc across registered workspaces (GET /api/docs), live-updated through the event stream. The
-// header has the command palette, theme, Settings and keyboard shortcuts buttons, like the doc view's top bar.
+// header has the Suiko mark, the command palette (as a search field), and the theme, Settings and keyboard shortcuts
+// buttons (in a doc they are in the More menu; the two views are never mounted together, so their test ids never
+// collide). Each row says, in the words of the doc's own turn pill, whose turn its threads are ("Your turn 4",
+// "With Claude 3": the summary's yourTurn / withAgent), whether a review waits for the agent to connect ("Waiting for
+// Claude"), whether the agent is listening, and the final version ("Final v2"); the agent's name is the summary's.
 
 import { html } from 'preact-htm';
 import { TESTID } from 'protocol';
 import { cycleTheme, docPath, navigate } from '../actions.js';
 import { useStore } from '../state.js';
-import { Chip, Icon, Spinner } from './common.js';
+import { agentTitle } from '../model.js';
+import { Chip, Icon, Logo, Spinner } from './common.js';
 import { HelpButton, PaletteButton, SettingsButton } from './TopBar.js';
 
 const STATE_LABEL = /** @type {Record<string, [string, string]>} */ ({
-  in_review: ['In review', 'accent'],
+  in_review: ['In review', 'muted'],
   approved: ['Approved', 'ok'],
   closed: ['Closed', 'muted'],
 });
@@ -21,9 +26,9 @@ export function Home() {
   const docs = home.docs;
   return html`<div class="home">
     <header class="home-head">
-      <h1><span class="logo" aria-hidden="true"><${Icon} name="comment" size=${18} /></span> Suiko</h1>
+      <h1><${Logo} size=${28} /> Suiko</h1>
       <div class="home-tools">
-        <${PaletteButton} />
+        <${PaletteButton} wide=${true} />
         <button type="button" class="icon-btn" aria-label=${`Theme: ${theme}. Change theme`} title="Theme (t)" onClick=${cycleTheme}>
           <${Icon} name=${theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'system'} />
         </button>
@@ -32,15 +37,15 @@ export function Home() {
       </div>
     </header>
     <main class="home-main">
-      <h2 class="home-sub">Documents</h2>
+      <h2 class="home-sub">Documents${docs?.length ? html` <span class="home-count">${docs.length}</span>` : null}</h2>
       ${home.error ? html`<p class="error" role="alert">${home.error}</p>` : null}
       ${docs === null ? html`<p class="muted"><${Spinner} /> Loading documents…</p>` : html`
         <ul class="doc-list" data-testid=${TESTID.docList}>
           ${docs.map((d) => html`<${DocRow} key=${`${d.ws}/${d.id}`} d=${d} />`)}
         </ul>
-        ${docs.length === 0 ? html`<div class="empty">
+        ${docs.length === 0 ? html`<div class="empty home-empty">
           <p><strong>No documents yet.</strong></p>
-          <p>Ask your agent to run <code>suiko open path/to/spec.md</code>, or run it yourself, and the spec appears here.</p>
+          <p>Ask your agent to run <code>suiko open path/to/doc.html</code>, or run it yourself, and the document appears here.</p>
         </div>` : null}`}
     </main>
   </div>`;
@@ -75,6 +80,9 @@ function DocRow({ d }) {
   const href = docPath(d.ws, d.id);
   const [stateLabel, stateTone] = STATE_LABEL[d.state] || [String(d.state || ''), 'muted'];
   const virtual = virtualDoc(d);
+  const agent = agentTitle(d.agent || 'claude');
+  // older daemons send only openThreads: say how many are open
+  const turns = d.yourTurn != null || d.withAgent != null;
   return html`<li class="doc-row">
     <a href=${href} class="doc-link" onClick=${(/** @type {MouseEvent} */ e) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -88,10 +96,12 @@ function DocRow({ d }) {
       ${virtual ? html`<${Chip} tone="info" class="kind-chip">${virtual.chip}<//>` : null}
       <${Chip} tone="muted">v${d.head}<//>
       <${Chip} tone=${stateTone}>${stateLabel}<//>
-      ${d.final ? html`<${Chip} tone="ok">FINAL v${d.final.version ?? d.final}<//>` : null}
-      ${d.openThreads ? html`<${Chip} tone="accent">${d.openThreads} open<//>` : null}
-      ${d.undelivered ? html`<${Chip} tone="warn" title="Submitted reviews the agent has not received yet">${d.undelivered} undelivered<//>` : null}
-      ${d.listening ? html`<${Chip} tone="ok">listening<//>` : null}
+      ${d.final ? html`<${Chip} tone="ok">Final v${d.final.version ?? d.final}<//>` : null}
+      ${turns && d.yourTurn ? html`<${Chip} tone="accent" title="Threads waiting for you: answers to check, questions, comments not sent yet">Your turn ${d.yourTurn}<//>` : null}
+      ${turns && d.withAgent ? html`<${Chip} tone="muted" title=${`Threads waiting for ${agent}`}>With ${agent} ${d.withAgent}<//>` : null}
+      ${!turns && d.openThreads ? html`<${Chip} tone="accent">${d.openThreads} open<//>` : null}
+      ${d.undelivered ? html`<${Chip} tone="warn" title=${`${d.undelivered === 1 ? 'A review you sent waits' : `${d.undelivered} reviews you sent wait`} for ${agent}: it gets ${d.undelivered === 1 ? 'it' : 'them'} when it connects`}>Waiting for ${agent}<//>` : null}
+      ${d.listening ? html`<${Chip} tone="ok">${agent} is listening<//>` : null}
     </span>
   </li>`;
 }

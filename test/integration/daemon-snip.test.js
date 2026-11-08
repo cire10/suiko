@@ -3,8 +3,9 @@
 // - POST /api/docs/:ws/:doc/snip/screen (screen snips, key B): success (stored attachment + data URL + size), a
 //   cancelled picker, single-flight (409 busy), no picker (501 unsupported), and the usual auth / Origin / 404 rules;
 // - stored attachments on the content origin: GET /c/<docKey>/__att/<file> (DocState.attachmentBase), refused for
-//   traversal, other docs' keys, non-image names, symlinks out of the attachments dir and same-origin (doc page)
-//   requests;
+//   traversal, other docs' keys, names that are not attachments, symlinks (out of the attachments dir, or to another
+//   file in it) and same-origin (doc page) requests; an SVG is served inert (no-script, sandboxed CSP; agents'
+//   SVG and HTML attachments are covered by daemon-rich-replies.test.js);
 // - the vendored modern-screenshot module the guest lazy-loads for doc snips (/__sr/<RV>/vendor/...), and the
 //   render.network "block" CSP that must still allow that same-origin dynamic import.
 // The real review engine and store run on temp workspaces; SPECREVIEW_HOME is a temp dir; ports are random (0).
@@ -381,7 +382,7 @@ describe('attachments on the content origin', () => {
     assert.equal((await content(p, { 'sec-fetch-site': 'Same-Origin' })).status, 404);
   });
 
-  test('only image files of that doc: traversal, other docs, other names and symlinks are 404', async () => {
+  test('only attachment files of that doc: traversal, other docs, other names and symlinks are 404', async () => {
     const key = docKey(store1.wsId, 'spec');
     const otherKey = docKey(store1.wsId, 'other');
     const dir = attachmentsDir();
@@ -400,7 +401,6 @@ describe('attachments on the content origin', () => {
       `/c/${key}/__att`,
       `/c/${key}/__att/`,
       `/c/${key}/__att/sub/a93.png`,
-      `/c/${key}/__att/a90.svg`,
       `/c/${key}/__att/notes.txt`,
       `/c/${key}/__att/.hidden.png`,
       `/c/${key}/__att/a91.png`, // symlink out of the store
@@ -421,6 +421,11 @@ describe('attachments on the content origin', () => {
     }
     // the right key still works
     assert.equal((await content(`/c/${key}/__att/${name}`)).status, 200);
+    // an SVG in the directory is served as an SVG that cannot run its script (agents may attach SVG charts)
+    const svg = await content(`/c/${key}/__att/a90.svg`);
+    assert.equal(svg.status, 200);
+    assert.equal(svg.headers['content-type'], 'image/svg+xml; charset=utf-8');
+    assert.match(String(svg.headers['content-security-policy']), /^default-src 'none'; style-src 'unsafe-inline'; sandbox; frame-ancestors /);
   });
 
   test('the content origin stays read-only for attachments', async () => {

@@ -96,7 +96,7 @@ async function csp(s, id, rel) {
 }
 
 describe('content-origin policy of snapshot docs', () => {
-  const ancestors = () => `frame-ancestors http://127.0.0.1:${d.uiPort} http://localhost:${d.uiPort}`;
+  const ancestors = () => `frame-ancestors 'self' http://127.0.0.1:${d.uiPort} http://localhost:${d.uiPort}`;
   const STRICT = "script-src 'self'; form-action 'none'; base-uri 'none'; object-src 'none'";
   const BLOCK = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'";
 

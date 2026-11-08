@@ -27,6 +27,7 @@ import { anchorAt, isActionable, originalAnchor } from '../review/threadstate.js
 import { preciseMapper } from '../review/workmap.js';
 import { commitRecord, reportHunks } from '../review/ops/record.js';
 import { addAgentReply } from '../review/ops/threads.js';
+import { storeReplyAttachments } from '../review/attachments.js';
 import { agentActor, emit, readHead, requireThread, respondsToOf } from '../review/ops/common.js';
 import { STORE_EXCLUDE, openRepo, splitNul } from './git.js';
 import { baseName, short } from './spec.js';
@@ -48,7 +49,9 @@ import { codeEnv, codeOf, hasText, lineAnchor, reader } from './util.js';
  * @typedef {import('../../shared/types.js').VersionManifest} VersionManifest
  * @typedef {import('../review/attribution.js').AttributedHunk} AttributedHunk
  * @typedef {import('../diff/hunks.js').Hunk} Hunk
- * @typedef {Record<string, { status: string, reply: string, at?: string }>} Replies
+ * @typedef {Record<string, { status: string, reply: string, at?: string, files?: any[], attachments?: any[] }>} Replies
+ *   files: reply attachments read and checked by ops/revise.js (attachments.js), stored here when the replies are
+ *   posted (never on a dry run or a refusal) and put on the reply's comment as `attachments`
  *
  * @typedef {object} Pair one file of the round compared head -> new (new-side content)
  * @property {string} path the hunk namespace (the new path; a dropped or deleted file's path)
@@ -182,9 +185,10 @@ async function recordRound(ctx, doc, { author, capturedBy, replies, other, summa
       return r;
     }
     if (!dryRun) {
+      await storeReplyAttachments(ctx, doc, /** @type {any} */ (replies));
       for (const [tid, r] of Object.entries(replies)) {
         const t = unstaged.find((x) => x.id === tid) ?? (await requireThread(ctx, doc.id, tid));
-        addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at });
+        addAgentReply(ctx, doc, t, { body: r.reply, status: r.status, at: r.at, attachments: r.attachments });
         await ctx.store.saveThread(doc.id, t);
       }
       await ctx.store.saveDoc(doc);
@@ -221,9 +225,10 @@ async function recordRound(ctx, doc, { author, capturedBy, replies, other, summa
     return r;
   }
 
-  // the blobs of the new round, then the version (record.js: journal, manifest, events)
+  // the blobs of the new round and the replies' attachments, then the version (record.js: journal, manifest, events)
   const used = new Set(N.files.flatMap((f) => [f.old, f.new]).filter(Boolean));
   for (const [r, buf] of snap.bufs) if (used.has(r)) await ctx.store.putDocBlob(doc.id, buf);
+  await storeReplyAttachments(ctx, doc, /** @type {any} */ (replies));
   const finalSummary = summary || defaultSummary(respondsTo, Object.keys(replies), newV);
   const res = await commitRecord(ctx, doc, /** @type {any} */ (prep), {
     author,

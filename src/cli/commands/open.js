@@ -11,8 +11,9 @@
 //
 // For each file: find the workspace (refusing $HOME and '/' unless --workspace is given; then the file's directory
 // is used), create `.specreview/` there if needed, track the doc and record v1 (engine openDoc), then make sure the
-// daemon runs and print the review URL `http://127.0.0.1:<uiPort>/d/<wsId>/<docId>?k=<token>`. Also prints the
-// external hosts the doc loads live, and a warning when the working copy differs from head.
+// daemon runs and print the review URL `http://127.0.0.1:<uiPort>/d/<wsId>/<docId>?k=<token>`. Also names the hosts
+// the doc loads content from (a plain note, snapshot.js externalsLines), and warns when the working copy differs
+// from head.
 // The URL opens in the system browser unless --browser (or $SPECREVIEW_BROWSER) says `pane` (print it for the agent
 // to show in its built-in browser pane) or `none`.
 // The `next:` hint names the doc the way follow-up commands run from the cwd should: by id when the cwd's own
@@ -40,7 +41,7 @@ import {
 export const spec = {
   name: 'open',
   usage: 'open <file|dir...> | open - [--name N] [--title T] [--browser pane|system|none] [--workspace <dir>] [--json]',
-  summary: 'Track a spec (recording v1 if it is new), make sure the review server runs, and print the review URL.',
+  summary: 'Track a document (recording v1 if it is new), make sure the review server runs, and print the review URL.',
   options: {
     title: { type: 'string' },
     browser: { type: 'string' },
@@ -175,6 +176,8 @@ export async function execute(rt, input) {
         '(the doc is tracked; run `suiko doctor`)',
     );
   }
+  // one stderr line when the installed Suiko skill or protocol block is older than this CLI (install/freshness.js)
+  stderr.push(...(await (await import('../install/freshness.js')).freshnessNotes(rt)));
   const json = docsJson.length === 1 ? docsJson[0] : { docs: docsJson };
   if (daemonError) Object.assign(json, { error: { message: /** @type {Error} */ (daemonError).message } });
   return { exit: daemonError ? exitCodeOf(daemonError) || EXIT.ERROR : EXIT.OK, text: text.join('\n'), json, stderr };
@@ -382,7 +385,7 @@ async function folderResult(rt, tracked, expanded, browser) {
     text.push(`next: ${shownPrefix(shown)}run ${waits.join(' and ')} in the background`);
   }
   for (const root of [...new Set(tracked.filter((t) => t.storeCreated).map((t) => t.root))]) {
-    text.push(`created ${path.join(root, '.specreview')}/ (commit it with the specs)`);
+    text.push(`created ${path.join(root, '.specreview')}/ (commit it with the docs)`);
   }
   if (daemonError) {
     stderr.push(`suiko: the review server could not be started: ${/** @type {Error} */ (daemonError).message} (the docs are tracked; run \`suiko doctor\`)`);
@@ -574,7 +577,7 @@ function describe(t, url, daemonError, browser, ref) {
   }
   if (t.storeCreated) {
     out.push(
-      `created ${path.join(t.root, '.specreview')}/ (commit it with the spec). Recommended .gitattributes lines:`,
+      `created ${path.join(t.root, '.specreview')}/ (commit it with the doc). Recommended .gitattributes lines:`,
       '  .specreview/assets/** binary',
       '  .specreview/docs/*/versions/* linguist-generated=true',
     );

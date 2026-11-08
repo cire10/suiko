@@ -9,7 +9,7 @@
 // Isolation: temp workspace, SPECREVIEW_HOME and HOME for the subprocesses, a free port pair in 5850-5899
 // (SPECREVIEW_PORT, never 4777/4778); `suiko stop` (and a pid kill as a fallback) in afterAll.
 
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -17,7 +17,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TESTID } from '../../src/shared/protocol.js';
-import { Ui } from './fixtures.mjs';
+import { pinnedPage, Ui } from './fixtures.mjs';
+
+// the preferences these specs were written for (fixtures.mjs LEGACY_PREFS)
+const test = base.extend(/** @type {any} */ ({ page: pinnedPage }));
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = path.join(ROOT, 'bin', 'suiko.js');
@@ -145,17 +148,17 @@ test('Markdown: the CLI-started daemon serves the UI; comment -> submit -> wait 
   await expect(frame.locator('h1')).toHaveText('Token Service Implementation Spec');
   await expect(frame.locator('pre.mermaid svg, [data-sr-kind="mermaid"] svg').first()).toBeAttached({ timeout: 15000 });
   await expect.poll(() => frame.evaluate(() => /** @type {HTMLImageElement} */ (document.querySelector('img')).naturalWidth)).toBe(160);
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/No agent listening/);
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude isn't connected/);
 
   // the agent starts listening (a real background `wait`)
   const wait = cli(['wait', 'kitchen-sink']);
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/claude is listening/, { timeout: 15000 });
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude is listening/, { timeout: 15000 });
 
   // select a phrase with the mouse, press c (forwarded by the guest), write, Add to review
   await dragSelect(ui, page, 'p', 'rotated on every use');
   await page.keyboard.press('c');
   const composer = page.getByTestId(TESTID.composer);
-  await expect(composer.locator('.agent-sees')).toContainText('Agent will see: L51');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /^Claude will see: L51 /);
   await page.getByTestId(TESTID.composerTextarea).fill('What happens to requests in flight?');
   await page.getByTestId(TESTID.composerAdd).click();
   await expect(composer).toBeHidden();
@@ -171,7 +174,7 @@ test('Markdown: the CLI-started daemon serves the UI; comment -> submit -> wait 
   expect(delivered.code, delivered.stderr).toBe(0);
   expect(delivered.stdout).toContain('review rv1 on v1 · CHANGES REQUESTED');
   expect(delivered.stdout).toMatch(/^\[t1\] comment · L51 · /m);
-  await expect(page.locator('.review-progress')).toContainText('Delivered to claude');
+  await expect(page.locator('.review-progress')).toHaveText(/^Claude has it · \d\d:\d\d$/);
 
   // the agent edits the file (Edit tool) and records v2 with a reply
   const file = path.join(S.ws, 'docs', 'kitchen-sink.md');
@@ -182,14 +185,15 @@ test('Markdown: the CLI-started daemon serves the UI; comment -> submit -> wait 
   expect(revised.stdout).toMatch(/recorded v2 for kitchen-sink .*-> t1 addressed/s);
 
   // the UI follows: toast, v2 in the picker, the thread card and its highlight in the doc
-  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'v2 ready' })).toContainText('from claude');
+  await expect(page.getByTestId(TESTID.toast).filter({ hasText: 'Updated to v2' })).toBeVisible();
   await expect(page.getByTestId(TESTID.versionPicker)).toHaveValue('2');
   const card = ui.card('t1');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Added a 30 s grace window.');
   await expect.poll(async () => {
     const g = await ui.inspect();
-    return (g.highlights?.['sr-open'] ?? 0) + (g.highlights?.['sr-resolved'] ?? 0);
+    // t1 is addressed: drawn as answered / changed, for the reviewer to check (sr-check)
+    return ['sr-open', 'sr-check', 'sr-declined', 'sr-answer', 'sr-resolved'].reduce((n, k) => n + (g.highlights?.[k] ?? 0), 0);
   }).toBeGreaterThan(0);
   const v2frame = await ui.frame();
   expect(v2frame.url()).toMatch(/\/v2\/docs\/kitchen-sink\.md$/);
@@ -205,11 +209,11 @@ test('HTML: the author scripts run in the doc, a comment reaches wait', async ({
   await expect(frame.locator('#generated li')).toHaveCount(3);
   await expect(frame.locator('pre.mermaid svg')).toBeAttached({ timeout: 15000 });
   const wait = cli(['wait', 'app-spec']);
-  await expect(page.getByTestId(TESTID.presence)).toHaveText(/claude is listening/, { timeout: 15000 });
+  await expect(page.getByTestId(TESTID.presence)).toHaveText(/Claude is listening/, { timeout: 15000 });
   await dragSelect(ui, page, 'p', 'processed in three stages');
   await page.keyboard.press('c');
   const composer = page.getByTestId(TESTID.composer);
-  await expect(composer.locator('.agent-sees')).toContainText('L27');
+  await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /L27/);
   await page.getByTestId(TESTID.composerTextarea).fill('Name the stages.');
   await page.getByTestId(TESTID.composerSendNow).click();
   await expect(composer).toBeHidden();

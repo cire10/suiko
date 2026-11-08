@@ -141,7 +141,7 @@ const SelectionCapture = (() => {
       }, 'sel-up');
       window.addEventListener('pointerup', up, true);
       window.addEventListener('pointercancel', up, true);
-      window.addEventListener('keyup', guard(() => scheduleUpdate(), 'sel-key'), true);
+      listenOwn(window, 'keyup', guard(() => scheduleUpdate(), 'sel-key'), true);
     },
     /** Enables/disables captures (disabled in readonly mode and while picking). @param {boolean} on */
     setEnabled(on) {
@@ -153,6 +153,15 @@ const SelectionCapture = (() => {
       } else {
         scheduleUpdate();
       }
+    },
+    /**
+     * Hides the toolbar for the current selection and keeps the selection (the UI opened a composer for it: its
+     * buttons would only repeat what the composer does, over the text being commented on). A new selection shows it
+     * again.
+     */
+    dismiss() {
+      if (current) dismissedKey = JSON.stringify(current.capture);
+      Overlay.toolbar.hide();
     },
     /** Removes the page selection and hides the toolbar. */
     clear() {

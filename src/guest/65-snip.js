@@ -1005,7 +1005,7 @@ const Snip = (() => {
   }
 
   /** Esc cancels snip mode (consumed: never forwarded, never seen by the page's later handlers). */
-  window.addEventListener('keydown', guard((/** @type {KeyboardEvent} */ ev) => {
+  listenOwn(window, 'keydown', guard((/** @type {KeyboardEvent} */ ev) => {
     if (!active || ev.defaultPrevented || ev.isComposing) return;
     if (ev.key !== 'Escape' || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     ev.preventDefault();

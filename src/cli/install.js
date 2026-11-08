@@ -20,6 +20,10 @@
 //     --user prints the `claude mcp add --scope user ...` command (Claude Code's user config is not edited).
 // install agents-md: inserts integrations/agents-md/AGENTS.snippet.md into <project>/AGENTS.md, replacing an
 //   existing `<!-- specreview:begin ... <!-- specreview:end -->` block (idempotent) or appending it.
+// Every instruction file Suiko writes says which Suiko wrote it: a copy ends with `<!-- installed by suiko 0.4.0 -->`
+// (a TOML file with `# installed by suiko 0.4.0`), a protocol block has that line just above its end marker. `suiko
+// open` and `suiko doctor` compare it with the running CLI (install/freshness.js): `npm install -g` does not refresh
+// copies in ~/.claude or ~/.codex, so an upgrade would otherwise keep the old instructions in front of the agent.
 // The integration files are WP8's; they are read at run time.
 
 import fs from 'node:fs';
@@ -27,7 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { NotFoundError } from '../core/store/errors.js';
-import { BIN_PATH, PACKAGE_ROOT } from './daemon-client.js';
+import { BIN_PATH, PACKAGE_ROOT, packageVersion } from './daemon-client.js';
 import { BACKUP_SUFFIX, checkMarkers, copyAction, readExisting, readJsonFile, stringifyLike, updateManifest, writeAtomic } from './install/files.js';
 
 export const INTEGRATIONS_DIR = path.join(PACKAGE_ROOT, 'integrations');
@@ -186,6 +190,40 @@ export function withInvocationNote(text, invocation) {
 }
 
 /**
+ * The line that says which Suiko installed a file (see the header).
+ * @param {string} [version] default: this package's version
+ * @param {{ toml?: boolean }} [o]
+ * @returns {string}
+ */
+export function installMark(version = packageVersion(), o = {}) {
+  return o.toml ? `# installed by suiko ${version}` : `<!-- installed by suiko ${version} -->`;
+}
+
+/**
+ * A whole file as installed: its text (one final newline) followed by the install mark.
+ * @param {string} text
+ * @param {string} [version]
+ * @param {{ toml?: boolean }} [o]
+ * @returns {string}
+ */
+export function withInstallMark(text, version = packageVersion(), o = {}) {
+  return `${text.replace(/\n*$/, '\n')}${installMark(version, o)}\n`;
+}
+
+/**
+ * A marked block (`<!-- specreview:begin` .. `<!-- specreview:end -->`) as installed: the install mark goes on the
+ * line above its end marker.
+ * @param {string} block
+ * @param {string} [version]
+ * @returns {string}
+ */
+export function markBlock(block, version = packageVersion()) {
+  const end = block.lastIndexOf(END_MARKER);
+  if (end < 0) return block;
+  return `${block.slice(0, end)}${installMark(version)}\n${block.slice(end)}`;
+}
+
+/**
  * @param {string} s
  * @returns {string}
  */
@@ -218,20 +256,22 @@ export function claudeCommandFiles() {
 }
 
 /**
- * Every file Suiko copies into a Claude Code config dir, with its template text and localised content.
+ * Every file Suiko copies into a Claude Code config dir, with its template text and localised content (the
+ * not-on-PATH note where needed, and the install mark).
  * @param {string} base <claude home> or <project>/.claude
- * @param {{ cliOnPath: boolean, invocation: string }} o
+ * @param {{ cliOnPath: boolean, invocation: string, version?: string }} o
  * @returns {Array<{ target: string, source: string, template: string, content: string, dir: string }>}
  */
 export function claudeCopies(base, o) {
   if (!fs.existsSync(SKILL_DIR)) throw new NotFoundError(`integration files missing: ${SKILL_DIR}`);
-  const localize = (/** @type {string} */ text) => (o.cliOnPath ? text : withInvocationNote(text, o.invocation));
+  const version = o.version ?? packageVersion();
+  const localize = (/** @type {string} */ text) => withInstallMark(o.cliOnPath ? text : withInvocationNote(text, o.invocation), version);
   const out = [];
   const skillTarget = path.join(base, 'skills', 'spec-review');
   for (const rel of listFiles(SKILL_DIR)) {
     const source = path.join(SKILL_DIR, rel);
     const template = readText(source);
-    out.push({ target: path.join(skillTarget, rel), source, template, content: rel === 'SKILL.md' ? localize(template) : template, dir: skillTarget });
+    out.push({ target: path.join(skillTarget, rel), source, template, content: rel === 'SKILL.md' ? localize(template) : withInstallMark(template, version), dir: skillTarget });
   }
   for (const name of claudeCommandFiles()) {
     const source = path.join(COMMANDS_DIR, name);
@@ -343,7 +383,7 @@ export function describeHookEntries(entries) {
  */
 export function planAgentsMd(o) {
   if (!fs.existsSync(AGENTS_SNIPPET)) throw new NotFoundError(`integration files missing: ${AGENTS_SNIPPET}`);
-  const snippet = readText(AGENTS_SNIPPET).replace(/\s+$/, '');
+  const snippet = markBlock(readText(AGENTS_SNIPPET).replace(/\s+$/, ''));
   const target = o.file ? path.resolve(o.cwd, o.file) : path.join(projectRoot(o.cwd), 'AGENTS.md');
   const current = readExisting(target);
   // damaged markers (two begin lines, a begin line without its end) are refused, as `suiko install` does: guessing

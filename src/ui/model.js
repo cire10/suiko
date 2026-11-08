@@ -1,7 +1,11 @@
 // @ts-check
-// Pure, import-free helpers that derive what the UI shows from DocState (design 5.3 / 10.2 shapes): thread status
-// and anchor-state chips, panel filters and the Verify queue, document order, presence and review progress,
-// changes grouping, outline badges and the history timeline; plus shortcut labels and key-combo classification
+// Pure, import-free helpers that derive what the UI shows from DocState (design 5.3 / 10.2 shapes): the thread
+// card's one status chip and whose turn a thread is (turnReason), the panel filters (Your turn, the agent's, Done,
+// All), what to check, the planned changes an Apply sends (applicablePlanned), document order, presence and review
+// progress, the header's turn pill ("whose turn is it?") and problems chip, what an approval would leave pending
+// (approveWarnings), the composer's "Claude will see" line, long documents and the review's `edits`, agent
+// attachments, changes grouping, outline badges and the history timeline; plus shortcut labels and key-combo
+// classification
 // (app-level Cmd/Ctrl combos, single-character keys) and the command palette's fuzzy search. No DOM and no store
 // access, so the same functions run in the browser and in Node tests.
 
@@ -53,11 +57,29 @@ export function docKindOf(ds) {
   return k === 'code' || k === 'snapshot' ? k : 'file';
 }
 
+/** A plan from Claude Code's plan mode (`suiko plan-gate`): a snapshot doc of origin 'plan'. @param {DocState} ds */
+export function isPlanDoc(ds) {
+  return docKindOf(ds) === 'snapshot' && ds?.doc?.origin?.type === 'plan';
+}
+
+/**
+ * The send mode in effect (Settings > Send comments): the setting, except on a plan (isPlanDoc), where comments are
+ * always collected until the reviewer sends them together ('batch'). The plan gate answers ExitPlanMode with the first
+ * review it gets, and the agent cannot reply on threads while it waits there, so a comment sent alone would end the
+ * plan review and cost a plan revision per comment. "Send now" in the composer still sends one on purpose.
+ * @param {{ prefs?: { sendMode?: string }, ds?: DocState }} s
+ * @returns {'now'|'batch'}
+ */
+export function sendModeOf(s) {
+  return isPlanDoc(s?.ds) || s?.prefs?.sendMode === 'batch' ? 'batch' : 'now';
+}
+
 /**
  * What the doc view offers for a kind (design 2.14), read by the components and actions that depend on the rendered
- * doc frame: frame (the doc iframe and its guest), pick / snip / hide (the guest tools), pageErrors (the status
- * bar's page error count), applyNow (the reviewer applies a suggestion to the file: not for snapshots, whose agent
- * applies them when it revises), liveBanners (the working-copy and lost-frame banners), locks ("Mark agreed").
+ * doc frame: frame (the doc iframe and its guest), pick / snip / hide (the guest tools), pageErrors (the problems
+ * chip's script errors and failed resources), applyNow (the reviewer applies a suggestion to the file: not for
+ * snapshots, whose agent applies them when it revises), liveBanners (the working-copy and lost-frame banners), locks
+ * ("Mark agreed").
  * A code review has no frame: its view renders diffs as text nodes (src/ui/components/kinds/CodeReviewView.js).
  * @param {DocState} ds
  * @returns {{ frame: boolean, pick: boolean, snip: boolean, hide: boolean, pageErrors: boolean, applyNow: boolean,
@@ -276,6 +298,42 @@ export function defaultBase(ds, version, kind) {
   return v > 1 ? v - 1 : null;
 }
 
+/** Over this many visible text characters (or, without that count, source lines) a doc is long: batched edits. */
+export const LONG_DOC = Object.freeze({ chars: 20000, lines: 800 });
+
+/**
+ * The size of the doc's latest version, as DocState.versions records it: `textChars` (the visible text, absent on old
+ * versions and code rounds) and `lines` (source lines). long: over LONG_DOC (characters when counted, else lines).
+ * @param {DocState} ds
+ * @returns {{ long: boolean, chars: number|null, lines: number|null }}
+ */
+export function docSize(ds) {
+  const meta = versionMeta(ds, Number(ds?.doc?.head));
+  const chars = meta && meta.textChars != null && Number.isFinite(Number(meta.textChars)) ? Number(meta.textChars) : null;
+  const lines = meta && meta.lines != null && Number.isFinite(Number(meta.lines)) ? Number(meta.lines) : null;
+  const long = chars != null ? chars > LONG_DOC.chars : lines != null && lines > LONG_DOC.lines;
+  return { long, chars, lines };
+}
+
+/** Whether the doc is long (docSize): its edits are batched with the Auto setting. @param {DocState} ds */
+export function isLongDoc(ds) {
+  return docSize(ds).long;
+}
+
+/**
+ * The `edits` every review the UI sends carries (Settings > Doc edits): 'now' (the agent edits the doc for each
+ * review) or 'batch' (it answers now, plans the edits, and makes them in one pass when the reviewer applies them).
+ * 'auto' batches on long docs (isLongDoc).
+ * @param {DocState} ds
+ * @param {{ editMode?: string }|null|undefined} prefs
+ * @returns {'now'|'batch'}
+ */
+export function reviewEdits(ds, prefs) {
+  const mode = prefs?.editMode;
+  if (mode === 'now' || mode === 'batch') return mode;
+  return isLongDoc(ds) ? 'batch' : 'now';
+}
+
 /** Guard badges of a version manifest summary. @param {any} meta @param {number} [maxRatio] */
 export function guardBadges(meta, maxRatio = 0.5) {
   /** @type {Array<{ key: string, label: string, tone: string }>} */
@@ -428,22 +486,57 @@ export function lastAgentComment(t) {
 }
 
 /**
- * Status chip of a thread (design 11.5).
+ * The one status chip of a thread card, in plain words that say whose turn it is (calm review vocabulary; the agent's
+ * name where "Claude" appears): open "With Claude", planned "Will change", answered "Claude answered", addressed
+ * "Changed in v3 — check it" while the reviewer has to check it (isVerifiable) else "Changed in v3", declined "Claude
+ * didn't change it", needs_input "Needs your answer" (with the banner "Claude asked you"), resolved "Done"; an answer
+ * the reviewer has replied to since is "With Claude" again. An unresolved thread whose anchor lost its place in the
+ * version shown (turnReason 'lost', which needs `ctx`) says "Lost its place" instead. `key` is the status, or 'lost';
+ * `title` explains a chip that needs it.
  * @param {Thread} t
  * @param {string} [agent]
+ * @param {{ drafts: any, version: number|'live'|null }|null} [ctx] the drafts and the version shown
+ * @returns {{ key: string, label: string, tone: string, banner?: string, title?: string }}
  */
-export function statusInfo(t, agent = 'claude') {
+export function statusInfo(t, agent = 'claude', ctx = null) {
+  const name = agentTitle(agent);
+  if (ctx && turnReason(t, ctx) === 'lost') {
+    return { key: 'lost', label: 'Lost its place', tone: 'warn', title: 'The text this thread was on changed or was removed in this version' };
+  }
+  // The agent answered, then the reviewer replied (sent): the agent has the last word to say again.
+  if (['addressed', 'answered', 'declined', 'needs_input'].includes(t?.status) && reviewerSpokeLast(t)) {
+    return { key: t.status, label: `With ${name}`, tone: 'accent', title: `You replied; ${name} answers on this thread` };
+  }
   switch (t?.status) {
     case 'addressed': {
       const c = lastAgentComment(t);
-      return { key: 'addressed', label: c?.version ? `Addressed in v${c.version}` : 'Addressed', tone: 'ok' };
+      const changed = c?.version ? `Changed in v${c.version}` : 'Changed';
+      return isVerifiable(t, ctx ? ctx.drafts : null)
+        ? { key: 'addressed', label: `${changed} — check it`, tone: 'ok', title: `${name} changed the document for this thread: check the change` }
+        : { key: 'addressed', label: changed, tone: 'ok' };
     }
-    case 'answered': return { key: 'answered', label: 'Answered', tone: 'ok' };
-    case 'declined': return { key: 'declined', label: 'Declined', tone: 'warn' };
-    case 'needs_input': return { key: 'needs_input', label: 'Needs you', tone: 'attn', banner: `${agent} asked you` };
-    case 'resolved': return { key: 'resolved', label: 'Resolved', tone: 'muted' };
-    default: return { key: 'open', label: 'Open', tone: 'accent' };
+    case 'answered': return { key: 'answered', label: `${name} answered`, tone: 'ok' };
+    case 'declined': return { key: 'declined', label: `${name} didn't change it`, tone: 'warn' };
+    case 'needs_input': return { key: 'needs_input', label: 'Needs your answer', tone: 'attn', banner: `${name} asked you` };
+    case 'planned': {
+      return { key: 'planned', label: 'Will change', tone: 'info', title: `${name} agreed and will make this change when you apply planned changes` };
+    }
+    case 'resolved': return { key: 'resolved', label: 'Done', tone: 'muted' };
+    default: return { key: 'open', label: `With ${name}`, tone: 'accent' };
   }
+}
+
+/**
+ * Whether the reviewer wrote the newest comment of a thread (a reply they sent after the agent's last word).
+ * @param {Thread} t
+ */
+export function reviewerSpokeLast(t) {
+  const cs = t?.comments || [];
+  for (let i = cs.length - 1; i >= 0; i--) {
+    if (isHuman(cs[i].by)) return true;
+    if (isAgent(cs[i].by)) return false;
+  }
+  return false;
 }
 
 /** Reply drafts pending for a thread. @param {any} drafts Drafts @param {string} threadId */
@@ -452,8 +545,8 @@ export function replyDraftsFor(drafts, threadId) {
 }
 
 /**
- * Verify queue membership (design 8.8): addressed / answered / declined threads with no newer reviewer comment and
- * no pending reply draft.
+ * What the reviewer has to check (design 8.8; formerly the Verify queue): addressed / answered / declined threads with
+ * no newer reviewer comment and no pending reply draft.
  * @param {Thread} t
  * @param {any} drafts
  */
@@ -470,29 +563,94 @@ export function isVerifiable(t, drafts) {
   return lastAgent > lastHuman;
 }
 
+/**
+ * Why a thread waits for the reviewer ("your turn", Gerrit's attention set), or null when it does not: 'pending' (a
+ * reply or resolve of the review being prepared is on it), 'answer' (the agent asked, needs_input, and the reviewer
+ * has not answered yet), 'check' (the agent changed or answered it and spoke last: isVerifiable), 'lost'
+ * (unresolved, and its anchor lost its place in the version shown), in that order. The one rule behind the turn pill's count (myTurn) and the thread panel's "Your
+ * turn" filter, so the two can never differ. A thread with no reason and not resolved waits for the agent.
+ * @param {Thread} t
+ * @param {{ drafts: any, version: number|'live'|null }} ctx
+ * @returns {'pending'|'answer'|'check'|'lost'|null}
+ */
+export function turnReason(t, ctx) {
+  const items = ctx?.drafts?.items || [];
+  if (items.some((/** @type {any} */ d) => d.kind !== 'thread' && d.thread === t?.id)) return 'pending';
+  // the agent's question, until the reviewer has answered it
+  if (t?.status === 'needs_input' && !reviewerSpokeLast(t)) return 'answer';
+  if (isVerifiable(t, ctx?.drafts)) return 'check';
+  if (t?.status !== 'resolved' && isOutdated(t, ctx?.version ?? null)) return 'lost';
+  return null;
+}
+
+/**
+ * The thread panel's filters (a segmented control): 'mine' "Your turn" (new-thread drafts and every thread with a
+ * turnReason), 'agent' (the agent's name, "Claude": unresolved threads with no turnReason, and every planned thread,
+ * listed first), 'done' "Done" (resolved), 'all'. Every unresolved thread is in exactly one of mine / agent, except a
+ * planned thread that also waits for the reviewer (a reply not sent yet, a lost anchor): it is in both, so the
+ * agent's "Planned changes" always lists what Apply sends (applicablePlanned). The 'agent' label is a placeholder:
+ * filterLabel names the agent.
+ */
 export const FILTERS = Object.freeze([
-  { key: 'open', label: 'Open' },
-  { key: 'needs', label: 'Needs me' },
-  { key: 'verify', label: 'Verify' },
-  { key: 'drafts', label: 'Drafts' },
-  { key: 'resolved', label: 'Resolved' },
-  { key: 'outdated', label: 'Outdated' },
+  { key: 'mine', label: 'Your turn' },
+  { key: 'agent', label: 'Claude' },
+  { key: 'done', label: 'Done' },
   { key: 'all', label: 'All' },
 ]);
 
+/** @typedef {'mine'|'agent'|'done'|'all'} FilterKey */
+
+/** Filter keys of earlier versions (palette commands, keys, saved state, old call sites) and the filter they are now. */
+const LEGACY_FILTERS = /** @type {Record<string, FilterKey>} */ ({
+  needs: 'mine', verify: 'mine', drafts: 'mine', outdated: 'mine', open: 'agent', resolved: 'done',
+});
+
+/**
+ * A filter key as the panel knows it: the current keys as they are, an earlier one mapped (needs / verify / drafts /
+ * outdated -> mine, open -> agent, resolved -> done), anything else the default filter of the doc (defaultFilter;
+ * 'all' without a doc).
+ * @param {unknown} key
+ * @param {DocState} [ds]
+ * @param {number|'live'|null} [version]
+ * @returns {FilterKey}
+ */
+export function normalizeFilter(key, ds = null, version = null) {
+  const k = String(key ?? '');
+  if (FILTERS.some((f) => f.key === k)) return /** @type {FilterKey} */ (k);
+  if (Object.hasOwn(LEGACY_FILTERS, k)) return LEGACY_FILTERS[k];
+  return ds ? defaultFilter(ds, version) : 'all';
+}
+
+/**
+ * The filter the panel shows while the reviewer has not picked one for this doc: Your turn when something waits for
+ * them, else the agent's when something waits for it, else All.
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ * @returns {FilterKey}
+ */
+export function defaultFilter(ds, version) {
+  const counts = filterCounts(ds, version);
+  if (counts.mine) return 'mine';
+  if (counts.agent) return 'agent';
+  return 'all';
+}
+
+/** A filter's label: the agent's name for 'agent' ("Claude"). @param {string} key @param {string} [agent] */
+export function filterLabel(key, agent = 'claude') {
+  if (key === 'agent') return agentTitle(agent);
+  return FILTERS.find((f) => f.key === key)?.label ?? key;
+}
+
 /**
  * @param {Thread} t
- * @param {string} filter
+ * @param {string} filter a filter key (an earlier one is mapped: normalizeFilter)
  * @param {{ drafts: any, version: number|'live'|null }} ctx
  */
 export function threadMatches(t, filter, ctx) {
-  switch (filter) {
-    case 'open': return t.status !== 'resolved';
-    case 'needs': return t.status === 'needs_input';
-    case 'verify': return isVerifiable(t, ctx.drafts);
-    case 'drafts': return replyDraftsFor(ctx.drafts, t.id).length > 0;
-    case 'resolved': return t.status === 'resolved';
-    case 'outdated': return isOutdated(t, ctx.version);
+  switch (normalizeFilter(filter)) {
+    case 'mine': return turnReason(t, ctx) != null;
+    case 'agent': return t.status === 'planned' || (t.status !== 'resolved' && turnReason(t, ctx) == null);
+    case 'done': return t.status === 'resolved';
     default: return true;
   }
 }
@@ -504,23 +662,26 @@ export function threadDrafts(drafts) {
 
 /**
  * Items the thread panel lists for a filter, in document order (List layout, amendments 1). New-thread drafts are
- * listed with 'open', 'drafts' and 'all'. `keep`, the thread whose reply box is open, is listed whatever the filter,
- * so the text being typed never disappears with its card (the thread was accepted in another tab, say).
+ * listed with 'mine' (Your turn) and 'all'. `keep`, the threads with input open on their card (the reply box, a
+ * "Record as decision…" being typed: actions.js keptThreads), is listed whatever the filter, so the text being typed
+ * never disappears with its card (the agent answered it, or it was accepted in another tab, say).
  * @param {DocState} ds
- * @param {string} filter
+ * @param {string} filter a filter key (an earlier one is mapped: normalizeFilter)
  * @param {number|'live'|null} version
- * @param {string|null} [keep]
+ * @param {string|null|Array<string|null|undefined>} [keep] a thread id or a list of them
  * @returns {Array<{ kind: 'thread'|'draft', id: string, item: any, anchor: Anchor|null }>}
  */
 export function panelItems(ds, filter, version, keep = null) {
   if (!ds) return [];
+  const key = normalizeFilter(filter, ds, version);
   const ctx = { drafts: ds.drafts, version };
+  const kept = new Set((Array.isArray(keep) ? keep : [keep]).filter(Boolean));
   /** @type {Array<{ kind: 'thread'|'draft', id: string, item: any, anchor: Anchor|null }>} */
   const out = [];
   for (const t of ds.threads || []) {
-    if (t.id === keep || threadMatches(t, filter, ctx)) out.push({ kind: 'thread', id: t.id, item: t, anchor: anchorAt(t, version) });
+    if (kept.has(t.id) || threadMatches(t, key, ctx)) out.push({ kind: 'thread', id: t.id, item: t, anchor: anchorAt(t, version) });
   }
-  if (filter === 'open' || filter === 'drafts' || filter === 'all') {
+  if (key === 'mine' || key === 'all') {
     for (const d of threadDrafts(ds.drafts)) out.push({ kind: 'draft', id: d.id, item: d, anchor: d.anchor || null });
   }
   // code reviews: by file first (whole-review threads, which have no file, come first)
@@ -531,7 +692,11 @@ export function panelItems(ds, filter, version, keep = null) {
   return out;
 }
 
-/** Count per filter key. @param {DocState} ds @param {number|'live'|null} version @returns {Record<string, number>} */
+/**
+ * Count per filter key (new-thread drafts count with Your turn and All), the number of cards each filter lists. `mine`
+ * always equals the turn pill's count (myTurn): both come from turnReason.
+ * @param {DocState} ds @param {number|'live'|null} version @returns {Record<string, number>}
+ */
 export function filterCounts(ds, version) {
   /** @type {Record<string, number>} */
   const counts = {};
@@ -540,10 +705,28 @@ export function filterCounts(ds, version) {
   for (const f of FILTERS) {
     let n = 0;
     for (const t of ds?.threads || []) if (threadMatches(t, f.key, ctx)) n++;
-    if (f.key === 'open' || f.key === 'drafts' || f.key === 'all') n += nDrafts;
+    if (f.key === 'mine' || f.key === 'all') n += nDrafts;
     counts[f.key] = n;
   }
   return counts;
+}
+
+/**
+ * The planned changes an Apply sends (batched edits): every thread the agent planned to change (status 'planned'),
+ * whichever filter lists it (one that also waits for the reviewer, a reply not sent yet or a lost anchor, is in Your
+ * turn too), in id order. The one set behind the panel's "Apply N", a card's "Apply this now", the turn pill, the
+ * Approve dialog's warning and the palette, so they can never apply different changes.
+ * @param {DocState} ds
+ * @returns {any[]}
+ */
+export function applicablePlanned(ds) {
+  return (ds?.threads || []).filter((/** @type {any} */ t) => t.status === 'planned')
+    .sort((/** @type {any} */ a, /** @type {any} */ b) => idNumber(a.id) - idNumber(b.id));
+}
+
+/** Threads the agent planned to change: applicablePlanned (the name callers used first). @param {DocState} ds */
+export function plannedThreads(ds) {
+  return applicablePlanned(ds);
 }
 
 /** All draft items (thread + reply + resolve). @param {DocState} ds */
@@ -557,9 +740,9 @@ export function blockingOpen(ds) {
 }
 
 /**
- * The verdict the Submit dialog starts with: "Request changes" when the review carries a blocking comment (a
- * blocking new thread, or a reopen of a blocking thread), else `otherwise` (the reviewer's Settings choice,
- * "Comment" by default).
+ * The verdict the Send dialog starts with when there are drafts: "Needs changes" when the review carries a Must fix
+ * comment (a blocking new thread, or a reopen of a blocking thread), else `otherwise` (the reviewer's Settings
+ * choice, "Send feedback" by default).
  * @param {DocState} ds
  * @param {'comment'|'changes_requested'} [otherwise]
  * @returns {'changes_requested'|'comment'}
@@ -572,15 +755,16 @@ export function defaultVerdict(ds, otherwise = 'comment') {
 }
 
 /**
- * What to tell the agent after submitting when it is not listening (Submit dialog, Settings, command palette).
+ * What to paste into the agent's chat when it is not listening (the Send dialog, the turn pill, Settings, Document
+ * info, the command palette): plain words, no Markdown, so what the UI shows is exactly what gets copied.
  * @param {DocState} ds
  */
 export function agentPrompt(ds) {
-  return `Run \`suiko feedback ${ds?.doc?.id ?? ''}\` and address it.`;
+  return `Run suiko feedback ${ds?.doc?.id ?? ''} and address it.`;
 }
 
 /**
- * What "Accept all" accepts: the Verify queue's addressed and answered threads (the agent changed the doc, or answered
+ * What "Accept all" accepts: the addressed and answered threads to check (the agent changed the doc, or answered
  * a question). Declined threads stay in the queue: each needs the reviewer's own decision.
  * @param {DocState} ds
  * @returns {any[]}
@@ -590,7 +774,7 @@ export function acceptableThreads(ds) {
     && isVerifiable(t, ds.drafts));
 }
 
-/** The Verify queue's declined threads (left out of "Accept all"). @param {DocState} ds @returns {any[]} */
+/** The declined threads to check (the agent did not change them; left out of "Accept all"). @param {DocState} ds @returns {any[]} */
 export function declinedToVerify(ds) {
   return (ds?.threads || []).filter((/** @type {any} */ t) => t.status === 'declined' && isVerifiable(t, ds.drafts));
 }
@@ -636,23 +820,36 @@ function agentRepliedSince(ds, review) {
 }
 
 /**
- * Presence chip (design 11.7).
- * @param {DocState} ds
- * @returns {{ kind: 'editing'|'listening'|'revising'|'none', label: string, tone: string }}
+ * The agent's name at the start of a sentence: 'claude' -> 'Claude'. A name that is not one plain lowercase word
+ * ('gpt-5', 'MyBot') is left as it is.
+ * @param {unknown} name
  */
-export function presenceInfo(ds) {
-  const agent = agentName(ds);
-  if (ds?.working?.dirty && !ds.working.missing) return { kind: 'editing', label: `${agent} is editing (unrecorded)`, tone: 'warn' };
-  if (ds?.waiters?.length) return { kind: 'listening', label: `${agent} is listening`, tone: 'ok' };
-  const last = latestReview(ds);
-  if (last && Object.keys(last.deliveredTo || {}).length && !answeringVersion(ds, last) && !agentRepliedSince(ds, last)) {
-    return { kind: 'revising', label: `${agent} is revising...`, tone: 'warn' };
-  }
-  return { kind: 'none', label: 'No agent listening', tone: 'muted' };
+export function agentTitle(name) {
+  const n = String(name ?? '');
+  return /^[a-z]+$/.test(n) ? n[0].toUpperCase() + n.slice(1) : n;
 }
 
 /**
- * Progress of the newest review: Submitted -> Delivered to claude 14:02 -> revising... -> v3 ready.
+ * Where the agent is (the turn pill's dot, design 11.7): editing the file (unrecorded changes on disk), listening (a
+ * `suiko wait` is running), working on the feedback it got (delivered, not answered yet), or not connected (feedback
+ * waits for its next `suiko wait`). `label` is the sentence, `short` the pill's narrow form.
+ * @param {DocState} ds
+ * @returns {{ kind: 'editing'|'listening'|'revising'|'none', label: string, short: string, tone: string }}
+ */
+export function presenceInfo(ds) {
+  const agent = agentTitle(agentName(ds));
+  if (ds?.working?.dirty && !ds.working.missing) return { kind: 'editing', label: `${agent} is editing`, short: 'Editing', tone: 'warn' };
+  if (ds?.waiters?.length) return { kind: 'listening', label: `${agent} is listening`, short: 'Listening', tone: 'ok' };
+  const last = latestReview(ds);
+  if (last && Object.keys(last.deliveredTo || {}).length && !answeringVersion(ds, last) && !agentRepliedSince(ds, last)) {
+    return { kind: 'revising', label: `${agent} is working…`, short: 'Working…', tone: 'accent' };
+  }
+  return { kind: 'none', label: `${agent} isn't connected`, short: 'Not connected', tone: 'muted' };
+}
+
+/**
+ * Progress of the newest review, in plain words: "Sent 14:01" -> "Claude has it · 14:02" -> "Claude is editing…" ->
+ * "v3 ready". `stage`: submitted, delivered, revising, ready.
  * @param {DocState} ds
  * @returns {{ label: string, tone: string, stage: string }|null}
  */
@@ -663,15 +860,176 @@ export function reviewProgress(ds) {
   const answer = answeringVersion(ds, r);
   if (answer) return { label: `v${answer.v} ready`, tone: 'ok', stage: 'ready' };
   const delivered = Object.entries(r.deliveredTo || {});
-  if (!delivered.length) return { label: `Submitted ${formatClock(r.submittedAt)}`.trim(), tone: 'muted', stage: 'submitted' };
-  if (ds?.working?.dirty) return { label: `${agent} is revising...`, tone: 'warn', stage: 'revising' };
+  if (!delivered.length) return { label: `Sent ${formatClock(r.submittedAt)}`.trim(), tone: 'muted', stage: 'submitted' };
+  if (ds?.working?.dirty) return { label: `${agentTitle(agent)} is editing…`, tone: 'warn', stage: 'revising' };
   const [name, at] = delivered[0];
-  return { label: `Delivered to ${name} ${formatClock(String(at))}`.trim(), tone: 'info', stage: 'delivered' };
+  const clock = formatClock(String(at));
+  return { label: `${agentTitle(name)} has it${clock ? ` · ${clock}` : ''}`, tone: 'info', stage: 'delivered' };
 }
 
 /**
- * "v3 ready - 3 to verify, 1 needs you" when the head version answers a review. `addressed` counts the Verify queue
- * (addressed, answered and declined threads waiting for the reviewer).
+ * What waits for the reviewer: the thread panel's "Your turn" and the turn pill's count. New-thread drafts, threads
+ * with a pending reply or resolve in the review being prepared, threads the agent answered (addressed / answered /
+ * declined with the agent speaking last: isVerifiable), its questions (needs_input), and unresolved threads that lost
+ * their place in the version shown. Each thread counts once.
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ * @returns {{ count: number, drafts: number, pending: number, check: number, answer: number, lost: number, ids: string[] }}
+ *   drafts: new-thread drafts; pending: threads with a reply / resolve draft; check: answered by the agent;
+ *   answer: its questions; lost: lost their place; ids: the threads counted
+ */
+export function myTurn(ds, version) {
+  const drafts = threadDrafts(ds?.drafts).length;
+  const counts = { pending: 0, check: 0, answer: 0, lost: 0 };
+  /** @type {string[]} */
+  const ids = [];
+  const ctx = { drafts: ds?.drafts, version };
+  for (const t of ds?.threads || []) {
+    const why = turnReason(t, ctx);
+    if (!why) continue;
+    counts[why]++;
+    ids.push(t.id);
+  }
+  return { count: drafts + ids.length, drafts, ...counts, ids };
+}
+
+/** Unresolved threads plus new-thread drafts: the count on the thread panel's button. @param {DocState} ds */
+export function openThreadCount(ds) {
+  return (ds?.threads || []).filter((/** @type {any} */ t) => t.status !== 'resolved').length + threadDrafts(ds?.drafts).length;
+}
+
+/** Unresolved threads whose anchor lost its place (changed or orphaned) in a version. @param {DocState} ds @param {number|'live'|null} version */
+export function lostThreads(ds, version) {
+  return (ds?.threads || []).filter((/** @type {any} */ t) => t.status !== 'resolved' && isOutdated(t, version));
+}
+
+/**
+ * The turn pill (top bar): one short answer to "whose turn is it?" plus what is behind it (the presence, the newest
+ * review's progress, the round summary, what waits for the reviewer, the planned changes). Its label: "Your turn · N"
+ * while something waits for the reviewer; else "Apply N planned" while the agent's planned changes (batched edits)
+ * wait for the reviewer's Apply, the next step; else "Review closed", "Approved vN" (the final version is the latest),
+ * or where the agent is ("Claude is working…", "Claude is listening", ...). The dot always shows the agent's presence.
+ * `planned`: the planned changes (applicablePlanned), also while it is your turn.
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ */
+export function turnInfo(ds, version) {
+  const presence = presenceInfo(ds);
+  const progress = reviewProgress(ds);
+  const mine = myTurn(ds, version);
+  const planned = applicablePlanned(ds).length;
+  const head = Number(ds?.doc?.head) || 0;
+  const final = Number(ds?.doc?.final?.version) || 0;
+  /** @type {{ kind: string, label: string, short: string, tone: string }} */
+  let turn;
+  if (mine.count) turn = { kind: 'yours', label: `Your turn · ${mine.count}`, short: `Your turn · ${mine.count}`, tone: 'accent' };
+  else if (planned) turn = { kind: 'apply', label: `Apply ${planned} planned`, short: `Apply ${planned}`, tone: 'accent' };
+  else if (ds?.doc?.state === 'closed') turn = { kind: 'closed', label: 'Review closed', short: 'Closed', tone: 'muted' };
+  else if (ds?.doc?.state === 'approved' && final && final >= head) turn = { kind: 'approved', label: `Approved v${final}`, short: 'Approved', tone: 'ok' };
+  else turn = { kind: presence.kind, label: presence.label, short: presence.short, tone: presence.tone };
+  return { ...turn, presence, progress, round: roundSummary(ds), mine, planned };
+}
+
+/**
+ * Whether the primary button's "Approve" is the obvious next step (accent): the agent answered the newest review
+ * with a version, nothing waits for the reviewer and no thread waits for the agent.
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ */
+export function approveReady(ds, version) {
+  if (reviewProgress(ds)?.stage !== 'ready' || myTurn(ds, version).count) return false;
+  return !(ds?.threads || []).some((/** @type {any} */ t) => t.status === 'open' || t.status === 'planned');
+}
+
+/**
+ * What an approval of the version shown would leave pending, for the Approve dialog's warning rows (each with its
+ * way out):
+ * - 'planned': the agent's planned changes, not in the version yet ("2 planned changes aren't in v2 yet", Apply 2);
+ * - 'yours': threads that still wait for the reviewer after it ("3 threads still wait for you", Show): its questions,
+ *   threads that lost their place, and answers to check, except the ones the approval marks done (addressed and
+ *   answered, with "Mark N answered threads done": `resolveAddressed`) and the ones with a reply or a resolve in the
+ *   review (they go out with it);
+ * - 'agent': threads still waiting for the agent ("1 thread is still with Claude").
+ * Empty when nothing would be left.
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ * @param {{ resolveAddressed?: boolean }} [opts]
+ * @returns {Array<{ key: 'planned'|'yours'|'agent', count: number, label: string, ids: string[] }>}
+ */
+export function approveWarnings(ds, version, { resolveAddressed = true } = {}) {
+  if (!ds) return [];
+  const v = numericVersion(ds, version);
+  const ctx = { drafts: ds.drafts, version };
+  const agent = agentTitle(agentName(ds));
+  /** @type {Array<{ key: 'planned'|'yours'|'agent', count: number, label: string, ids: string[] }>} */
+  const out = [];
+  /** @param {any[]} list */
+  const idsOf = (list) => list.map((t) => String(t.id));
+  const planned = applicablePlanned(ds);
+  if (planned.length) {
+    const n = planned.length;
+    out.push({ key: 'planned', count: n, label: `${n} planned ${n === 1 ? "change isn't" : "changes aren't"} in v${v} yet`, ids: idsOf(planned) });
+  }
+  const yours = (ds.threads || []).filter((/** @type {any} */ t) => {
+    const why = turnReason(t, ctx);
+    if (why === 'answer' || why === 'lost') return true;
+    return why === 'check' && !(resolveAddressed && (t.status === 'addressed' || t.status === 'answered'));
+  });
+  if (yours.length) {
+    const n = yours.length;
+    out.push({ key: 'yours', count: n, label: `${n} ${n === 1 ? 'thread still waits' : 'threads still wait'} for you`, ids: idsOf(yours) });
+  }
+  const withAgent = (ds.threads || []).filter((/** @type {any} */ t) => t.status !== 'resolved' && t.status !== 'planned' && turnReason(t, ctx) == null);
+  if (withAgent.length) {
+    const n = withAgent.length;
+    out.push({ key: 'agent', count: n, label: `${n} ${n === 1 ? 'thread is' : 'threads are'} still with ${agent}`, ids: idsOf(withAgent) });
+  }
+  return out;
+}
+
+/**
+ * The count on the Changes tab: how many changes the latest version brings since the reviewer's last review or
+ * acceptance, while that version is shown (0 otherwise, and for a doc with nothing new).
+ * @param {DocState} ds
+ * @param {number|'live'|null} version
+ * @param {any} changes the comparison loaded (Changes for base -> version)
+ */
+export function newChangesCount(ds, version, changes) {
+  const todo = revisionsToAccept(ds);
+  return todo && version === todo.version ? (changes?.hunks || []).length : 0;
+}
+
+/**
+ * What is wrong, for the header's problems chip (which shows only when this is not empty): script errors and
+ * resources that failed to load in the rendered doc (kinds with a doc frame), and a file missing on disk. A thread
+ * that lost its place is not a problem but a routine part of a review (the agent removed or rewrote that text): Your
+ * turn counts it and its card offers Move here / Keep as general. Unrecorded changes on disk are not a problem either
+ * (the agent is editing): the banner and the turn pill say so.
+ * @param {DocState} ds
+ * @param {{ version?: number|'live'|null, pageErrors?: { count?: number, last?: string|null, resourcesFailed?: string[] },
+ *   externalsFailed?: string[] }} g
+ * @returns {Array<{ key: 'errors'|'resources'|'missing', count: number, label: string, detail?: string, items?: string[] }>}
+ */
+export function problemList(ds, { pageErrors, externalsFailed }) {
+  if (!ds) return [];
+  const caps = kindCaps(ds);
+  /** @type {Array<{ key: 'errors'|'resources'|'missing', count: number, label: string, detail?: string, items?: string[] }>} */
+  const out = [];
+  /** @param {number} n @param {string} one @param {string} many */
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  if (caps.pageErrors) {
+    const errors = Number(pageErrors?.count) || 0;
+    if (errors) out.push({ key: 'errors', count: errors, label: plural(errors, 'script error in the page', 'script errors in the page'), detail: pageErrors?.last || '' });
+    const failed = [...(externalsFailed || []), ...(pageErrors?.resourcesFailed || [])];
+    if (failed.length) out.push({ key: 'resources', count: failed.length, label: plural(failed.length, 'resource did not load', 'resources did not load'), items: failed });
+  }
+  if (caps.liveBanners && ds.working?.missing) out.push({ key: 'missing', count: 1, label: 'The file is missing on disk', detail: String(ds.doc?.path || '') });
+  return out;
+}
+
+/**
+ * "v3 ready: 3 to check, 1 needs your answer" when the head version answers a review. `addressed` counts the
+ * threads the agent answered that wait for the reviewer's check (addressed, answered and declined: isVerifiable).
  * @param {DocState} ds
  */
 export function roundSummary(ds) {
@@ -682,9 +1040,9 @@ export function roundSummary(ds) {
   const addressed = threads.filter((/** @type {any} */ t) => isVerifiable(t, ds.drafts)).length;
   const needs = threads.filter((/** @type {any} */ t) => t.status === 'needs_input').length;
   const parts = [];
-  if (addressed) parts.push(`${addressed} to verify`);
-  if (needs) parts.push(`${needs} needs you`);
-  return { text: parts.length ? `v${head} ready - ${parts.join(', ')}` : `v${head} ready`, addressed, needs, version: head };
+  if (addressed) parts.push(`${addressed} to check`);
+  if (needs) parts.push(`${needs} ${needs === 1 ? 'needs' : 'need'} your answer`);
+  return { text: parts.length ? `v${head} ready: ${parts.join(', ')}` : `v${head} ready`, addressed, needs, version: head };
 }
 
 // ------------------------------------------------------------------------------------------------ changes
@@ -974,6 +1332,36 @@ export function anchorChipParts(preview, anchor) {
 }
 
 /**
+ * The composer's "Claude will see" line, in plain words: `what` (the quote, “…”, or what the anchor targets: "General
+ * comment", 'table row "Enterprise"', a code review's 'src/a.js:L3-4') and its section ("§1.1 Milestones", '' when
+ * there is none or `what` says it); `title`, for the tooltip, adds the source lines ("Claude will see: L25 §1.1
+ * Milestones “Remove the legacy session store.”"). The engine's own preview text ("Agent will see: ...") is not shown.
+ * @param {any} preview the server's preview {label, lines, section, text}
+ * @param {Anchor|null} anchor
+ * @param {string} [agent]
+ * @returns {{ what: string, section: string, title: string }}
+ */
+export function agentSees(preview, anchor, agent = 'claude') {
+  const name = agentTitle(agent);
+  const chip = anchorChipParts(preview, anchor);
+  if (anchor?.file?.path || !anchor) {
+    const what = chip.label || targetLabel(anchor);
+    return { what, section: '', title: `${name} will see: ${what}` };
+  }
+  if (anchor.kind === 'doc') return { what: 'General comment', section: '', title: `${name} will see: a comment about the whole document` };
+  const quote = anchor.kind !== 'section' ? normWs(anchor.quote?.exact || '') : '';
+  const label = String(preview?.label || '');
+  // lines picked in Source: the lines are what it is about ("lines 51-52")
+  const source = anchor.kind === 'source' && chip.lines ? `lines ${chip.lines.slice(1)}` : '';
+  // the engine labels a text selection 'text' and a general comment 'GENERAL': the UI's own label is better then
+  const what = quote ? `“${clip(quote, 80)}”`
+    : source || (anchor.kind === 'section' ? `§${sectionTail(anchor.section) || 'section'}`
+      : label && label !== 'text' && label !== 'GENERAL' && label !== 'source lines' ? clip(label, 90) : targetLabel(anchor));
+  const section = anchor.kind === 'section' ? '' : chip.section;
+  return { what, section, title: `${name} will see: ${[chip.lines, chip.section, what].filter(Boolean).join(' ')}` };
+}
+
+/**
  * Suggestion editor mode (design 11.4): text mode when the anchor's source slice equals the rendered quote modulo
  * whitespace, otherwise source mode (whole lines).
  * @param {Anchor|null} a
@@ -1010,15 +1398,48 @@ export function canSendNow(comp) {
   return !!comp && !comp.draftId && comp.type !== 'agree';
 }
 
-// ------------------------------------------------------------------------------------------------ attachments
-
-/** File names the daemon gives stored attachments ('a3.png'); anything else is never turned into a URL. */
-const ATTACHMENT_NAME = /^[A-Za-z0-9][\w.-]*\.(?:png|jpe?g|gif|webp)$/i;
+/**
+ * What Cmd/Ctrl+Enter (`shift`: Cmd/Ctrl+Shift+Enter) does while a composer is open, by Settings > Send comments:
+ * 'send' (the comment alone, to the agent now), 'save' (a draft; also Save draft for a draft being edited and "Mark
+ * agreed"), or 'review' (the key is the whole review's: the Send dialog). Right away ('now'): Enter sends, Shift
+ * saves as a draft; When I click Send ('batch'): Enter adds to the review, Shift sends now. A draft being edited or
+ * "Mark agreed" cannot be sent alone: Enter saves, Shift opens the Send dialog.
+ * @param {any} comp Composer (state.js)
+ * @param {boolean} shift
+ * @param {'now'|'batch'|string} sendMode
+ * @returns {'send'|'save'|'review'}
+ */
+export function composerKeyAction(comp, shift, sendMode) {
+  if (!canSendNow(comp)) return shift ? 'review' : 'save';
+  if (sendMode === 'batch') return shift ? 'send' : 'save';
+  return shift ? 'save' : 'send';
+}
 
 /**
- * URL of a stored attachment ('attachments/a3.png') for thumbnails: DocState.attachmentBase plus its file name.
- * Only URLs on the content origin are returned (attachmentBase lives under contentBase), so a crafted path or base
- * can never make the UI load an image from anywhere else. Null when the daemon serves no attachments.
+ * What Cmd/Ctrl+Enter (`shift`: Cmd/Ctrl+Shift+Enter) does in a reply box: 'send' (the reply alone, now) or 'save'
+ * (a reply draft of the review), the same way round as in the composer.
+ * @param {boolean} shift
+ * @param {'now'|'batch'|string} sendMode
+ * @returns {'send'|'save'}
+ */
+export function replyKeyAction(shift, sendMode) {
+  if (sendMode === 'batch') return shift ? 'send' : 'save';
+  return shift ? 'save' : 'send';
+}
+
+// ------------------------------------------------------------------------------------------------ attachments
+
+/**
+ * File names the daemon gives stored attachments ('a3.png'; an agent's 'a7.svg' or HTML preview 'a8.html'); anything
+ * else is never turned into a URL.
+ */
+const ATTACHMENT_NAME = /^[A-Za-z0-9][\w.-]*\.(?:png|jpe?g|gif|webp|svg|html?)$/i;
+
+/**
+ * URL of a stored attachment ('attachments/a3.png') for thumbnails and previews: DocState.attachmentBase plus its
+ * file name. Only URLs on the content origin are returned (attachmentBase lives under contentBase), so a crafted path
+ * or base can never make the UI load an image or a preview from anywhere else. Null when the daemon serves no
+ * attachments.
  * @param {DocState} ds
  * @param {unknown} path
  * @returns {string|null}
@@ -1040,6 +1461,68 @@ export function attachmentUrl(ds, path) {
 /** The file name of an attachment path, for labels and alt texts. @param {unknown} path */
 export function attachmentName(path) {
   return String(path ?? '').split('/').pop() || '';
+}
+
+/**
+ * The files the agent attached to a comment (Comment.attachments: {path, name, kind}), checked: a doc-relative
+ * 'attachments/...' path, the name it gave (else the file name), and the kind ('html' for .html / .htm, else
+ * 'image').
+ * @param {any} comment
+ * @returns {Array<{ path: string, name: string, kind: 'image'|'html' }>}
+ */
+export function agentAttachments(comment) {
+  const list = Array.isArray(comment?.attachments) ? comment.attachments : [];
+  /** @type {Array<{ path: string, name: string, kind: 'image'|'html' }>} */
+  const out = [];
+  for (const a of list) {
+    const path = typeof a === 'string' ? a : a?.path;
+    if (typeof path !== 'string' || !/^attachments\/[^/]+$/.test(path)) continue;
+    const kind = a?.kind === 'html' || /\.html?$/i.test(path) ? 'html' : 'image';
+    out.push({ path, name: typeof a?.name === 'string' && a.name.trim() ? a.name.trim() : attachmentName(path), kind });
+  }
+  return out;
+}
+
+/**
+ * The name an attachment of a thread goes by: the name the agent gave it on a reply ('chart.html'), else its file
+ * name ('a7.html').
+ * @param {Thread} t @param {string} path
+ */
+export function threadAttachmentName(t, path) {
+  for (const c of t?.comments || []) {
+    const hit = agentAttachments(c).find((a) => a.path === path);
+    if (hit) return hit.name;
+  }
+  return attachmentName(path);
+}
+
+/** The body of the reply "Use in doc" sends (actions.js useAttachment); a reply with only it shows as one line. */
+export const USE_REPLY_BODY = 'Put this in the doc.';
+/** The body of the reviewer comment an Apply adds to a planned thread (the server's, `apply: true`). */
+export const APPLY_COMMENT_BODY = 'Apply this change.';
+
+/**
+ * A reviewer comment that is a request rather than a message, shown as one compact line: the Apply of a planned
+ * change ('apply', "You asked Claude to make this change") or a "Use in doc" ('use', "You asked Claude to put
+ * chart.html in the document", plus the comment's own words when they are not the default ones). Null for an
+ * ordinary comment.
+ * @param {Thread} t
+ * @param {any} c
+ * @param {string} [agent]
+ * @returns {{ kind: 'apply'|'use', text: string, body: string }|null}
+ */
+export function systemLine(t, c, agent = 'claude') {
+  if (!c || !isHuman(c.by)) return null;
+  const name = agentTitle(agent);
+  const body = String(c.body ?? '').trim();
+  if (c.apply === true) {
+    return { kind: 'apply', text: `You asked ${name} to make this change`, body: body && body !== APPLY_COMMENT_BODY ? body : '' };
+  }
+  const use = Array.isArray(c.use) ? c.use.filter((/** @type {any} */ u) => typeof u === 'string') : [];
+  if (!use.length) return null;
+  const names = use.map((/** @type {string} */ u) => threadAttachmentName(t, u));
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return { kind: 'use', text: `You asked ${name} to put ${list} in the document`, body: body && body !== USE_REPLY_BODY ? body : '' };
 }
 
 // ------------------------------------------------------------------------------------------------ layout
@@ -1253,7 +1736,7 @@ function charBonus(t, j) {
 /**
  * Scores a palette row for a query (null: no match). The whole query is fuzzy-matched against the title; besides,
  * each word of the query may match the title (fuzzy) or the keywords / description / category (as a word or a
- * substring), in any order, so 'approve submit' finds 'Submit review as Approve' and words of a comment find its
+ * substring), in any order, so 'approve submit' finds 'Approve this version…' and words of a comment find its
  * thread. An `exact` hit ranks first.
  * @param {string} query
  * @param {SearchRow} row

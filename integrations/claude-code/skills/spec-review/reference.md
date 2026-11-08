@@ -6,6 +6,8 @@
 - [Commands](#commands)
 - [The feedback packet](#the-feedback-packet)
 - [Thread types, statuses and "needs action"](#thread-types-statuses-and-needs-action)
+- [Batched edits: planned and APPLY](#batched-edits-planned-and-apply)
+- [Attachments on your replies, and use: lines](#attachments-on-your-replies-and-use-lines)
 - [Making edits: Edit, apply, edit](#making-edits-edit-apply-edit)
 - [The revise input](#the-revise-input)
 - [Guards](#guards)
@@ -15,11 +17,10 @@
 - [Hooks](#hooks)
 - [Snapshot docs](#snapshot-docs)
 - [MCP tools](#mcp-tools)
-- [Writing the doc](#writing-the-doc)
 
 ## Conventions
 
-- `<doc>` is a doc id (the slug printed by `open`, e.g. `token-service`) or the file path. The workspace is found from the current directory or the path: the nearest ancestor with `.specreview/`, else the git top level, else the file's directory. An id that is not tracked there (or a directory with no workspace, e.g. a project without git whose `.specreview/` sits next to the specs) is looked up in the workspaces `open` registered below or above the current directory; an id tracked in several of them is an error naming them, so pass the file path or `--workspace <dir>`. A path always works.
+- `<doc>` is a doc id (the slug printed by `open`, e.g. `funding-study`) or the file path. The workspace is found from the current directory or the path: the nearest ancestor with `.specreview/`, else the git top level, else the file's directory. An id that is not tracked there (or a directory with no workspace, e.g. a project without git whose `.specreview/` sits next to the documents) is looked up in the workspaces `open` registered below or above the current directory; an id tracked in several of them is an error naming them, so pass the file path or `--workspace <dir>`. A path always works.
 - Line numbers are 1-based lines of the **current file on disk**. Ranges such as `L42-43` are inclusive.
 - Ids are sequential per doc: threads `t1`, comments `c1`, reviews `rv1`, locks `L1`, decisions `D1`, versions `v1`. Hunk ids `h1…` are numbered per diff.
 - Output is compact text; `--json` (where listed) prints the same data as JSON.
@@ -30,7 +31,7 @@
 
 | Command | What it does | Exit |
 |---|---|---|
-| `open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track the doc, record v1 if new, start the local server, print the UI URL. Warns if the working copy differs from head. | 0 |
+| `open <file...> [--title T] [--browser pane\|system\|none] [--workspace <dir>] [--json]` | Track the doc, record v1 if new, start the local server, print the UI URL. Warns if the working copy differs from head, and (stderr) when the installed Suiko instructions are older than the CLI, naming the command that updates them. | 0 |
 | `open <dir>` | Every `.md`/`.markdown`/`.html`/`.htm` file below the folder (no dot-directories or `node_modules`, at most 200; says what it skipped): one line per doc, then the UI's home URL listing them. | 0 |
 | `open - [--name N] [--title T]` | Review Markdown piped on stdin (at most 5 MB) as a snapshot doc: a new doc each time, or with `--name` the doc of that name (piping it again records a new version). | 0 |
 | `last [--session <id>] [--transcript <path>] [--title T]` | Open your last message (Claude Code transcript of `$CLAUDE_CODE_SESSION_ID`) as a snapshot doc; prints the URL and the background `wait` command and returns. Codex transcripts are not supported. | 0 / 4 |
@@ -41,15 +42,15 @@
 | `apply <doc> <tid...> [--dry-run]` | Apply suggestion threads verbatim to the working copy (staged, not recorded). | 0 / 3 |
 | `edit <doc> --thread t1[,t2] --old <s> --new <s> [--all]` | Thread-tagged exact replace. `old` must be unique unless `--all`. | 0 / 3 |
 | `edit <doc> --stdin` | Batch: `[{"threads":["t1"],"old":"...","new":"...","all":false}]` on stdin. | 0 / 3 |
-| `reply <doc> <tid> -m <md> [--status answered\|declined\|needs_input\|addressed] [--at L42-46] [--decision "text"]` | Reply without recording a version. | 0 / 4 |
+| `reply <doc> <tid> -m <md> [--status answered\|planned\|declined\|needs_input\|addressed] [--at L42-46] [--attach <file>]... [--decision "text"]` | Reply without recording a version; `--attach` shows an image or an HTML mockup on the reply. | 0 / 4 |
 | `revise <doc> [-m <summary>] [--replies <file\|->] [--dry-run] [--break-lock L1="why"]... [--allow-rewrite] [--force]` | Record the working copy as a new version, with replies; runs the guards. | 0 / 3 |
 | `revise <doc> --source <file\|-> [--replies <file\|->]` | Snapshot docs: record the given text as the new version (guards only warn). With `--source -` the replies must come from a file. | 0 |
-| `revert <doc> (--hunk hN \| --lock L1)` | Reverse one head-to-working hunk, or write a lock's agreed text back. | 0 / 3 |
+| `revert <doc> (--hunk hN \| --lock L1)` | Reverse one head-to-working hunk, or write a lock's agreed text back, in the doc's file only: for a document built from sources, undo the change in the sources and rebuild instead. | 0 / 3 |
 | `reanchor <doc> <tid> (--lines A-B \| --quote TEXT) [--file <path>]` | Move a thread's anchor. Applies to head when the working copy is clean, else staged until the next revise. | 0 / 3 |
 | `ask <doc> (--quote TEXT \| --lines A-B \| --file <path> [--lines A-B]) -m <question>` | Ask the reviewer a question anchored on the doc (status `needs_input`). | 0 / 3 |
 | `threads <doc> [--status open\|addressed\|needs_input\|resolved\|outdated\|all] [--json]` | One line per thread. | 0 |
 | `show <doc> [<tid>] [--version N] [--lines A-B] [--file <path> [--side new\|old]]` | A full thread with its timeline, or exact source of an old version (code reviews: one file of a round). | 0 / 4 |
-| `diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Changes between versions (default: last reviewed..head). | 0 |
+| `diff <doc> [vA..vB] [--stat\|--unified] [--json]` | Changes between versions (default: last reviewed..head); `head..live` is your unrecorded changes. | 0 |
 | `log <doc> [--json]` | Timeline of versions and reviews. | 0 |
 | `status [<doc>] [--json]` | Docs, head, thread counts, undelivered reviews, listeners, working-copy state. | 0 |
 | `final <doc> [--decisions] [--out <dir>]` | Check the working copy equals the final version; `--decisions` writes `<name>.decisions.md`. | 0 / 3 |
@@ -59,7 +60,7 @@
 | `mcp` | stdio MCP server. | |
 | `hook pre-write`, `hook prompt` | Claude Code hook entry points. | always 0 |
 | `plan-gate [--timeout 30m] [--browser system\|none]` | Claude Code plan-mode gate (PermissionRequest hook, matcher ExitPlanMode). | always 0 |
-| `install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]`, `install agents-md [--apply]` | Print (or with `--apply`, write) the integration files. | 0 |
+| `install [--only a,b] [--user\|--project] [--apply]`, `install claude [--user\|--project] [--with-hooks] [--with-mcp] [--apply]`, `install agents-md [--apply]` | Print (or with `--apply`, write) the integration files; every instruction file ends with `installed by suiko <version>`. After an upgrade, `open` names the command that updates the copies that are out of date (e.g. `suiko install --only claude --apply`, or `suiko install agents-md --apply` for an AGENTS.md block that command wrote). | 0 |
 
 Exit codes: 0 ok or delivered · 1 error or bad usage · 2 wait timed out · 3 refused (guard, dirty working copy, a thread without a reply, conflict, `old` not unique) · 4 doc, thread or version not found · 5 session closed · 6 superseded by a newer `wait` for the same doc and agent.
 
@@ -68,42 +69,44 @@ Exit codes: 0 ok or delivered · 1 error or bad usage · 2 wait timed out · 3 r
 ### Text form
 
 ```text
-SPECREVIEW FEEDBACK · token-service (docs/specs/token-service.md) · review rv1 on v1 · CHANGES REQUESTED
+SPECREVIEW FEEDBACK · funding-study (reports/funding-study.html) · review rv1 on v1 · CHANGES REQUESTED
 Line numbers = current file on disk (identical to v1).
 Reviewer summary: Good start. Section 7 is agreed - keep it.
 4 threads need action (4 new): 1 blocking · 1 question · 1 suggestion · 1 comment
 
-[t1] blocking · comment · L42-43 · §3 Tokens > 3.2 Token refresh
-  on: "rotated on every use"
-  src> Refresh tokens are rotated on every use, and the previous token is
-  src> invalidated immediately.
-  Eric: Rotation on every use breaks multi-tab sessions. Use a 30 s reuse-detection grace window.
+[t1] blocking · comment · L212 · §3 Findings > 3.2 Funding stress
+  on: "spreads widened on 12 days"
+  src>     <p>Funding spreads widened on 12 days, all of them after the March rate decision.</p>
+  Eric: Count the days over the full two-year window, and say which threshold you used.
 
-[t2] question · L88 · §4 Architecture · <img alt="System overview"> region x40-62% y10-30%
-  src> ![System overview](./img/arch.png)
-  crop: /abs/path/.specreview/docs/token-service/attachments/a1.png  (Read it to see the region)
-  Eric: Does the gateway sit in front of the auth service or beside it?
+[t2] question · L88 · §2 Method · <img alt="Pipeline overview"> region x40-62% y10-30%
+  src>     <img src="img/pipeline.png" alt="Pipeline overview">
+  crop: /abs/path/.specreview/docs/funding-study/attachments/a1.png  (Read it to see the region)
+  Eric: Does the dedupe step run before or after the join?
 
-[t3] suggestion · L120 · §5.1 Retries · apply verbatim: suiko apply token-service t3
-  - The client MUST retry 3 times.
-  + The client MUST retry up to 5 times with exponential backoff (base 200 ms, full jitter).
-  Eric: Match the platform retry policy.
+[t3] suggestion · L120 · §2.1 Data · apply verbatim: suiko apply funding-study t3
+  -     <p>Sessions with fewer than 10 trades are dropped.</p>
+  +     <p>Sessions with fewer than 10 trades, or with a trading halt, are dropped.</p>
+  Eric: Halted sessions skew the spread too.
 
-[t4] comment · L151 · §6 Data model · table cell row "refresh_token" x col "TTL" = "30d"
-  src> | refresh_token | opaque | 30d |
-  Eric: 30 days is too long for admin accounts; split by role.
+[t4] comment · L151 · §4 Results · table cell row "2024-Q2" x col "Days" = "4"
+  src>       <tr><td>2024-Q2</td><td>4</td><td>61 bp</td></tr>
+  Eric: The chart above shows 5 days for this quarter.
 
-LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
+LOCKED (agreed - do not modify): L1 §7 Caveats (L170-196)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `suiko apply`.
-  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+PROTOCOL: change only what the threads ask for; src> lines are exact Edit old_string (for a built doc, change its sources and rebuild); edit bottom-up. Suggestions: `suiko apply` (for a doc built from sources: put the text into the sources and rebuild).
+  Questions: answer in the thread's reply; edit only if the answer belongs in the doc. Unsure: status needs_input.
 REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
-NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry per thread) -> suiko wait token-service (background)
+NEXT: edits, if any -> suiko revise funding-study --replies - (JSON, one entry per thread) -> suiko wait funding-study (background)
 ```
 
-- **Header:** doc, path, the review(s) and the version they were made on, and the verdict (`COMMENT`, `CHANGES REQUESTED`, `APPROVED`; `· FINAL = vN` when the reviewer marked a final version). The second line says whether the working copy is identical to head or differs (`lines mapped`).
+The PROTOCOL lines appear in the first packet.
+
+- **Header:** doc, path, the review(s) and the version they were made on, and the verdict (`COMMENT`, `CHANGES REQUESTED`, `APPROVED`; `· FINAL = vN` when the reviewer marked a final version). The second line says whether the working copy is identical to head or differs (`lines mapped`). `EDITS: batch` and `APPLY:` lines are explained in [Batched edits](#batched-edits-planned-and-apply).
 - **Items** appear in file order, blocking first within ties: `[tN] [LABEL ·] [severity ·] type · L<a>-<b> · §<section path> [· <target>]`. Severity is shown when it is not `normal`.
-- **Labels:** none for new threads, `REOPENED`, `REPLY` (the reviewer replied after your reply), `ANSWER` (the reviewer answered your `needs_input` question).
+- **Labels:** none for new threads, `REOPENED`, `REPLY` (the reviewer replied after your reply), `ANSWER` (the reviewer answered your `needs_input` question), `APPLY` (make the change you planned).
+- **`use:`** under a thread: the reviewer wants one of your attachments in the document (see [Attachments](#attachments-on-your-replies-and-use-lines)). In a packet that approves a final version it reads `use: <absolute path> (chart.html) — the doc is final (v3); say in your reply whether this should go into a next version`: reply, do not edit.
 - **Targets:** text (no label), `<img alt="…">`, `region x40-62% y10-30%`, a snipped area `snip (figure + 2 paragraphs)`, `mermaid node "Gateway"`, `table cell row "…" x col "…"`, a section `§7 Rollout plan (L170-196)`, raw source lines, or `GENERAL:` for the whole doc. `(script-rendered inside <div id="chart">)` means the text was built by a script, so `src>` is the enclosing static element.
 - **`on:`** the rendered text the reviewer selected (up to 120 characters). Not source.
 - **`src>`** exact full lines from the file on disk, extended until the string is unique in the file. Strip the `  src> ` prefix and join with newlines to get an Edit `old_string`.
@@ -113,74 +116,88 @@ NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry p
   - At most about 1,200 characters of `src>` per thread.
 - **`crop:`** an absolute path to a PNG of the region the reviewer drew. Read it to see what they mean.
 - **`image:`** an absolute path to a picture the reviewer attached: a snipped area of the doc, a screenshot of anything on their screen, or a pasted image (PNG, or JPEG when very large). **Read every `crop:` and `image:` file with the Read tool before acting on its thread**; the comment often only makes sense with the picture. See [Pictures](#pictures-snips-and-screenshots).
-- **Suggestions** show `-` (current) and `+` (proposed) lines and the `apply` command.
+- **Suggestions** show `-` (current) and `+` (proposed) lines and the `apply` command (in a batched round, `suggestion: plan it now; it is applied in the APPLY round` instead). For a document built from sources, the proposed text goes into the sources (see [Making edits](#making-edits-edit-apply-edit)).
 - **Conversation:** your last reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment since. Older ones collapse to `(+2 earlier, suiko show <doc> t2)`.
 - **Anchor notes:** `(outdated: text changed)` means the quoted text was edited since the comment; `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)` means it could not be found.
 - **Footer:** `LOCKED` ranges, `DECISIONS` to keep true, drafts (only with `--include-drafts`, clearly labelled as not submitted), the protocol reminder and `NEXT`.
 - **Size cap:** 10,000 characters. Threads beyond it are listed one per line; run `suiko show <doc> tN` for each.
-- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: suiko final token-service --decisions   (then stop waiting)`. When the approval also reopened or answered threads, they are listed and NEXT says to answer each with `suiko reply <doc> <tid> -m <md> --status answered|declined` (no edits, no new version) before `final`, and the PROTOCOL lines are replaced by a reply-only line. This applies only when the final version is the current head; an approval without a final version keeps the usual revise flow.
+- **Approved:** `… · APPROVED · FINAL = v3`, `0 threads need action`, `NEXT: suiko final funding-study --decisions   (then stop waiting)`. When the approval also reopened or answered threads, they are listed and NEXT says to answer each with `suiko reply <doc> <tid> -m <md> --status answered|declined` (no edits, no new version) before `final`, and the PROTOCOL lines are replaced by a reply-only line. This applies only when the final version is the current head; an approval without a final version keeps the usual revise flow.
 
 ### Pictures: snips and screenshots
 
 ```text
-[t5] comment · L60-64 · §2 Request flow · snip (figure + 2 paragraphs)
-  src> ![Request flow](./img/request-flow.png)
+[t5] comment · L60-64 · §2 Method · snip (figure + 2 paragraphs)
+  src>     <figure><img src="img/pipeline.png" alt="Pipeline overview"></figure>
   src> 
-  src> Clients call the gateway, which forwards each request to the token service.
+  src>     <p>Trades are joined to quotes by session, then deduplicated.</p>
   src> 
-  src> On a timeout the gateway retries once, then fails over to the standby region.
-  image: /abs/path/.specreview/docs/token-service/attachments/a2.png  (Read it to see what the reviewer snipped)
-  Eric: The figure shows the client retrying, but the text says the gateway does. Which is it?
+  src>     <p>A session with a trading halt is split at the halt.</p>
+  image: /abs/path/.specreview/docs/funding-study/attachments/a2.png  (Read it to see what the reviewer snipped)
+  Eric: The figure shows the dedupe before the join, but the text says after. Which is it?
 
 [t6] comment · GENERAL
-  image: /abs/path/.specreview/docs/token-service/attachments/a3.png  (Read it to see the image the reviewer attached)
-  Eric: This is the login page today. The mockup in §5 should match it.
+  image: /abs/path/.specreview/docs/funding-study/attachments/a3.png  (Read it to see the image the reviewer attached)
+  Eric: This is the dashboard today. The mockup in §5 should match it.
 ```
 
-- **Snip** (`b` in the UI): the reviewer boxed an area of the rendered doc. `src>` covers every block under the box, in file order; edit only what the comment is about. A large snip's `src>` is shortened like any other: Read those lines first.
-- **Screenshot** (`B`, or `suiko snip` from a hotkey): usually a `GENERAL` thread, or anchored to text the reviewer had selected. It may show something outside the doc (the running app, a terminal, another page). Tie it to the spec through the comment; if you cannot tell which part it concerns, reply `needs_input`.
+- **Snip** (the Area tool at the bottom of the document, or `b`): the reviewer boxed an area of the rendered doc. `src>` covers every block under the box, in file order; change only what the comment is about. A large snip's `src>` is shortened like any other: Read those lines first.
+- **Screenshot** (`B`, or `suiko snip` from a hotkey): usually a `GENERAL` thread, or anchored to text the reviewer had selected. It may show something outside the doc (the running app, a terminal, another page). Tie it to the document through the comment; if you cannot tell which part it concerns, reply `needs_input`.
+- **Something drawn or built at runtime** (a canvas, a chart drawn by a script, a state reached by clicking): the thread cites the nearest source lines and usually has a picture. Read it, find what produces it (markup, data, styles, script, template), change that, and rebuild if the document is built.
 - In JSON, `attachments` lists the absolute paths of a thread's pictures, and `attachmentKind` says what they are (`region`, `snip` or `image`).
 
 ### JSON form (`--json`, and MCP `structuredContent`)
 
 ```json
-{"schema":1,"doc":"token-service","path":"docs/specs/token-service.md","head":1,"working":"clean",
+{"schema":1,"doc":"funding-study","path":"reports/funding-study.html","head":1,"working":"clean",
  "reviews":[{"id":"rv1","version":1,"verdict":"changes_requested","body":"...","by":"Eric","at":"..."}],
- "verdict":"changes_requested","final":null,
+ "verdict":"changes_requested","edits":"now","final":null,
  "threads":[{"id":"t1","why":"new","type":"comment","severity":"blocking","status":"open",
-   "lines":[42,43],"section":["3 Tokens","3.2 Token refresh"],"target":"text","label":"text",
-   "on":"rotated on every use","src":"Refresh tokens are rotated on every use, and the previous token is\ninvalidated immediately.",
+   "lines":[212,212],"section":["3 Findings","3.2 Funding stress"],"target":"text","label":"text",
+   "on":"spreads widened on 12 days","src":"    <p>Funding spreads widened on 12 days, all of them after the March rate decision.</p>",
    "srcUnique":true,"srcWindow":false,"srcEditable":true,"anchorState":"exact",
    "comments":[{"by":"Eric","kind":"human","body":"...","at":"..."}],
    "suggestion":null,"attachments":[],"apply":null}],
- "locks":[{"id":"L1","lines":[170,196],"section":["7 Rollout plan"]}],
+ "locks":[{"id":"L1","lines":[170,196],"section":["7 Caveats"]}],
  "decisions":[],"drafts":null,
  "counts":{"actionable":4,"new":4,"reopened":0,"reply":0,"answer":0,"awaitingReviewer":0,"resolved":0,"outdated":0},
- "next":"targeted edits, then: suiko revise token-service --replies -"}
+ "next":"edits, if any -> suiko revise funding-study --replies - -> suiko wait funding-study (background)"}
 ```
 
 ## Thread types, statuses and "needs action"
 
 - Types: `comment`, `question`, `suggestion`, `agent-question` (created by `ask`). Severities: `blocking`, `normal`, `nit`.
-- Statuses: `open`, `addressed`, `answered`, `declined`, `needs_input`, `resolved`. You set `addressed`, `answered`, `declined` or `needs_input` through `revise` or `reply`. **Only the reviewer resolves** (Accept) or reopens.
-- A thread needs action when its status is `open`, or when the reviewer's newest comment is newer than yours and it is not `resolved`.
-- A review can hold a single thread: the reviewer's **Send now** (or `suiko snip --send`) submits one comment at once with verdict `comment`. It needs action like any other packet: handle it, revise, wait again.
+- Statuses: `open`, `addressed`, `answered`, `planned`, `declined`, `needs_input`, `resolved`. You set `addressed`, `answered`, `planned`, `declined` or `needs_input` through `revise` or `reply`. **Only the reviewer resolves** (Accept) or reopens.
+- A thread needs action when its status is `open`, or when the reviewer's newest comment is newer than yours and it is not `resolved`. A `planned` thread waits for the reviewer's APPLY.
+- The reviewer usually sends each comment as they write it (or with `suiko snip --send`), as a review with verdict `comment` and one thread; comments sent while you work arrive together in your next packet. Every packet needs action: handle it, revise, wait again.
 - Delivery: a review is marked delivered when the packet has been printed. Your next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. If you never act on it, the prompt hook reminds you after about 5 minutes.
+
+## Batched edits: planned and APPLY
+
+The reviewer can batch the edits (Suiko does it by default on long documents), so you answer each comment at once and change the document once per batch:
+
+- A packet with the line `EDITS: batch. Answer every thread now. …` asks you to answer every thread now without editing the document. Next to an APPLY round it reads `EDITS: batch for every thread not marked APPLY. …`; when only some threads are batched, `EDITS: batch for t9 only (the other threads: edit now). …` (handle the others as usual). For a change you agree to make, reply with status `planned` and say exactly what you will change; questions get `answered` (also `declined` and `needs_input` as usual). A batched suggestion says `suggestion: plan it now; it is applied in the APPLY round`. Post all replies with one `suiko revise <doc> --replies -` (the working copy equals head, so it records no version and only posts them; the packet's `NEXT` says `replies only, no edits yet`) or with `suiko reply <doc> tN -m <md> --status planned`.
+- A `planned` thread is not waiting on you: `wait` does not count it as unanswered. Until each batched thread has a reply, `wait` exits 3 and asks for one (status `planned` with exactly what you will change).
+- When the reviewer applies the plan, an `APPLY` packet arrives: its header line `APPLY: make every planned change below in one pass, then record ONE version as NEXT says (status addressed).`, then each thread with the label `APPLY`, the reviewer's original request and your planned reply. Make every change (a suggestion as in [Making edits](#making-edits-edit-apply-edit)), then record one version as `NEXT` says, with status `addressed` for each thread: one `suiko revise <doc> --replies -` (for a web page you build, the `suiko snapshot` command it names).
+
+## Attachments on your replies, and use: lines
+
+- **Show, don't only tell.** When the reviewer asks to see a chart, an image or a mockup, or when a picture explains your answer better than words, attach files to your reply: `--attach <file>` (repeatable) on `suiko reply`, or `"attachments": ["<file>", …]` on a thread of the revise JSON (paths relative to the current directory, or absolute). Images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) show as thumbnails, an `.html`/`.htm` file as a live preview in a sandbox; at most 6 per reply, 5 MB each. Suiko keeps a copy in `.specreview/docs/<doc>/attachments/`, so write the file anywhere (a temp directory is fine). Iterate on it in the thread: the reviewer replies, you attach the next version.
+- **`use:` line.** When the reviewer chooses **Use in doc** for one of your attachments, the thread comes back with `use: <absolute path> (chart.html) — put this into the doc at this thread's place …`. Put it into the document at the thread's anchor, the way the document holds such things (copy the file next to the document and reference it, or inline its content), then reply `addressed`.
 
 ## Making edits: Edit, apply, edit
 
-1. **Read first.** Read the spec file, or the cited ranges, before editing. The reviewer may have recorded their own revision since the packet.
-2. **Edit tool** for comments: `old_string` = the `src>` text. Edit bottom-up, or rely on the `src>` text rather than line numbers.
-3. **`suiko apply <doc> <tid...>`** for suggestions, after all Edit-tool edits. It maps the anchored range to the current file and splices the exact text if it is still there (or if it occurs once, or near the expected place). Otherwise it reports `conflict tN: expected text not found near L120; treat as a normal comment` (exit 3). On success the suggestion is `staged` and the edit is tagged to the thread. `apply` rewrites the file, so re-Read before any later Edit.
+1. **Read first, and only what you need.** Read the cited ranges (Read with `offset`/`limit`) before editing, not the whole document, and do not re-read the whole document each round. The reviewer may have recorded their own revision since the packet.
+2. **Change only what the thread asks for.** In the document itself: the Edit tool with `old_string` = the `src>` text, edit bottom-up or rely on the `src>` text rather than line numbers, and keep the surrounding formatting. In a document built from sources (a template, data, a script that writes the HTML): `src>` shows the built output; change the source that produces it, rebuild the document the way it was built, and name the rebuilt lines in the thread's `at`: it explains every change on the lines it names (a rebuilt table, data blob or chart script usually reaches beyond the anchored paragraph). Never restyle or rewrite parts no thread asked about.
+3. **`suiko apply <doc> <tid...>`** for suggestions, after all Edit-tool edits. It maps the anchored range to the current file and splices the exact text if it is still there (or if it occurs once, or near the expected place). Otherwise it reports `conflict tN: expected text not found near L120; treat as a normal comment` (exit 3). On success the suggestion is `staged` and the edit is tagged to the thread. `apply` rewrites the file, so re-Read before any later Edit. **A document built from sources:** do not run `apply`. It changes only the built file, so the next rebuild brings the old text back, and `revise` then refuses with `ERR reverted` (below). Put the suggested text into the sources, rebuild, and reply `addressed`.
 4. **`suiko edit`** is the CLI form of an exact replace, tagged to threads. Use it when you have no Edit tool:
    ```bash
-   suiko edit token-service --thread t1 --old "rotated on every use" --new "rotated with a 30 s grace window"
-   suiko edit token-service --stdin <<'JSON'
-   [{"threads":["t1"],"old":"rotated on every use","new":"rotated with a 30 s grace window"},
-    {"threads":["t4"],"old":"| refresh_token | opaque | 30d |","new":"| refresh_token (user) | opaque | 30d |","all":false}]
+   suiko edit funding-study --thread t1 --old "widened on 12 days" --new "widened on 31 days (above 50 bp)"
+   suiko edit funding-study --stdin <<'JSON'
+   [{"threads":["t1"],"old":"widened on 12 days","new":"widened on 31 days (above 50 bp)"},
+    {"threads":["t4"],"old":"<td>2024-Q2</td><td>4</td>","new":"<td>2024-Q2</td><td>5</td>","all":false}]
    JSON
    ```
-5. **Writes are guarded.** In Claude Code, a Write that would replace more than 40% of a spec under review is denied by the pre-write hook. Use Edit.
+5. **Writes are guarded.** In Claude Code, a Write that would replace more than 40% of the text of a document under review (its visible text, for HTML) makes the pre-write hook ask the user to allow it (in a workspace whose config says `"writeHook": "deny"`, it is denied). Change only what the threads ask for, with Edit, or in the sources followed by a rebuild. See [Hooks](#hooks).
 
 ## The revise input
 
@@ -188,54 +205,68 @@ NEXT: edits, if any -> suiko revise token-service --replies - (JSON, one entry p
 
 ```text
 { "summary": string,                                      // -m <summary> overrides it
-  "threads": { "<tid>": { "status": "addressed" | "answered" | "declined" | "needs_input",
+  "threads": { "<tid>": { "status": "addressed" | "answered" | "planned" | "declined" | "needs_input",
                           "reply": string,                // Markdown, shown to the reviewer
-                          "at": "L42-46" | "L12,L90-91" } },  // optional: lines of the NEW file you changed for it
+                          "at": "L42-46" | "L12,L90-91",  // optional: lines of the NEW file you changed for it
+                          "attachments": [string] } },    // optional: files shown on the reply (see Attachments)
   "other":   [ { "at": "L12" | "L12-14" | "del:h6" | "h6", "why": string } ],   // changes no thread asked for
   "breakLocks": { "L1": "reason" } }                      // only when the user explicitly asked
 ```
 
 - Give one `threads` entry for every thread the packet listed. A missing entry is a warning.
+- `at` explains every change on the lines it names (see [How hunks are linked](#how-hunks-are-linked-to-threads)). To find them, `suiko revise <doc> --dry-run` lists each hunk with its lines, and so does `suiko diff <doc> head..live --stat` (your unrecorded changes).
 - `addressed` with no linked change is a warning: add `at` if you changed it somewhere away from the anchor.
-- If the working copy equals head, `revise` posts the replies only. If there is nothing to record and no replies, it says so and exits 0.
+- If the working copy equals head, `revise` posts the replies only. If there is nothing to record and no replies, it says so and exits 0. An `addressed` reply then gets `WARN tN is marked addressed but nothing was recorded: the document did not change. …`: a file the document loads at runtime (with `fetch` or XHR) is not versioned, so a change made only there records nothing; change the document itself, or reply `answered`.
 - `--break-lock L1="reason"` on the command line is the same as `breakLocks`.
 
 Successful report:
 
 ```text
-suiko: recorded v2 for token-service (+9 -3 lines, 4 hunks) · responds to rv1
-  h1 L42-46  §3.2 Token refresh  -> t1 addressed  (overlap)
-  h2 L90-91  §4 Architecture     -> t2 addressed  (hint)
-  h3 L120    §5.1 Retries        -> t3 addressed  (tagged: apply)
-  h4 L12     front matter        -> other: Bumped 'Last revised' date
+suiko: recorded v2 for funding-study (+9 -3 lines, 4 hunks) · responds to rv1
+  h1 L48     §3 Findings         -> t2 addressed  (hint)
+  h2 L120    §2.1 Data           -> t3 addressed  (tagged: apply)
+  h3 L212    §3.2 Funding stress -> t1 addressed  (overlap)
+  h4 L12     header              -> other: Bumped 'Last revised' date
   t4 needs_input (reply only)
 guards: ok · lock L1 untouched · no unexplained deletions · rewrite 4%
 anchors: 4 threads + 1 lock -> 1 exact, 1 moved, 3 edited, 0 changed, 0 orphaned
-reviewer notified (1 UI open). next: suiko wait token-service (background)
+reviewer notified (1 UI open). next: suiko wait funding-study (background)
 ```
 
 Refusal (exit 3, nothing recorded, working copy untouched):
 
 ```text
 suiko: REFUSED - nothing recorded (exit 3)
-  ERR lock: h5 L171-174 changes L1 §7 Rollout plan (agreed in rv1)
-      fix: suiko revert token-service --hunk h5   or   --break-lock L1="<reason>"
-  ERR deletion: h6 removes 14 lines (v1 L201-214, §8 Open questions) linked to no thread
-      fix: suiko revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
+  ERR deletion: h6 removes 14 lines (v2 L201-214, §8 Open questions) linked to no thread
+      fix: undo it where you made it (in the sources, then rebuild, for a document built from them; `suiko revert funding-study --hunk h6` restores a file edited directly), or, if a thread asked for it, add its lines ("L200-201") to that thread's "at", or explain it: "other":[{"at":"del:h6","why":"..."}]
+  ERR lock: h5 L171-174 changes L1 §7 Caveats (agreed in rv1)
+      fix: undo it where you made it (in the sources, then rebuild, for a document built from them; `suiko revert funding-study --hunk h5` restores a file edited directly), or, if the user agreed to change it, --break-lock L1="<reason>"
+  ERR deletion: h3 removes or replaces 23 words (v2 L150-162, §4 Results) outside the text of t4 (linked to t4 only because it overlaps t4's text)
+      fix: undo it where you made it (in the sources, then rebuild, for a document built from them; `suiko revert funding-study --hunk h3` restores a file edited directly), or, if t4 asked for the whole change, name its lines ("L150-162") in t4's "at", or explain it: "other":[{"at":"h3","why":"..."}]
+  ERR reverted: h1 removes t3's applied suggestion "Sessions with fewer than 10 trades, or with a trading halt, …" (applied in v2)
+      fix: a rebuild from sources brings back the old text: put the suggestion into the sources and rebuild. If a thread asked to change it again, add its lines ("L120") to that thread's "at"
   WARN t2 marked addressed but no hunk is linked to it (add "at":"L90-91" if you changed it)
 working copy left untouched. Preview with --dry-run.
 ```
 
-How to respond: revert hunks that were your mistake; explain intended changes with `other`; for a lock, reply `needs_input` and let the reviewer decide (use `--break-lock` only when the user explicitly asks). Never revert a hunk you did not make.
+Errors are listed bottom-up (the highest hunk first): reverting a hunk renumbers the hunks after it, so follow the fixes in that order. How to respond:
+- **A change a thread asked for:** name its lines in that thread's `at`. An `at` explains every change on the lines it names; a hunk linked only by overlap is explained only within the thread's text and its paragraph or section.
+- **A change no thread asked for:** undo it where you made it. In a document built from sources, undo it in the sources and rebuild: `suiko revert <doc> --hunk hN` restores only the file it is run on, so for a built document the next rebuild brings the change back. For a file you edited directly, `suiko revert` is the quickest way. If you meant the change, explain it with `other`.
+- **`reverted`:** a rebuild dropped a suggestion that an earlier version applied to the built file only. Put the suggested text into the sources and rebuild.
+- **A lock:** reply `needs_input` and let the reviewer decide (use `--break-lock` only when the user explicitly asks).
+- Never revert a hunk you did not make: explain it (`"why": "not mine: external edit"`).
 
 ## Guards
 
+What the deletion and rewrite checks count is the text the reviewer reads: for HTML its visible text (not tags or attributes, so not `data:` URIs or inline styles, and not scripts, styles or JSON data blobs, except the sentences in the string literals of an inline script of up to 256 KB, which the page may show as text), for Markdown the source, less inline `data:` images. A rebuilt document whose data blob or chart script changed together with the sentences the threads asked about passes. `revise` is the real gate: the pre-write hook ([Hooks](#hooks)) only catches a Write that replaces most of the document, while `revise` checks every change, however it was made.
+
 | Check | Default | Way out |
 |---|---|---|
-| An active lock's agreed text is no longer intact | refuse | `revert --lock L1`, or `--break-lock L1="reason"` when the user asks |
+| An active lock's agreed text is no longer intact | refuse | undo the change (`revert --lock L1` writes the agreed text back), or `--break-lock L1="reason"` when the user asks |
 | ... but the lock was added after the last packet you received | warn | |
-| An unlinked, unexplained hunk removes or replaces 20 or more words, or 3 or more whole lines | refuse | an `other` entry, `revert --hunk hN`, or config |
-| More than half of the old text removed or replaced (head of 40 lines or more) | refuse | `--allow-rewrite` only when the user asked for a rewrite |
+| A hunk removes or replaces 20 or more words, or 3 or more whole lines, of that text that nothing explains: all of it for an unlinked hunk; for a linked hunk, the part outside its threads' text (the anchor and its paragraph, or a heading's section) and outside the lines an `at` names | refuse | name the lines in the `at` of the thread that asked for it, an `other` entry, undo it where you made it, or config |
+| More than half of that text removed or replaced where no thread asked for it (unlinked hunks, and what a linked hunk changes outside its threads' text and its `at` lines; a GENERAL thread covers the whole document), in a document of 40 lines or 300 words or more (HTML: 300 visible words) | refuse | name the lines in the `at` of the thread that asked for it; `--allow-rewrite` only when the user asked for a rewrite |
+| A suggestion an earlier version applied (its thread addressed or resolved) is in head but gone from the working copy, and no hunk that removes it is linked with `at` (or a tagged edit) or explained by `other` (`reverted`: a rebuild from sources that never had it) | refuse | put the suggested text into the sources and rebuild; if a thread asked to change it again, name its lines in that thread's `at` |
 | A thread in the packet has no reply entry | warn | add the entry |
 | A thread marked `addressed` has no linked change | warn | add `at` |
 | A decision's text is touched by a hunk not linked to that decision's thread | warn | |
@@ -246,9 +277,11 @@ How to respond: revert hunks that were your mistake; explain intended changes wi
 For each hunk between head and the working copy, in order:
 
 1. **tagged:** an `apply` or `edit` made for that thread produced it.
-2. **hint:** your `at` lines for a thread overlap it.
-3. **overlap:** it changes text inside an actionable thread's anchored range.
+2. **hint:** your `at` lines for a thread overlap it. An `at` explains every change on the lines it names.
+3. **overlap:** it changes text inside an actionable thread's anchored range (the anchor's whole lines, on lines of up to 1,000 characters). This link is inferred, so it explains only the thread's text and its paragraph-level block (for a heading, its section; for a GENERAL thread, the whole document). Whatever the hunk changes beyond that counts as unasked: the deletion check then says `linked to tN only because it overlaps tN's text`, and naming the hunk's lines in that thread's `at` explains it, if the thread asked for the whole change.
 4. Otherwise it is **unlinked** and must be explained by an `other` entry (`at` lines of the new file, or `del:hN` / `hN`).
+
+`suiko revise <doc> --dry-run` shows how each hunk is linked and its lines; `suiko diff <doc> head..live --stat` lists the hunks of your unrecorded changes.
 
 Human and external edits look the same as yours. If you did not make a hunk, explain it (`"why": "not mine: external edit"`); do not revert it.
 
@@ -272,8 +305,8 @@ If an anchor is wrong, move it: `suiko reanchor <doc> tN --lines A-B` or `--quot
 
 ## Hooks
 
-- **`hook pre-write`** (PreToolUse, matcher `Write`): if the target is a tracked doc that has at least one review and is not closed, and the Write would change more than 40% of its lines, it denies the Write with a reason pointing to Edit, `suiko apply` and `suiko edit` (in `warn` mode it asks the user instead). Small Writes are allowed.
-- **`hook prompt`** (UserPromptSubmit): adds a note to the prompt when a submitted review on a doc in this workspace was not delivered and nothing is waiting for it, or was delivered more than about 5 minutes ago but never acted on. Example: `suiko: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run suiko feedback token-service and address it per the spec-review skill.` When the current directory has no workspace of its own, the registered workspaces below it are checked and the command names them (`suiko feedback token-service --workspace notes/specs`).
+- **`hook pre-write`** (PreToolUse, matcher `Write`): if the target is a tracked doc that has at least one review and is not closed, and the Write would replace more than 40% of its text (measured as the guards do: the visible text of HTML, so a changed script, style, data blob or `data:` URI counts for nothing), it asks the user to allow the Write: a permission prompt with the reason (in a headless `claude -p` run the Write is denied and you get the reason). The reason reads: "Suiko: this Write would replace 91% of the visible text of reports/funding-study.html, which is under review (v3, 7 open threads). Allow it only if a full rewrite was asked for; otherwise change only what the review threads ask for (Edit the file, or change its sources and rebuild). After an approved full rewrite, record it with `suiko revise funding-study --allow-rewrite`." A workspace whose `.specreview/config.json` sets `"writeHook": "deny"` denies such Writes instead, and `"off"` turns the hook off. Smaller Writes are allowed. A rebuild by a script is not a Write, so the hook never sees it. **`suiko revise` is the real gate:** the hook only catches near-total rewrites, while `revise` refuses any unexplained deletion or rewrite. After a full rewrite the user asked for, record it with `suiko revise <doc> --allow-rewrite --replies -`.
+- **`hook prompt`** (UserPromptSubmit): adds a note to the prompt when a submitted review on a doc in this workspace was not delivered and nothing is waiting for it, or was delivered more than about 5 minutes ago but never acted on. Example: `suiko: review rv2 on funding-study (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run suiko feedback funding-study and address it per the spec-review skill.` When the current directory has no workspace of its own, the registered workspaces below it are checked and the command names them (`suiko feedback funding-study --workspace reports`).
 - Both always exit 0 and print nothing on error.
 - **`plan-gate`** (PermissionRequest, matcher `ExitPlanMode`, timeout 345600): records the plan (the plan file, else the inline plan) as a snapshot doc, a new version on each ExitPlanMode of the same plan file in the session, opens the UI and blocks until the review (`wait --all` never takes a plan review). Threads your new version changed are marked addressed (`Changed in vN.`). Approved: allows ExitPlanMode. Request changes or Comment: denies it with feedback citing the plan file and its lines (`YOUR PLAN WAS NOT APPROVED ...`): make targeted Edit-tool changes to the plan file and call ExitPlanMode again. On any error, or when the user answers in the terminal, it prints nothing and exits 0. Comments sent with an approval are not passed on.
 
@@ -390,8 +423,8 @@ Edit the files with your editor tools. Use `apply <doc> <tid>` for suggestions, 
 | `suiko_feedback` | `{doc, peek?, include_drafts?}` |
 | `suiko_apply` | `{doc, thread_ids}` |
 | `suiko_edit` | `{doc, thread_ids, old_string, new_string, replace_all?}` |
-| `suiko_reply` | `{doc, thread_id, body, status?, at?, decision?}` |
-| `suiko_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` |
+| `suiko_reply` | `{doc, thread_id, body, status?, at?, attachments?, decision?}` |
+| `suiko_revise` | `{doc, summary, threads, other?, break_locks?, allow_rewrite?, dry_run?}` (each thread may carry `attachments`) |
 | `suiko_revert` | `{doc, hunk?, lock?}` |
 | `suiko_reanchor` | `{doc, thread_id, lines?, quote?, file?}` |
 | `suiko_ask` | `{doc, body, quote? or lines?, file?}` |
@@ -400,16 +433,3 @@ Edit the files with your editor tools. Use `apply <doc> <tid>` for suggestions, 
 | `suiko_log`, `suiko_status` | `{doc?}` |
 | `suiko_show` | `{doc, thread_id?, version?, lines?, file?, side?}` |
 | `suiko_final` | `{doc, decisions?, out_dir?}` |
-
-## Writing the doc
-
-Write the document its readers need, in the form that serves them best: Markdown, or HTML using anything HTML, CSS and JavaScript can do, external libraries included. Never simplify, restructure or restyle it for Suiko.
-
-Suiko renders the doc exactly as written, scripts included, and the reviewer can respond to anything they see:
-
-- select text to comment on it, suggest a replacement or ask a question;
-- snip any area of the rendered page (the picture, plus the source lines of every block under it);
-- attach a screenshot of anything on their screen, such as a state reached by clicking through the page;
-- comment on a section or on the whole doc.
-
-When feedback is about something that has no exact source line (a canvas, a chart drawn by a script, an animation, a state reached by interacting with the page), it arrives as a comment with a picture and the nearest source lines. Read the picture, find what produces it, and change that.

@@ -31,7 +31,8 @@
 <div class="spacer" data-srid="29"></div>
 <p data-srid="30">The end.</p>
 <script>
-  // Author script: tab switching, a click counter, a key handler and its own message log.
+  // Author script: tab switching, a click counter and its own message log. No key listeners: a page with its own
+  // (keyed.html) keeps its single keys (85-keys.js).
   for (const tab of document.querySelectorAll('[role=tab]')) {
     tab.addEventListener('click', () => {
       for (const p of document.querySelectorAll('[role=tabpanel]')) p.hidden = p.id !== tab.getAttribute('aria-controls');
@@ -40,7 +41,6 @@
   let clicks = 0;
   const counter = document.getElementById('clicks');
   counter.addEventListener('click', () => { clicks++; counter.textContent = 'clicks: ' + clicks; });
-  document.addEventListener('keydown', (e) => { if (e.key === 'z') e.preventDefault(); });
   window.__authorMessages = [];
   window.addEventListener('message', (e) => window.__authorMessages.push(e.data));
 </script>

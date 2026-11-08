@@ -224,8 +224,8 @@ Reviewer summary: Good start. Section 7 is agreed - keep it.
 
 LOCKED (agreed - do not modify): L1 §7 Rollout plan (L170-196)
 DECISIONS to keep true: (none yet)
-PROTOCOL: targeted edits only; src> lines are exact Edit old_string; edit bottom-up. Suggestions: `specreview apply`.
-  Questions: answer in the thread's reply; edit only if the answer belongs in the spec. Unsure: status needs_input.
+PROTOCOL: change only what the threads ask for; src> lines are exact Edit old_string (for a built doc, change its sources and rebuild); edit bottom-up. Suggestions: `specreview apply` (for a doc built from sources: put the text into the sources and rebuild).
+  Questions: answer in the thread's reply; edit only if the answer belongs in the doc. Unsure: status needs_input.
 REPLIES: answer every thread above on the thread itself, with a status (the reviewer reads replies in Suiko, not in this chat).
 NEXT: edits, if any -> specreview revise token-service --replies - (JSON, one entry per thread) -> specreview wait token-service (background)
 ```
@@ -261,10 +261,10 @@ reviewer notified (1 UI open). next: specreview wait token-service (background)
 If a guard trips, nothing is recorded and the command exits 3:
 ```
 specreview: REFUSED - nothing recorded (exit 3)
-  ERR lock: h5 L171-174 changes L1 §7 Rollout plan (agreed in rv1)
-      fix: specreview revert token-service --hunk h5   or   --break-lock L1="<reason>"
   ERR deletion: h6 removes 14 lines (v1 L201-214, §8 Open questions) linked to no thread
-      fix: specreview revert token-service --hunk h6   or   add "other":[{"at":"del:h6","why":"..."}]
+      fix: undo it where you made it (in the sources, then rebuild, for a document built from them; `specreview revert token-service --hunk h6` restores a file edited directly), or, if a thread asked for it, add its lines ("L200-201") to that thread's "at", or explain it: "other":[{"at":"del:h6","why":"..."}]
+  ERR lock: h5 L171-174 changes L1 §7 Rollout plan (agreed in rv1)
+      fix: undo it where you made it (in the sources, then rebuild, for a document built from them; `specreview revert token-service --hunk h5` restores a file edited directly), or, if the user agreed to change it, --break-lock L1="<reason>"
   WARN t2 marked addressed but no hunk is linked to it (add "at":"L90-91" if you changed it)
 working copy left untouched. Preview with --dry-run.
 ```
@@ -323,7 +323,7 @@ wrote docs/specs/token-service.decisions.md
 The History tab and `specreview log` show v1 -> v2 -> v3. With `git.autoCommit` turned on, every version is also a commit.
 
 ### 3.13 Variants
-- **The user says "done" in chat but never submitted.** `specreview feedback token-service --include-drafts` prints `0 submitted reviews pending; 3 DRAFT comments not yet submitted (ask the reviewer to click Submit review)` and lists the drafts, clearly labelled.
+- **The user says "done" in chat but never submitted.** `specreview feedback token-service --include-drafts` prints `0 submitted reviews pending; 3 DRAFT comments not yet submitted (ask the reviewer to click Send)` and lists the drafts, clearly labelled.
 - **The background wait died** (for example, Claude restarted). The UserPromptSubmit hook injects: "specreview: review rv2 on token-service is waiting (2 threads). Run `specreview feedback token-service`." `feedback` delivers it and marks it delivered.
 - **MCP-only agent:** `specreview_open`, `specreview_wait` (call it again while it returns waiting), `specreview_apply` or `specreview_edit`, `specreview_revise`.
 - **Codex, Gemini CLI and similar:** the same commands, run in the foreground.
@@ -621,7 +621,7 @@ All files carry `"schema": 1`. They are written with sorted top-level keys, 2-sp
 {"schema":1,
  "reviewer":{"name":"Eric"},
  "guards":{"enforceLocks":true,"maxRewriteRatio":0.5,"unexplainedDeletionLines":3,"unexplainedDeletion":"refuse",
-           "writeHook":"deny","writeHookRatio":0.4},
+           "writeHook":"warn","writeHookRatio":0.4},
  "anchoring":{"minScore":0.65,"minQuoteSim":0.6,"contextChars":32},
  "render":{"network":"allow","mermaid":true,"math":true,"highlight":true},
  "git":{"autoCommit":false},
@@ -629,7 +629,7 @@ All files carry `"schema": 1`. They are written with sorted top-level keys, 2-sp
 ```
 - `reviewer.name` defaults to `git config user.name`, then the OS username.
 - `unexplainedDeletion` is one of `refuse | warn | off`.
-- `writeHook` is one of `deny | warn | off`.
+- `writeHook` is one of `warn | ask | deny | off`. The default `warn` (and its synonym `ask`) makes the pre-write hook ask the user (9.9); `deny` refuses such Writes; `off` turns the hook off. Workspaces created by 0.3.1 or earlier have `"writeHook":"deny"` written in their config.json and keep it; set `"deny"` to keep denying in a new workspace.
 - `render.network` is one of `allow | block`.
 
 **doc.json**
@@ -1120,6 +1120,8 @@ For each hunk of `head` to `working`, try these in order:
 
 `--dry-run` prints the full report and records nothing. A refusal exits 3 and leaves the working copy untouched.
 
+As built, 8.3 and 8.4 are superseded by BUILD_AMENDMENTS 4.3 and 4.4 and the headers of `src/core/review/attribution.js` and `guards.js`: the checks measure the text the reviewer reads; an explicit `at` explains the lines it names while an overlap link explains only its thread's paragraph or section; a `reverted` check refuses a version that drops a suggestion an earlier version applied (a rebuild from sources that never got it); and no fix line leads with `revert`, which restores only the built file of a document built from sources.
+
 ### 8.5 Changes payload (`GET /api/.../diff?from=&to=`, `ops.changes`)
 ```json
 {"from":1,"to":2,"stats":{"added":9,"removed":3,"hunks":4,"blocksChanged":5},
@@ -1336,12 +1338,13 @@ While `specreview_wait` blocks: if the request carries `_meta.progressToken`, se
 ### 9.9 Claude Code hooks (`specreview hook ...`)
 Both hooks read the hook JSON on stdin and always exit 0. On any error they print nothing, and they must finish in under 300 ms.
 - **`hook pre-write`** (PreToolUse, matcher `Write`). If `tool_input.file_path` is a tracked doc that has at least one review, its state is not `closed`, and `config.guards.writeHook` is not `off`:
-  1. Compute `ratio = changedLines(current, tool_input.content) / max(1, currentLines)`.
-  2. If `ratio > writeHookRatio` (0.4), print:
+  1. Compute `ratio`: the share of the current text that `tool_input.content` no longer has, measured as the guards measure (`src/shared/visible-text.js`: an HTML doc's visible text, block by block).
+  2. If `ratio > writeHookRatio` (0.4), print, with the default `writeHook` `"warn"` (or its synonym `"ask"`):
      ```json
-     {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"docs/specs/token-service.md is under SpecReview (v2, 3 open threads, L1 locked). Use Edit for targeted changes (or specreview apply/edit). If the user explicitly asked for a full rewrite, use `specreview revise --allow-rewrite` after writing with Edit."}}
+     {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Suiko: this Write would replace 99% of the text of docs/specs/token-service.md, which is under review (v2, 3 open threads, L1 locked). Allow it only if a full rewrite was asked for; otherwise change only what the review threads ask for (Edit the file, or change its sources and rebuild). After an approved full rewrite, record it with `suiko revise token-service --allow-rewrite`."}}
      ```
-  3. In `warn` mode, set `permissionDecision` to `"ask"`.
+     Claude Code shows the user a permission prompt with the reason (a headless `-p` run denies the Write and gives Claude the reason), so a full rewrite the user asked for costs one click. `revise` remains the real gate.
+  3. With `writeHook` `"deny"`, `permissionDecision` is `"deny"` and the reason says the workspace denies such Writes.
 - **`hook prompt`** (UserPromptSubmit). From `cwd`, find the store. For docs with submitted reviews not yet delivered to `claude` and no live waiter, print:
   ```json
   {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"specreview: review rv2 on token-service (2 threads, CHANGES REQUESTED) was submitted at 14:20 and not delivered. Run `specreview feedback token-service` and address it per the spec-review skill."}}

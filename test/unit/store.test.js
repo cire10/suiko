@@ -68,7 +68,7 @@ describe('open and config', () => {
     const defaults = await store.config();
     assert.deepEqual(defaults.guards, {
       enforceLocks: true, maxRewriteRatio: 0.5, unexplainedWords: 20, unexplainedDeletionLines: 3,
-      unexplainedDeletion: 'refuse', writeHook: 'deny', writeHookRatio: 0.4,
+      unexplainedDeletion: 'refuse', writeHook: 'warn', writeHookRatio: 0.4,
     });
     assert.deepEqual(defaults.anchoring, { minScore: 0.65, minQuoteSim: 0.6, contextChars: 32 });
     assert.deepEqual(defaults.render, { network: 'allow', mermaid: true, math: true, highlight: true });
@@ -79,7 +79,7 @@ describe('open and config', () => {
     fs.writeFileSync(path.join(store.storeDir, 'config.json'), JSON.stringify({
       schema: 1,
       reviewer: { name: 'Eric' },
-      guards: { maxRewriteRatio: 0.8, unexplainedDeletion: 'sometimes', enforceLocks: 'yes' },
+      guards: { maxRewriteRatio: 0.8, unexplainedDeletion: 'sometimes', enforceLocks: 'yes', writeHook: 'ask' },
       render: { network: 'block' },
       extra: { kept: true },
     }));
@@ -88,6 +88,7 @@ describe('open and config', () => {
     assert.equal(cfg.guards.maxRewriteRatio, 0.8);
     assert.equal(cfg.guards.unexplainedDeletion, 'refuse', 'invalid enum ignored');
     assert.equal(cfg.guards.enforceLocks, true, 'wrong type ignored');
+    assert.equal(cfg.guards.writeHook, 'ask', "'ask' is a valid writeHook (a synonym of 'warn')");
     assert.equal(cfg.guards.writeHookRatio, 0.4);
     assert.equal(cfg.render.network, 'block');
     assert.deepEqual(/** @type {any} */ (cfg).extra, { kept: true });

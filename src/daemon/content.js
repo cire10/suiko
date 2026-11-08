@@ -13,11 +13,19 @@
 //   /c/<docKey>/<ver>/<doc.path>             the rendered doc (ver = live | v<N>), guest tag at guestInsertAt,
 //                                            Markdown shell asset base replaced (render finalizeHtml)
 //   /c/<docKey>/<ver>/<other path>           an asset (rules below)
-//   /c/<docKey>/__att/<file>                 a stored review attachment (screenshot, crop, pasted image) of the doc:
-//                                            images only, from .specreview/docs/<doc>/attachments/, for the UI's
-//                                            thumbnails (DocState.attachmentBase). Refused to same-origin requests
-//                                            (Sec-Fetch-Site: same-origin), so the doc's own (untrusted) script cannot
-//                                            read the reviewer's screenshots; the UI origin loads them as same-site.
+//   /c/<docKey>/__att/<file>                 a stored review attachment of the doc, from .specreview/docs/<doc>/
+//                                            attachments/ (DocState.attachmentBase): the reviewer's screenshots and
+//                                            crops, and the files agents attach to replies (png jpg gif webp svg html).
+//                                            Refused to same-origin requests (Sec-Fetch-Site: same-origin), so the
+//                                            doc's own (untrusted) script cannot read them (nor frame a preview); the
+//                                            UI origin loads them as same-site. The stored file itself only, never
+//                                            through a symlink. Raster images get the doc's CSP; an SVG gets
+//                                            attachmentSvgCsp (no script, sandboxed: safe even opened in a tab); an
+//                                            HTML preview gets attachmentPreviewCsp: the CSP `sandbox allow-scripts`
+//                                            directive (always an opaque origin, even top-level), inline scripts and
+//                                            styles (plus https: when render.network is "allow"), no connection to
+//                                            the daemon, frame-ancestors = the UI origins (the UI embeds it in
+//                                            <iframe sandbox="allow-scripts" referrerpolicy="no-referrer">).
 //   (a code doc: 404 for every /c/<docKey>/<ver>/ route; only __att is served)
 //   /<anything else>                         root-absolute URL used by a doc ('/img/a.png'): 307 to the same path
 //                                            under the Referer's /c/<docKey>/<ver>/ prefix; 404 without one
@@ -31,7 +39,9 @@
 //         'live' entry for a too-large asset) or when the live rules allow it.
 //   live: allowed when the path is in the current live render's `assets`, or lies under the doc's own directory
 //         (recursively) with an allowed extension.
-// Every response: X-Content-Type-Options: nosniff and Content-Security-Policy frame-ancestors <UI origins>
+// Every response: X-Content-Type-Options: nosniff and Content-Security-Policy frame-ancestors 'self' <UI origins>
+// (the UI frames the doc; 'self', the content origin, lets a doc frame its own pages, e.g. a widget next to it, while
+// every ancestor must still be one of these, so no other site can frame anything here)
 // (+ default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval' when render.network is "block": the doc's own
 // doc.render.network when it has one, e.g. a fetched web page, else the workspace config's).
 // A snapshot doc (a plan, an agent message, piped text, a fetched web page: not a workspace file) gets the strict
@@ -122,8 +132,11 @@ function isAssetTag(seg) {
 const VER_RE = /^(live|v[1-9]\d{0,8})$/;
 /** Path segment of the attachment route under /c/<docKey>/ (never a version: those are live / v<N>). */
 export const ATTACHMENT_SEGMENT = '__att';
-/** Attachment file names the content origin serves (the store's names, image extensions only; never SVG). */
-const ATTACHMENT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(png|jpe?g|gif|webp)$/i;
+/**
+ * Attachment file names the content origin serves (the store's names): images, SVG and HTML previews
+ * (protocol.js AGENT_ATTACHMENT_KINDS); anything else in the directory is never served.
+ */
+const ATTACHMENT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(png|jpe?g|gif|webp|svg|html?)$/i;
 const MANIFEST_CACHE_MAX = 512;
 
 /** @typedef {import('../core/store/store.js').Store} Store */
@@ -189,7 +202,7 @@ export class ContentOrigin {
    * @returns {Promise<string>}
    */
   async #csp(wsId, doc = null) {
-    const parts = [`frame-ancestors ${loopbackOrigins(this.deps.ports().uiPort).join(' ')}`];
+    const parts = [`frame-ancestors 'self' ${loopbackOrigins(this.deps.ports().uiPort).join(' ')}`];
     if (wsId) {
       let network = /** @type {any} */ (doc)?.render?.network;
       if (network !== 'allow' && network !== 'block') {
@@ -311,14 +324,44 @@ export class ContentOrigin {
     const { store, doc } = await this.deps.index.doc(ref.wsId, ref.docId);
     const dir = path.join(store.docDir(doc.id), 'attachments');
     const abs = realpathWithin(dir, rest[0]);
-    // a symlink inside the directory must also land on an attachment-like image name (never e.g. an .svg)
-    if (!abs || !ATTACHMENT_FILE_RE.test(path.basename(abs))) throw notFound();
+    // the stored file itself: a symlink (even to another attachment) is never followed, so the type served is always
+    // the one of the file's own name
+    if (!abs || path.basename(abs) !== rest[0]) throw notFound();
+    const ext = extOf(rest[0]);
+    const uiOrigins = loopbackOrigins(this.deps.ports().uiPort);
+    /** @type {Record<string, string>} */
+    let headers;
+    if (ext === 'svg') {
+      headers = { 'Content-Security-Policy': attachmentSvgCsp(uiOrigins), 'Referrer-Policy': 'no-referrer' };
+    } else if (ext === 'html' || ext === 'htm') {
+      const network = await this.#networkOf(ref.wsId, doc);
+      headers = { 'Content-Security-Policy': attachmentPreviewCsp(uiOrigins, network), 'Referrer-Policy': 'no-referrer' };
+    } else {
+      headers = { 'Content-Security-Policy': await this.#csp(ref.wsId, doc) };
+    }
     await sendFile(req, res, abs, {
       contentType: contentTypeOf(rest[0]),
       cacheControl: 'private, no-cache',
-      headers: { 'Content-Security-Policy': await this.#csp(ref.wsId, doc) },
+      headers,
       maxBytes: LIMITS.maxAttachmentBytes,
     });
+  }
+
+  /**
+   * The network rule of a doc's pages: its own render.network (a fetched web page), else the workspace config's
+   * ('allow' when the config cannot be read, as for the doc itself).
+   * @param {string} wsId
+   * @param {Doc} doc
+   * @returns {Promise<'allow' | 'block'>}
+   */
+  async #networkOf(wsId, doc) {
+    const own = /** @type {any} */ (doc)?.render?.network;
+    if (own === 'allow' || own === 'block') return own;
+    try {
+      return (await this.deps.index.config(wsId)).render?.network === 'block' ? 'block' : 'allow';
+    } catch {
+      return 'allow';
+    }
   }
 
   /**
@@ -408,6 +451,43 @@ export class ContentOrigin {
     this.manifests.set(key, manifest);
     return manifest;
   }
+}
+
+/**
+ * CSP of an SVG attachment: no script and no loads (inline styles only), sandboxed, so it is inert even when opened
+ * as a page ("Open in a new tab"); framed only by the UI.
+ * @param {string[]} uiOrigins
+ * @returns {string}
+ */
+export function attachmentSvgCsp(uiOrigins) {
+  return `default-src 'none'; style-src 'unsafe-inline'; sandbox; frame-ancestors ${uiOrigins.join(' ')}`;
+}
+
+/**
+ * CSP of an agent's HTML preview attachment (a chart, a mock-up): the `sandbox allow-scripts` directive makes it an
+ * opaque origin wherever it is loaded (no cookies, no storage of the content origin, no reading the doc or other
+ * attachments, no forms, popups or top navigation); inline scripts and styles run, plus https: resources (CDN
+ * libraries, web fonts, images) when the doc's render.network is "allow"; it never connects to the daemon; only the
+ * UI may frame it.
+ * @param {string[]} uiOrigins
+ * @param {'allow' | 'block'} network
+ * @returns {string}
+ */
+export function attachmentPreviewCsp(uiOrigins, network) {
+  const web = network === 'allow' ? ' https:' : '';
+  return [
+    'sandbox allow-scripts',
+    "default-src 'none'",
+    `script-src 'unsafe-inline' 'unsafe-eval'${web}`,
+    `style-src 'unsafe-inline'${web}`,
+    `img-src data: blob:${web}`,
+    `font-src data:${web}`,
+    `media-src data: blob:${web}`,
+    ...(web ? ['connect-src https:'] : []),
+    "form-action 'none'",
+    "base-uri 'none'",
+    `frame-ancestors ${uiOrigins.join(' ')}`,
+  ].join('; ');
 }
 
 /**

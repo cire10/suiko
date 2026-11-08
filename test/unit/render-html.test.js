@@ -184,6 +184,19 @@ test('features.mermaid only when .mermaid elements exist and no script mentions 
   assert.equal((await render('<p>no diagrams</p>')).features.mermaid, false);
 });
 
+test('features.mermaid is never set for a doc with module scripts or a mermaid link of its own', async () => {
+  // a module may import mermaid without the page naming it (`./diagram.js`): Suiko's mermaid would race the doc's
+  const viaModule = appSpec.replace('</body>', '<script type="module" src="./diagram.js"></script></body>');
+  assert.equal((await render(viaModule)).features.mermaid, false);
+  const inlineModule = appSpec.replace('</body>', '<script type="Module">import { draw } from "./charts.js"; draw();</script></body>');
+  assert.equal((await render(inlineModule)).features.mermaid, false);
+  const preload = appSpec.replace('</head>', '<link rel="modulepreload" href="https://cdn.example.com/mermaid.esm.min.mjs"></head>');
+  assert.equal((await render(preload)).features.mermaid, false);
+  // classic scripts that do not mention mermaid keep the vendored one
+  const classic = appSpec.replace('</body>', '<script src="./app.js"></script></body>');
+  assert.equal((await render(classic)).features.mermaid, true);
+});
+
 test('assets and externals: local refs resolve workspace-relative, externals are absolute http(s)', async () => {
   const src = `<!doctype html><html><head>
 <link rel="stylesheet" href="css/site.css"><link rel="canonical" href="https://example.com/x">

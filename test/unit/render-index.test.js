@@ -143,6 +143,17 @@ test('getRender: versions are cached on disk (RENDERER_VERSION + sha8) and in me
   clearRenderMemoryCache();
   assert.equal((await getRender(store, doc, 1)).title, 'One', 'corrupt cache is recomputed');
 
+  // a render cached under other render rules (e.g. before the mermaid rule changed) is recomputed and rewritten
+  const stale = { ...JSON.parse(readFileSync(file, 'utf8')), title: 'Stale', rules: render.RENDER_RULES - 1 };
+  writeFileSync(file, JSON.stringify(stale));
+  clearRenderMemoryCache();
+  assert.equal((await getRender(store, doc, 1)).title, 'One', 'stale rules are recomputed');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).rules, render.RENDER_RULES);
+  const { rules: _rules, ...noRules } = stale;
+  writeFileSync(file, JSON.stringify(noRules));
+  clearRenderMemoryCache();
+  assert.equal((await getRender(store, doc, 1)).title, 'One', 'a render cached before the rules existed too');
+
   const noStamp = await getRender(store, doc, 1, { stamp: false });
   assert.ok(!noStamp.html.includes('data-srid'));
   assert.ok(existsSync(path.join(dir, `v0001-${RENDERER_VERSION}-${sha8}-nostamp.json`)));

@@ -2,12 +2,13 @@
 // UI polish found while using the product by hand (mock daemon):
 //   U1 the composer's "what the agent will see" line keeps its height while it resolves, and the composer takes the
 //      focus also when the guest's selection toolbar (focus inside the doc iframe) opened it;
-//   U2 "Submit review" keeps its element across DocState refreshes between a mousedown and its mouseup;
+//   U2 the primary button ("Send N") keeps its element and its box across DocState refreshes between a mousedown and
+//      its mouseup;
 //   U3 table picks are labelled by their scope (row / column / table), U4 cards quote their anchor's text;
-//   U5 the Submit dialog starts on "Request changes" when the review carries a blocking comment;
+//   U5 the Send dialog starts on "Needs changes" when the review carries a Must fix (blocking) comment;
 //   U6 change hunks read as inline word diffs (capped, "Show more"), U7 group titles drop the doc's only H1;
 //   U8 hidden / missing anchor chips only while the rendered doc is shown;
-//   U9 between 900 and 1199 px the outline rail is collapsed behind the menu button (remembered);
+//   U9 below 1600 px the outline rail is collapsed behind the ≡ button (remembered);
 //   U10 a forwarded c / s / q / a racing the guest's action does not open the composer twice.
 
 import { TESTID } from '../../src/shared/protocol.js';
@@ -66,14 +67,14 @@ test.describe('fresh doc', () => {
 
     const composer = page.getByTestId(TESTID.composer);
     const ta = page.getByTestId(TESTID.composerTextarea);
-    await expect(composer.locator('.anchor-preview')).toContainText('Locating what the agent will see');
+    await expect(composer.locator('.anchor-preview')).toContainText('Locating what Claude will see');
     // Focus left the doc iframe for the composer.
     await expect(ta).toBeFocused();
     const before = /** @type {{ y: number }} */ (await ta.boundingBox());
-    const chipsBefore = /** @type {{ y: number }} */ (await composer.getByRole('radio', { name: 'Blocking' }).boundingBox());
-    await expect(composer.locator('.agent-sees')).toContainText('Agent will see: L');
+    const chipsBefore = /** @type {{ y: number }} */ (await composer.getByRole('button', { name: 'Must fix' }).boundingBox());
+    await expect(composer.locator('.agent-sees')).toHaveAttribute('title', /^Claude will see: L\d/);
     const after = /** @type {{ y: number }} */ (await ta.boundingBox());
-    const chipsAfter = /** @type {{ y: number }} */ (await composer.getByRole('radio', { name: 'Blocking' }).boundingBox());
+    const chipsAfter = /** @type {{ y: number }} */ (await composer.getByRole('button', { name: 'Must fix' }).boundingBox());
     expect(Math.abs(after.y - before.y)).toBeLessThan(1);
     expect(Math.abs(chipsAfter.y - chipsBefore.y)).toBeLessThan(1);
     // Clamped to two lines; the whole text is in the tooltip.
@@ -121,13 +122,13 @@ test.describe('fresh doc', () => {
     expect(ui.errors).toEqual([]);
   });
 
-  test('U2: Submit review opens on a real click even when DocState refreshes between mousedown and mouseup', async ({ page, ui, mock }) => {
+  test('U2: Send opens on a real click even when DocState refreshes between mousedown and mouseup', async ({ page, ui, mock }) => {
     await ui.open('kitchen-sink');
     const d = mock.doc('kitchen-sink');
     const submit = page.getByTestId(TESTID.submitReviewOpen);
     const dialog = page.getByTestId(TESTID.submitReviewDialog);
-    // Each step changes what the second row of the top bar shows: presence, the progress chip appearing and
-    // changing, the round status appearing while the progress chip goes away.
+    // Each step changes what the top bar's turn pill says: the presence, the newest review's progress appearing and
+    // changing, a new version answering it.
     const refreshes = [
       () => d.setWaiters([{ agent: 'claude' }]),
       () => d.setWaiters([]),
@@ -143,13 +144,15 @@ test.describe('fresh doc', () => {
       await page.getByTestId(TESTID.composerAdd).click();
       await expect(page.getByTestId(TESTID.composer)).toBeHidden();
       await expect(page.locator('.drafts-count strong')).toHaveText(String(i + 1));
+      await expect(submit).toHaveText(`Send ${i + 1}`);
       await submit.evaluate((el) => { /** @type {any} */ (el).__mark = 1; });
       const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await submit.boundingBox());
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
-      const before = await page.locator('.tb-sub').innerText();
+      const pill = page.getByTestId(TESTID.turnPill);
+      const before = `${await pill.getAttribute('aria-label')}|${await pill.textContent()}`;
       await refresh();
-      await expect.poll(() => page.locator('.tb-sub').innerText()).not.toBe(before);
+      await expect.poll(async () => `${await pill.getAttribute('aria-label')}|${await pill.textContent()}`).not.toBe(before);
       // Same element, same place: the browser will dispatch the click.
       expect(await submit.evaluate((el) => /** @type {any} */ (el).__mark ?? null)).toBe(1);
       expect(await submit.boundingBox()).toEqual(box);
@@ -185,14 +188,15 @@ test.describe('fresh doc', () => {
     await expect(draft).not.toContainText('×');
     await expect(draft.locator('[data-anchor-quote]')).toContainText('refresh_token');
 
-    // A text selection: the card shows its lines and section, and quotes the selected text.
+    // A text selection: the card quotes the selected text, its section under it, its lines in the tooltip.
     await ui.selectText('Revoke the whole token family on reuse.');
     await page.locator('[data-selection-comment]').click();
     await page.getByTestId(TESTID.composerTextarea).fill('Including access tokens?');
     await page.getByTestId(TESTID.composerAdd).click();
     const textDraft = page.locator(`[data-testid="${TESTID.threadCard}"][data-draft-id="d2"]`);
     await expect(textDraft.locator('[data-anchor-quote]')).toHaveText('“Revoke the whole token family on reuse.”');
-    await expect(textDraft.locator('.target-lines')).toHaveText(/^L\d+$/);
+    await expect(textDraft.locator('.card-target')).toHaveAttribute('data-lines', /^L\d+$/);
+    await expect(textDraft.locator('.card-target')).toHaveAttribute('title', /\(§1 Goals L\d+\)$/);
     await expect(textDraft.locator('.target-section')).toHaveText('§1 Goals');
 
     // Submitted, they become threads with the same labels.
@@ -203,7 +207,7 @@ test.describe('fresh doc', () => {
     expect(ui.errors).toEqual([]);
   });
 
-  test('U5: the Submit dialog starts on "Request changes" when a draft is blocking, else on "Comment"', async ({ page, ui }) => {
+  test('U5: the Send dialog starts on "Needs changes" when a draft is a Must fix, else on "Send feedback"', async ({ page, ui }) => {
     await ui.open('kitchen-sink');
     const dialog = page.getByTestId(TESTID.submitReviewDialog);
     const verdict = (/** @type {string} */ v) => dialog.locator(`[data-testid="${TESTID.submitVerdict}"] input[value="${v}"]`);
@@ -218,12 +222,13 @@ test.describe('fresh doc', () => {
 
     await ui.selectText('Remove the legacy session store.');
     await page.locator('[data-selection-comment]').click();
-    await page.getByTestId(TESTID.composer).getByRole('radio', { name: 'Blocking' }).click();
+    await page.getByTestId(TESTID.composer).getByRole('button', { name: 'Must fix' }).click();
     await page.getByTestId(TESTID.composerTextarea).fill('Not before the migration.');
     await page.getByTestId(TESTID.composerAdd).click();
     await page.getByTestId(TESTID.submitReviewOpen).click();
     await expect(verdict('changes_requested')).toBeChecked();
-    await expect(page.getByTestId(TESTID.submitConfirm)).toHaveText('Request changes');
+    await expect(dialog.locator('.verdict-changes_requested strong')).toHaveText('Needs changes');
+    await expect(page.getByTestId(TESTID.submitConfirm)).toHaveText('Send');
     expect(ui.errors).toEqual([]);
   });
 
@@ -276,7 +281,7 @@ test.describe('fresh doc', () => {
 test.describe('round 2', () => {
   test.use({ scenario: 'round2' });
 
-  test('U5: reopening a blocking thread defaults the verdict to "Request changes"', async ({ page, ui }) => {
+  test('U5: reopening a blocking thread defaults the verdict to "Needs changes"', async ({ page, ui }) => {
     await ui.open('kitchen-sink');
     await modeTab(page, 'review').click();
     await page.locator('.filter[data-filter="all"]').click();
@@ -306,8 +311,8 @@ test.describe('round 2', () => {
     const chip = ui.card('t3').getByRole('button', { name: 'Hidden: Reveal' });
     await expect(chip).toBeVisible();
 
-    for (const mode of ['source', 'history']) {
-      await modeTab(page, mode).click();
+    for (const mode of /** @type {const} */ (['source', 'history'])) {
+      await ui.menu(mode);
       await expect(page.getByTestId(TESTID.threadPanel)).toBeVisible();
       await expect(cards).toHaveCount(6);
       await expect(page.getByRole('button', { name: 'Hidden: Reveal' })).toHaveCount(0);
@@ -356,11 +361,31 @@ test.describe('medium viewport (1050 px)', () => {
     expect(ui.errors).toEqual([]);
   });
 
-  test('U9: at 1300 px the rail is always shown and the menu button is gone', async ({ page, ui }) => {
-    await page.setViewportSize({ width: 1300, height: 800 });
+  test('U9: below 1600 px the rail waits behind ≡ (the doc keeps about 1050 px at 1440); from 1600 px it is beside the doc', async ({ page, ui }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await ui.open('kitchen-sink');
-    await expect(page.locator('#sr-nav')).toBeVisible();
-    await expect(page.locator('button[aria-controls="sr-nav"]')).toHaveCount(0);
+    const nav = page.locator('#sr-nav');
+    const toggle = page.locator('button[aria-controls="sr-nav"]');
+    await expect(nav).toBeHidden();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const doc = /** @type {{ width: number }} */ (await page.getByTestId(TESTID.docFrame).boundingBox());
+    expect(doc.width).toBeGreaterThanOrEqual(1040);
+    const side = /** @type {{ width: number }} */ (await page.locator('#sr-side').boundingBox());
+    expect(side.width).toBe(360);
+
+    // Wide enough: the rail is a column and the button goes away; narrower again, it waits behind the button.
+    await page.setViewportSize({ width: 1700, height: 900 });
+    await expect(nav).toBeVisible();
+    await expect(toggle).toHaveCount(0);
+    await page.setViewportSize({ width: 1300, height: 800 });
+    await expect(nav).toBeHidden();
+    await expect(toggle).toBeVisible();
+    // Opened at 1300 px: remembered for the narrower widths.
+    await toggle.click();
+    await expect(nav).toBeVisible();
+    await page.reload();
+    await ui.ready();
+    await expect(nav).toBeVisible();
     expect(ui.errors).toEqual([]);
   });
 });

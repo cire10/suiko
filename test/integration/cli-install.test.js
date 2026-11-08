@@ -13,7 +13,7 @@ process.env.SPECREVIEW_HOME = HOME;
 
 const { runCli, tempDir } = await import('./helpers/cli-harness.js');
 const { BIN_PATH, PACKAGE_ROOT } = await import('../../src/cli/daemon-client.js');
-const { claudeCommandFiles, hookCommand, insertSnippet, mergeHooks, planGateCommand, PLAN_GATE_TIMEOUT } = await import('../../src/cli/install.js');
+const { claudeCommandFiles, hookCommand, insertSnippet, markBlock, mergeHooks, planGateCommand, PLAN_GATE_TIMEOUT, withInstallMark } = await import('../../src/cli/install.js');
 
 /** @type {string} */
 let project;
@@ -77,7 +77,7 @@ describe('install claude', () => {
     for (const rel of ['SKILL.md', 'reference.md']) {
       assert.equal(
         fs.readFileSync(path.join(base, 'skills', 'spec-review', rel), 'utf8'),
-        fs.readFileSync(path.join(PACKAGE_ROOT, 'integrations', 'claude-code', 'skills', 'spec-review', rel), 'utf8'),
+        withInstallMark(fs.readFileSync(path.join(PACKAGE_ROOT, 'integrations', 'claude-code', 'skills', 'spec-review', rel), 'utf8')),
       );
     }
     assert.ok(fs.existsSync(path.join(base, 'commands', 'review-spec.md')));
@@ -241,7 +241,8 @@ describe('install agents-md', () => {
 
     const r = await run(['install', 'agents-md', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    const snippet = fs.readFileSync(snippetPath, 'utf8').trimEnd();
+    const snippet = markBlock(fs.readFileSync(snippetPath, 'utf8').trimEnd());
+    assert.match(snippet, /\n<!-- installed by suiko \S+ -->\n<!-- specreview:end -->$/, 'the block says which Suiko wrote it');
     assert.equal(fs.readFileSync(target, 'utf8'), `# Project rules\n\nBe nice.\n\n${snippet}\n`);
 
     const again = await run(['install', 'agents-md', '--apply', '--json']);
@@ -255,7 +256,7 @@ describe('install agents-md', () => {
   test('--file targets another file; a new file gets just the block', async () => {
     const r = await run(['install', 'agents-md', '--file', '../GEMINI.md', '--apply']);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(fs.readFileSync(path.join(project, 'GEMINI.md'), 'utf8'), `${fs.readFileSync(snippetPath, 'utf8').trimEnd()}\n`);
+    assert.equal(fs.readFileSync(path.join(project, 'GEMINI.md'), 'utf8'), `${markBlock(fs.readFileSync(snippetPath, 'utf8').trimEnd())}\n`);
   });
 
   test('insertSnippet', () => {

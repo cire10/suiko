@@ -1,8 +1,11 @@
 // @ts-check
 // WP4 Claude Code hook tests: `suiko hook pre-write` and `suiko hook prompt` run as real processes
-// (bin/suiko.js) against a store written by the real WP1 Store: the fast path without .specreview, the deny
-// JSON for a whole-file Write, warn/off modes, the prompt-injection text for undelivered and unacknowledged
-// reviews, live waiters, garbage stdin (never throws, always exit 0) and cold-start timing.
+// (bin/suiko.js) against a store written by the real WP1 Store: the fast path without .specreview, the JSON for a
+// whole-file Write (by default 'ask': the user decides, with a reason that reads for the user and for Claude),
+// the warn/ask/deny/off modes, what the pre-write hook measures (the visible text of an HTML report: a changed data
+// blob, image or sentence passes, a prose rewrite is stopped, minified or not; Markdown lines), the prompt-injection
+// text for undelivered and unacknowledged reviews, live waiters, garbage stdin (never throws, always exit 0) and
+// cold-start timing.
 
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,7 +20,8 @@ process.env.SPECREVIEW_HOME = HOME;
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/suiko.js');
 
 const { makeWorkspace, SPEC_MD, tempDir } = await import('./helpers/cli-harness.js');
-const { changedLineRatio, runHook } = await import('../../src/cli/hooks.js');
+const { runHook } = await import('../../src/cli/hooks.js');
+const { visibleChangeRatio } = await import('../../src/shared/visible-text.js');
 const { memorySink } = await import('../../src/cli/io.js');
 const { Readable } = await import('node:stream');
 
@@ -108,23 +112,25 @@ describe('hook pre-write', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('whole-file Write of a reviewed doc is denied with a reason', () => {
+  test('whole-file Write of a reviewed doc: by default the user is asked, with a reason for the user and for Claude', () => {
     const r = hook('pre-write', rewrite());
     assert.equal(r.code, 0);
     const out = JSON.parse(r.stdout);
     assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
-    assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+    // 'ask': Claude Code shows the user a permission prompt (a headless -p run denies it and gives Claude the reason)
+    assert.equal(out.hookSpecificOutput.permissionDecision, 'ask');
     assert.equal(
       out.hookSpecificOutput.permissionDecisionReason,
-      'docs/specs/token-service.md is under Suiko (v1, 1 open thread, L1 locked); this Write would replace 100% of its lines. ' +
-        'Use Edit for targeted changes (or suiko apply/edit). If the user explicitly asked for a full rewrite, use ' +
-        '`suiko revise --allow-rewrite` after writing with Edit.',
+      'Suiko: this Write would replace 99% of the text of docs/specs/token-service.md, which is under review (v1, 1 open thread, ' +
+        'L1 locked). Allow it only if a full rewrite was asked for; otherwise change only what the review threads ask for (Edit ' +
+        'the file, or change its sources and rebuild). After an approved full rewrite, record it with ' +
+        '`suiko revise token-service --allow-rewrite`.',
     );
   });
 
   test('a relative file_path resolves against the payload cwd', () => {
     const r = hook('pre-write', { ...rewrite(), tool_input: { file_path: 'docs/specs/token-service.md', content: 'gone\n' } });
-    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'ask');
   });
 
   const probe = tempDir('case');
@@ -133,7 +139,7 @@ describe('hook pre-write', () => {
   fs.rmSync(probe, { recursive: true, force: true });
   test('another spelling of the reviewed doc (case-insensitive volumes) is that doc', { skip: !caseInsensitive && 'case-sensitive volume' }, () => {
     const r = hook('pre-write', { ...rewrite(), tool_input: { file_path: path.join(ws.root, 'Docs', 'Specs', 'Token-Service.md'), content: 'gone\n' } });
-    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'ask');
   });
 
   test('a symlink to the reviewed doc, or a path through a symlinked folder, is that doc', () => {
@@ -143,7 +149,7 @@ describe('hook pre-write', () => {
       fs.symlinkSync(path.dirname(ws.file), path.join(dir, 'specs'));
       for (const p of [path.join(dir, 'alias.md'), path.join(dir, 'specs', path.basename(ws.file))]) {
         const r = hook('pre-write', { ...rewrite(), cwd: dir, tool_input: { file_path: p, content: 'gone\n' } });
-        assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny', p);
+        assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'ask', p);
       }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -160,12 +166,25 @@ describe('hook pre-write', () => {
     assert.equal(hook('pre-write', { ...rewrite(), tool_input: { file_path: other, content: 'x' } }).stdout, '');
   });
 
-  test('writeHook warn -> ask; off -> silent; custom ratio', () => {
-    setGuard('writeHook', 'warn');
-    assert.equal(JSON.parse(hook('pre-write', rewrite()).stdout).hookSpecificOutput.permissionDecision, 'ask');
+  test('writeHook warn / ask -> ask; deny -> deny; off -> silent; anything else -> the default (ask); custom ratio', () => {
+    const decision = () => JSON.parse(hook('pre-write', rewrite()).stdout).hookSpecificOutput;
+    for (const mode of ['warn', 'ask', 'sometimes', 7]) {
+      setGuard('writeHook', mode);
+      assert.equal(decision().permissionDecision, 'ask', String(mode));
+    }
+    setGuard('writeHook', 'deny');
+    const deny = decision();
+    assert.equal(deny.permissionDecision, 'deny');
+    assert.equal(
+      deny.permissionDecisionReason,
+      'Suiko: this Write would replace 99% of the text of docs/specs/token-service.md, which is under review (v1, 1 open thread, ' +
+        'L1 locked); this workspace denies such Writes (guards.writeHook "deny"). Instead, change only what the review threads ' +
+        'ask for (Edit the file, or change its sources and rebuild). If the user asked for a full rewrite, make it with Edit, then ' +
+        'record it with `suiko revise token-service --allow-rewrite`.',
+    );
     setGuard('writeHook', 'off');
     assert.equal(hook('pre-write', rewrite()).stdout, '');
-    setGuard('writeHook', 'deny');
+    setGuard('writeHook', 'warn');
     setGuard('writeHookRatio', 1);
     assert.equal(hook('pre-write', rewrite()).stdout, '');
     setGuard('writeHookRatio', 0.4);
@@ -175,19 +194,97 @@ describe('hook pre-write', () => {
     const fresh = await makeWorkspace();
     assert.equal(hook('pre-write', { ...rewrite(), cwd: fresh.root, tool_input: { file_path: fresh.file, content: 'x\n' } }).stdout, '');
     await fresh.store.saveReview('token-service', review());
-    assert.match(hook('pre-write', { ...rewrite(), cwd: fresh.root, tool_input: { file_path: fresh.file, content: 'x\n' } }).stdout, /"deny"/);
+    assert.match(hook('pre-write', { ...rewrite(), cwd: fresh.root, tool_input: { file_path: fresh.file, content: 'x\n' } }).stdout, /"permissionDecision":"ask"/);
     const doc = /** @type {any} */ (await fresh.store.getDoc('token-service'));
     await fresh.store.saveDoc({ ...doc, state: 'closed' });
     assert.equal(hook('pre-write', { ...rewrite(), cwd: fresh.root, tool_input: { file_path: fresh.file, content: 'x\n' } }).stdout, '');
     fresh.cleanup();
   });
 
-  test('changedLineRatio ignores blank lines, trailing spaces and moves', () => {
-    assert.equal(changedLineRatio('a\nb\nc\nd\n', 'a\nb\nc\nd\n'), 0);
-    assert.equal(changedLineRatio('a\n\nb  \n', 'b\na\n'), 0);
-    assert.equal(changedLineRatio('a\nb\nc\nd\n', 'a\nb\nX\nY\n'), 0.5);
-    assert.equal(changedLineRatio('a\na\n', 'a\n'), 0.5);
-    assert.equal(changedLineRatio('', 'anything'), 0);
+  test('the measure (Markdown lines) ignores blank lines, trailing spaces and moves, and counts the words a line lost', () => {
+    const md = (/** @type {string} */ a, /** @type {string} */ b) => visibleChangeRatio('markdown', a, b);
+    assert.equal(md('a\nb\nc\nd\n', 'a\nb\nc\nd\n'), 0);
+    assert.equal(md('a\n\nb  \n', 'b\na\n'), 0);
+    assert.equal(md('a\nb\nc\nd\n', 'a\nb\nX\nY\n'), 0.5);
+    assert.equal(md('a\na\n', 'a\n'), 0.5);
+    assert.equal(md('', 'anything'), 0);
+    assert.equal(md('short\na much longer line of text\n', 'short\nreplaced\n'), 21 / 26);
+    // a word changed in a line costs that word, not the line (the guards' word diff, roughly)
+    assert.equal(md('alpha beta gamma\n', 'alpha BETA gamma\n'), 4 / 14);
+    // an inline data: image is not text
+    const img = (/** @type {string} */ c) => `![chart](data:image/png;base64,${c.repeat(40)})\n`;
+    assert.equal(md(`Text.\n${img('AAAA')}`, `Text.\n${img('BBBB')}`), 0);
+  });
+
+  /** A reviewed HTML report (template, a JSON data blob, prose), tracked in its own workspace. */
+  async function reviewedReport() {
+    const w = await makeWorkspace({ track: false });
+    const page = (/** @type {number} */ seed, /** @type {string[]} */ paras) =>
+      ['<!doctype html><html><head><title>Study</title><style>p { margin: 0 }</style></head><body>', '<h1>Study</h1>',
+        ...paras.map((p) => `<p>${p}</p>`),
+        `<script type="application/json" id="d">${JSON.stringify({ v: Array.from({ length: 500 }, (_, i) => (i * seed) % 97) })}</script>`,
+        `<img src="data:image/png;base64,${'iVBORw0K'.repeat(50 + seed)}" alt="chart">`, '</body></html>', ''].join('\n');
+    const prose = Array.from({ length: 10 }, (_, i) => `Paragraph ${i} explains one step of the investigation in plain words, with its numbers.`);
+    const file = path.join(w.root, 'docs', 'report.html');
+    fs.writeFileSync(file, page(1, prose));
+    const doc = await w.store.createDoc({ path: file, createdBy: { kind: 'agent', name: 'claude' } });
+    await w.store.commitVersion(doc, { source: fs.readFileSync(file), manifest: { author: { kind: 'agent', name: 'claude' }, summary: 'v1', capturedBy: 'open' } });
+    await w.store.saveReview(doc.id, review());
+    const write = (/** @type {string} */ content) => ({ ...rewrite(), cwd: w.root, tool_input: { file_path: file, content } });
+    return { w, page, prose, write };
+  }
+
+  test('HTML: a Write that changes the data blob, the image and one sentence passes; a prose rewrite is stopped', async () => {
+    const { w, page, prose, write } = await reviewedReport();
+    try {
+      const rebuilt = prose.map((p, i) => (i === 3 ? 'Paragraph 3 now covers two years of sessions.' : p));
+      assert.equal(hook('pre-write', write(page(7, rebuilt))).stdout, '');
+      const rewritten = prose.map((p, i) => (i < 6 ? `Section ${i} is told differently now, in other words entirely.` : p));
+      const out = JSON.parse(hook('pre-write', write(page(1, rewritten))).stdout);
+      assert.equal(out.hookSpecificOutput.permissionDecision, 'ask');
+      assert.match(
+        out.hookSpecificOutput.permissionDecisionReason,
+        /^Suiko: this Write would replace (5\d|6\d)% of the visible text of docs\/report\.html, which is under review \(v1, 0 open threads\)\. Allow it only if a full rewrite was asked for; otherwise change only what the review threads ask for .* `suiko revise report --allow-rewrite`\.$/,
+      );
+      // the same Write as one minified line is measured the same way
+      const flat = (/** @type {string} */ t) => t.replace(/\n/g, '');
+      fs.writeFileSync(path.join(w.root, 'docs', 'report.html'), flat(page(1, prose)));
+      assert.equal(hook('pre-write', write(flat(page(7, rebuilt)))).stdout, '');
+      assert.match(hook('pre-write', write(flat(page(1, rewritten)))).stdout, /"permissionDecision":"ask"/);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('HTML: prose a page renders from its own script or JSON blob is measured; its data and a big inlined library are not', async () => {
+    const w = await makeWorkspace({ track: false });
+    try {
+      const file = path.join(w.root, 'docs', 'rendered.html');
+      // the page renders its paragraphs from a JSON blob, its chart from a data array, and carries a 300 KB library
+      const lib = (/** @type {string} */ tag) => `<script>/* vendored */${Array.from({ length: 3000 }, (_, i) => `function f${i}(x){ if (!x) throw new Error("the value ${tag} of parameter number ${i} must be a finite number"); return x * ${i}; }`).join('\n')}</script>`;
+      const page = (/** @type {string[]} */ paras, /** @type {number} */ seed, /** @type {string} */ tag) => [
+        '<!doctype html><html><head><title>Rendered</title></head><body><h1>Rendered report</h1><main id="m"></main>',
+        `<script type="application/json" id="text">${JSON.stringify(paras)}</script>`,
+        `<script type="application/json" id="data">${JSON.stringify({ days: Array.from({ length: 200 }, (_, i) => ({ d: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`, v: (i * seed) % 97, unit: 'bp' })) })}</script>`,
+        '<script>document.getElementById("m").innerHTML = JSON.parse(document.getElementById("text").textContent).map((p) => "<p>" + p + "</p>").join("");</script>',
+        lib(tag),
+        '</body></html>', ''].join('\n');
+      const prose = Array.from({ length: 12 }, (_, i) => `Paragraph ${i} explains one step of the investigation in plain words, with its numbers and caveats.`);
+      fs.writeFileSync(file, page(prose, 1, 'a'));
+      assert.ok(fs.statSync(file).size > 300 * 1024);
+      const doc = await w.store.createDoc({ path: file, createdBy: { kind: 'agent', name: 'claude' } });
+      await w.store.commitVersion(doc, { source: fs.readFileSync(file), manifest: { author: { kind: 'agent', name: 'claude' }, summary: 'v1', capturedBy: 'open' } });
+      await w.store.saveReview(doc.id, review());
+      const write = (/** @type {string} */ content) => ({ ...rewrite(), cwd: w.root, tool_input: { file_path: file, content } });
+      // new data (numbers, dates, short labels) and a changed library: nothing a reader reads
+      assert.equal(visibleChangeRatio('html', page(prose, 1, 'a'), page(prose, 5, 'b')), 0);
+      assert.equal(hook('pre-write', write(page(prose, 5, 'b'))).stdout, '');
+      // every paragraph rewritten in the JSON blob: the reader's text is gone
+      const rewritten = prose.map((_, i) => `Section ${i} now tells a different story in new words that nobody asked for here.`);
+      assert.match(hook('pre-write', write(page(rewritten, 1, 'a'))).stdout, /"permissionDecision":"ask"/);
+    } finally {
+      w.cleanup();
+    }
   });
 });
 
@@ -411,7 +508,7 @@ describe('hooks on untrusted committed store files', () => {
         assert.ok(r.ms < 2000, `${name} took ${Math.round(r.ms)} ms`);
         // prompt: the unreadable review is no reminder; pre-write: the doc still counts as reviewed (it has rv1)
         if (name === 'prompt') assert.equal(r.stdout, '');
-        else assert.match(r.stdout, /"permissionDecision":"deny"/);
+        else assert.match(r.stdout, /"permissionDecision":"ask"/);
       }
     } finally {
       repo.cleanup();
