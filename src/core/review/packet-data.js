@@ -41,7 +41,7 @@ import { anchorAt, conversation, hasContent, isAwaitingReviewer, isOutdated, why
 import { useTargets } from './attachments.js';
 import { docOriginType, docRefFor, isCode, isSnapshot, originType, pageUrlOf, planFileOf, resnapshotCommand } from '../store/snapshot.js';
 import { kindOf } from './kinds.js';
-import { codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js';
+import { SUMMARY_LEAD, codeLineBasis, codeNextStep, codePacketLabel } from '../code/packet.js';
 
 /**
  * @typedef {import('../../shared/types.js').Thread} Thread
@@ -238,6 +238,9 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
   for (const i of batched) i.edits = 'batch';
   const edits = batched.length ? 'batch' : 'now';
   const replyOnly = approval.approved && approval.finalNow && counts.actionable > 0;
+  // a review whose only feedback is its summary (no thread asks for anything): the summary is the request, so NEXT
+  // says how to record the change it asks for instead of "nothing to act on"
+  const summaryOnly = counts.actionable === 0 && !approval.approved && deliver.some((r) => r.verdict !== 'approved' && String(r.body ?? '').trim() !== '');
   // a batched round with nothing to edit now: the agent answers (planned / answered) and edits nothing yet
   const repliesNow = batched.length > 0 && batched.length === counts.actionable && !replyOnly && doc.state !== 'closed';
   // nothing to apply once the reviewer approved the final version: a suggestion that came with it gets a reply
@@ -281,7 +284,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
       firstPacket,
       replyOnly,
       agent,
-      next: repliesNow ? batchNextStep(ref) : codeNextStep(doc, ref, approval, counts.actionable),
+      next: repliesNow ? batchNextStep(ref) : codeNextStep(doc, ref, approval, counts.actionable, summaryOnly),
     };
   }
 
@@ -320,7 +323,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     agent,
     next: repliesNow
       ? batchNextStep(ref, { byReply: snapshot })
-      : snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable, root) : nextStep(doc, approval, counts.actionable),
+      : snapshot ? snapshotNextStep(doc, ref, approval, counts.actionable, root, summaryOnly) : nextStep(doc, approval, counts.actionable, summaryOnly),
   };
 }
 
@@ -610,8 +613,9 @@ function approvalOf(doc, latest) {
  * @param {Doc} doc
  * @param {{ approved: boolean, finalNow: boolean }} approval
  * @param {number} actionable
+ * @param {boolean} [summary] the reviewer's summary is the only feedback (no actionable thread, not approved)
  */
-function nextStep(doc, { approved, finalNow }, actionable) {
+function nextStep(doc, { approved, finalNow }, actionable, summary = false) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (approved && actionable === 0) {
     return finalNow ? `suiko final ${doc.id} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
@@ -621,6 +625,7 @@ function nextStep(doc, { approved, finalNow }, actionable) {
   if (approved && finalNow) {
     return `approved: answer each thread with suiko reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> suiko final ${doc.id} --decisions   (then stop waiting)`;
   }
+  if (actionable === 0 && summary) return `${SUMMARY_LEAD}: edits it asks for, if any -> suiko revise ${doc.id} -m <what changed> -> suiko wait ${doc.id} (background)`;
   if (actionable === 0) return `nothing to act on; suiko wait ${doc.id} (background)`;
   return `edits, if any -> suiko revise ${doc.id} --replies - -> suiko wait ${doc.id} (background)`;
 }
@@ -635,8 +640,9 @@ function nextStep(doc, { approved, finalNow }, actionable) {
  * @param {{ approved: boolean, finalNow: boolean }} approval
  * @param {number} actionable
  * @param {string | null} [root]
+ * @param {boolean} [summary] the reviewer's summary is the only feedback (see nextStep)
  */
-function snapshotNextStep(doc, ref, { approved, finalNow }, actionable, root = null) {
+function snapshotNextStep(doc, ref, { approved, finalNow }, actionable, root = null, summary = false) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (originType(doc) === 'plan') {
     if (approved && actionable === 0) return 'the plan is approved; go ahead with it';
@@ -649,12 +655,17 @@ function snapshotNextStep(doc, ref, { approved, finalNow }, actionable, root = n
   if (approved && finalNow) {
     return `approved: answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined (no new version) -> suiko final ${ref}   (then stop waiting)`;
   }
-  if (actionable === 0) return `nothing to act on; suiko wait ${ref} (background)`;
+  if (actionable === 0 && !summary) return `nothing to act on; suiko wait ${ref} (background)`;
+  // the summary alone: the same steps as a round, recorded without thread replies
+  const lead = summary ? `${SUMMARY_LEAD}: ` : '';
   const again = resnapshotCommand(doc, root);
   if (again) {
-    return /** @type {any} */ (doc).origin?.private === true
-      ? `edit the sources that produce the page -> ${again} --replies - (records v${doc.head + 1}) -> suiko wait ${ref} (background)`
+    if (/** @type {any} */ (doc).origin?.private === true) {
+      return `${lead}edit the sources that produce the page -> ${again}${summary ? '' : ' --replies -'} (records v${doc.head + 1}) -> suiko wait ${ref} (background)`;
+    }
+    return summary
+      ? `${lead}a public page is not edited; do what it asks -> suiko wait ${ref} (background)`
       : `answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined -> suiko wait ${ref} (background)`;
   }
-  return `write the complete revised text to a file -> suiko revise ${ref} --source <file> --replies - -> suiko wait ${ref} (background)`;
+  return `${lead}write the complete revised text to a file -> suiko revise ${ref} --source <file> ${summary ? '-m <what changed>' : '--replies -'} -> suiko wait ${ref} (background)`;
 }

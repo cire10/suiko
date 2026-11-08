@@ -18,7 +18,7 @@ import { UsageError } from '../../core/store/errors.js';
 import { homeDir } from '../../core/store/home.js';
 import { BIN_PATH, PACKAGE_ROOT } from '../daemon-client.js';
 import { applyPlan, cliInvocation, isOnPath, projectRoot } from '../install.js';
-import { AGENTS, Planner, UNVERIFIED, claudeDoubleInstall, claudePlugin } from './agents.js';
+import { AGENTS, Planner, UNVERIFIED, brokenHooksLine, claudeDoubleInstall, claudePlugin } from './agents.js';
 import { loadManifest } from './files.js';
 import { freshnessLine, staleByAgent } from './freshness.js';
 
@@ -48,6 +48,7 @@ export const MANIFEST_FILE = 'install-manifest.json';
  * @property {'user' | 'project'} scope
  * @property {AgentReport[]} agents
  * @property {Array<{ id: string, name: string, detected: boolean, evidence: string[], reason: string }>} unverified
+ * @property {boolean} only agents were named with --only (the text report then leaves the unverified ones out)
  * @property {FileAction[]} changes deduplicated actions (what applyPlan gets)
  * @property {Map<string, string[]>} owners path -> agent ids that planned it
  * @property {string[]} written
@@ -264,6 +265,7 @@ export function runInstaller(ctx, o) {
     applied: Boolean(o.apply),
     scope: ctx.scope,
     agents,
+    only: Boolean(o.only),
     unverified: UNVERIFIED.map((u) => {
       const d = u.detect(ctx);
       return { id: u.id, name: u.name, detected: d.detected, evidence: d.evidence, reason: u.reason };
@@ -345,7 +347,8 @@ export function describeReport(report) {
     out.push('', `No supported agent detected. Name one with --only to configure it anyway (agents: ${AGENT_IDS}).`);
   }
 
-  if (install && report.unverified.length) {
+  // --only: the user picked the agents, so the ones Suiko cannot set up are not news (the JSON still lists them)
+  if (install && !report.only && report.unverified.length) {
     out.push('', 'Not configured (unverified integration surface):');
     for (const u of report.unverified) out.push(`  ${u.name}${u.detected ? ` (detected: ${u.evidence.join(', ')})` : ''}: ${u.reason}`);
   }
@@ -480,8 +483,9 @@ function stillUsesShared(ctx, d, detected) {
  * Agents that are neither detected nor configured are left out. An agent counts as configured by its own files; the
  * shared ones (~/.agents/skills) count only for a detected agent whose whole configuration is shared (Droid).
  * `stale`: the freshness line (install/freshness.js) when its instruction files are older than this CLI.
+ * `hooks` (Claude Code): the line about Suiko hooks in settings.json that cannot run (agents.js brokenHooksLine).
  * @param {Ctx} ctx
- * @returns {Array<{ id: string, name: string, detected: boolean, configured: boolean, upToDate: boolean, plugin?: string, problem?: string, stale?: string }>}
+ * @returns {Array<{ id: string, name: string, detected: boolean, configured: boolean, upToDate: boolean, plugin?: string, problem?: string, stale?: string, hooks?: string }>}
  */
 export function integrationStatus(ctx) {
   const out = [];
@@ -502,6 +506,7 @@ export function integrationStatus(ctx) {
     const problem = twice ? `Suiko plugin installed (${pluginInfo?.id}), and ${twice}` : [...inst.refusals, ...un.refusals][0]?.message;
     const old = stale.get(def.id);
     const staleLine = old ? freshnessLine(old) : null;
+    const hooks = def.id === 'claude' ? brokenHooksLine(ctx, Boolean(plugin)) : null;
     out.push({
       id: def.id,
       name: def.name,
@@ -511,6 +516,7 @@ export function integrationStatus(ctx) {
       ...(plugin ? { plugin } : {}),
       ...(problem ? { problem } : {}),
       ...(staleLine ? { stale: staleLine } : {}),
+      ...(hooks ? { hooks } : {}),
     });
   }
   return out;

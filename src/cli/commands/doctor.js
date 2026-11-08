@@ -14,6 +14,8 @@
 // whether that configuration is current (a dry run of the installer; nothing is written), naming the Suiko version
 // its instruction files came from when they are older than this CLI, and the command that updates them and nothing
 // else (`suiko install --only <agent> --apply`, the same line `suiko open` prints; install/freshness.js).
+// A Suiko hook in ~/.claude/settings.json that runs a missing script or node (a deleted clone, a removed node
+// version) is an ERR: Claude Code reports a hook error each time it runs (install/agents.js brokenHooks).
 // Exit 0 when no ERR remains, else 1.
 
 import fs from 'node:fs';
@@ -92,8 +94,8 @@ export async function execute(rt, input) {
  */
 function checkNode(add) {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  const ok = major > 20 || (major === 20 && minor >= 19);
-  add(ok ? 'ok' : 'err', 'node', `node v${process.versions.node}${ok ? '' : ' (Suiko needs Node >= 20.19)'}`);
+  const ok = major > 22 || (major === 22 && minor >= 12);
+  add(ok ? 'ok' : 'err', 'node', `node v${process.versions.node}${ok ? '' : ' (Suiko needs Node >= 22.12)'}`);
   add('ok', 'version', `suiko ${packageVersion()} at ${PACKAGE_ROOT}`);
 }
 
@@ -210,12 +212,16 @@ async function checkIntegrations(rt, add) {
     }
     for (const s of list) {
       const check = `integration:${s.id}`;
+      // hooks that cannot run fail each time Claude Code runs them: an error of its own, whatever else is said
+      if (s.hooks) add('err', `${check}:hooks`, `${s.name}: ${s.hooks}`);
       if (s.problem) add('warn', check, `${s.name}: ${s.problem}`);
       else if (s.stale) add('warn', check, `${s.name}: ${s.stale}`);
       else if (s.plugin) add('ok', check, `${s.name}: Suiko plugin installed (${s.plugin})`);
       else if (s.configured && s.upToDate) add('ok', check, `${s.name}: Suiko configured`);
-      else if (s.configured) add('warn', check, `${s.name}: Suiko configuration is incomplete or outdated (run \`suiko install --only ${s.id} --apply\`)`);
-      else add('ok', check, `${s.name}: detected, Suiko not configured (\`suiko install --only ${s.id}\` shows what it would add)`);
+      else if (s.configured) {
+        // the hooks line already names the command that brings the configuration up to date
+        if (!s.hooks) add('warn', check, `${s.name}: Suiko configuration is incomplete or outdated (run \`suiko install --only ${s.id} --apply\`)`);
+      } else add('ok', check, `${s.name}: detected, Suiko not configured (\`suiko install --only ${s.id}\` shows what it would add)`);
     }
   } catch (err) {
     add('warn', 'integrations', `could not check the agent integrations: ${/** @type {Error} */ (err).message}`);

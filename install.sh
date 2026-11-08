@@ -4,7 +4,7 @@
 #   From a checkout:  ./install.sh [--yes] [suiko install options, e.g. --only claude,codex]
 #   Without one:      curl -fsSL <raw URL of this file> | SPECREVIEW_REPO=<git URL> sh -s -- [--yes] [options]
 #
-# 1. checks Node.js >= 20.19 (and npm);
+# 1. checks Node.js >= 22.12 (and npm);
 # 2. uses this checkout, or clones SPECREVIEW_REPO into ~/.specreview/app (updates it when it is already there);
 # 3. installs the npm dependencies (a checkout that already has node_modules is left as is);
 # 4. puts `suiko` on PATH with `npm link`, or, when that fails (a global prefix that needs sudo), with a small
@@ -63,9 +63,9 @@ done
 
 [ -n "${HOME:-}" ] || die 'HOME is not set'
 
-# 1. Node.js >= 20.19 -------------------------------------------------------------------------------------------
+# 1. Node.js >= 22.12 -------------------------------------------------------------------------------------------
 NODE=$(command -v node 2>/dev/null || true)
-[ -n "$NODE" ] || die 'Node.js 20.19 or newer is required and node is not on PATH (https://nodejs.org)'
+[ -n "$NODE" ] || die 'Node.js 22.12 or newer is required and node is not on PATH (https://nodejs.org)'
 NODE_VERSION=$("$NODE" -p 'process.versions.node' 2>/dev/null || true)
 MAJOR=${NODE_VERSION%%.*}
 REST=${NODE_VERSION#*.}
@@ -73,8 +73,8 @@ MINOR=${REST%%.*}
 case "$MAJOR.$MINOR" in
   *[!0-9.]* | .* | *.) die "could not read the Node.js version from $NODE (got: ${NODE_VERSION:-nothing})" ;;
 esac
-if [ "$MAJOR" -lt 20 ] || { [ "$MAJOR" -eq 20 ] && [ "$MINOR" -lt 19 ]; }; then
-  die "Node.js 20.19 or newer is required; $NODE is $NODE_VERSION"
+if [ "$MAJOR" -lt 22 ] || { [ "$MAJOR" -eq 22 ] && [ "$MINOR" -lt 12 ]; }; then
+  die "Node.js 22.12 or newer is required; $NODE is $NODE_VERSION"
 fi
 NPM=$(command -v npm 2>/dev/null || true)
 

@@ -102,6 +102,20 @@ describe('suiko install: detection and dry run', () => {
     assert.deepEqual(j.unverified.map((/** @type {any} */ u) => u.id), ['antigravity', 'devin']);
   });
 
+  test('--only: the text leaves out the agents Suiko cannot set up; the JSON still lists them', async () => {
+    const h = makeHome({ dirs: ['.claude'] });
+    const r = await h.run(['install', '--only', 'claude']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^Claude Code: detected/m);
+    assert.doesNotMatch(r.stdout, /unverified integration surface|Antigravity|Devin/);
+    const { j } = await h.json(['install', '--only', 'claude']);
+    assert.deepEqual(j.unverified.map((/** @type {any} */ u) => u.id), ['antigravity', 'devin']);
+    // naming every agent is still picking them
+    const all = await h.run(['install', '--only', 'claude,codex,gemini,cursor,opencode,claude-desktop']);
+    assert.equal(all.code, 0, all.stderr);
+    assert.doesNotMatch(all.stdout, /unverified integration surface/);
+  });
+
   test('detects agents by config dir or binary on PATH; ~/.gemini alone (Antigravity) is not Gemini CLI', async () => {
     const h = makeHome({ dirs: ['.gemini', '.kiro'], bins: ['codex', 'cursor-agent', 'opencode'] });
     const { j } = await h.json(['install']);

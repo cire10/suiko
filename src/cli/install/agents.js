@@ -448,11 +448,12 @@ const claudeSettingsFiles = (c) => (c.scope === 'project' ? [claudeSettings(c), 
 
 /**
  * Suiko hook commands found in the settings files of this scope (an earlier settings install), except the
- * plan-mode gate: the plugin does not include it, so a gate in settings.json next to the plugin runs once.
+ * plan-mode gate unless `gate`: the plugin does not include it, so a gate in settings.json next to the plugin runs once.
  * @param {Ctx} c
+ * @param {{ gate?: boolean }} [o]
  * @returns {Array<{ file: string, commands: string[] }>}
  */
-function settingsHooks(c) {
+function settingsHooks(c, o = {}) {
   const out = [];
   for (const file of claudeSettingsFiles(c)) {
     const s = readJsonLenient(file);
@@ -460,12 +461,100 @@ function settingsHooks(c) {
     const commands = [];
     for (const groups of Object.values(hooks)) {
       for (const g of Array.isArray(groups) ? groups : []) {
-        for (const h of Array.isArray(g?.hooks) ? g.hooks : []) if (isOurHook(h) && !isPlanGateHook(h)) commands.push(String(h.command));
+        for (const h of Array.isArray(g?.hooks) ? g.hooks : []) if (isOurHook(h) && (o.gate || !isPlanGateHook(h))) commands.push(String(h.command));
       }
     }
     if (commands.length) out.push({ file, commands });
   }
   return out;
+}
+
+/**
+ * The words of a shell command: "..." (backslash escapes, as shellQuote writes them), '...' and bare words, up to
+ * the first thing that is none of these.
+ * @param {string} command
+ * @returns {string[]}
+ */
+function shellWords(command) {
+  const words = [];
+  const re = /\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s"']+))/y;
+  for (let m = re.exec(command); m; m = re.exec(command)) {
+    words.push(m[1] !== undefined ? m[1].replace(/\\(.)/g, '$1') : (m[2] ?? m[3]));
+  }
+  return words;
+}
+
+/**
+ * What a Suiko hook command runs: the CLI (an absolute bin/suiko.js, or a bare `suiko` / `specreview` looked up on
+ * PATH) and the word before it (the node), else null.
+ * @param {string} command
+ * @returns {{ cli: string, node: string | null } | null}
+ */
+export function hookTarget(command) {
+  const words = shellWords(command);
+  const i = words.findIndex((w) => /(?:^|[/\\])(?:suiko|specreview)(?:\.js)?$/.test(w));
+  return i < 0 ? null : { cli: words[i], node: i > 0 ? words[i - 1] : null };
+}
+
+/**
+ * @typedef {{ file: string, command: string, missing: string, bare: boolean }} BrokenHook
+ * `missing`: the absolute script or node path that does not exist, or (`bare`) the command name not on PATH
+ */
+
+/**
+ * Suiko hooks in this scope's Claude Code settings (the plan-mode gate too) that cannot run: the script or the node
+ * they name by absolute path is gone (a deleted clone, a removed node version), or the bare command is not on PATH.
+ * Claude Code then reports a hook error each time one runs.
+ * @param {Ctx} c
+ * @returns {BrokenHook[]}
+ */
+export function brokenHooks(c) {
+  /** @type {BrokenHook[]} */
+  const out = [];
+  for (const { file, commands } of settingsHooks(c, { gate: true })) {
+    for (const command of commands) {
+      const t = hookTarget(command);
+      if (!t) continue;
+      if (path.isAbsolute(t.cli)) {
+        const gone = [t.cli, t.node].find((p) => p && path.isAbsolute(p) && !fs.existsSync(p));
+        if (gone) out.push({ file, command, missing: gone, bare: false });
+      } else if (!/[/\\]/.test(t.cli) && !isOnPath(t.cli, c.pathEnv)) {
+        out.push({ file, command, missing: t.cli, bare: true });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * What broken hooks run, for a message: "they run /x/bin/suiko.js, which is missing".
+ * @param {BrokenHook[]} broken
+ * @returns {string}
+ */
+export function describeBrokenHooks(broken) {
+  const targets = [...new Map(broken.map((b) => [b.missing, b])).values()];
+  const what = (/** @type {BrokenHook} */ b) => (b.bare ? `\`${b.missing}\`` : b.missing);
+  const why = (/** @type {BrokenHook} */ b) => (b.bare ? 'not on PATH here' : 'missing');
+  const runs = broken.length === 1 ? 'it runs' : 'they run';
+  if (targets.length === 1) return `${runs} ${what(targets[0])}, which is ${why(targets[0])}`;
+  return `${runs} ${targets.map((b) => `${what(b)} (${why(b)})`).join(' and ')}`;
+}
+
+/**
+ * The doctor line about broken Suiko hooks (null when none): where they are, what they run, and the command that
+ * fixes them (the settings install points them at this CLI; next to the plugin, uninstall removes them).
+ * @param {Ctx} c
+ * @param {boolean} plugin the Suiko plugin is installed
+ * @returns {string | null}
+ */
+export function brokenHooksLine(c, plugin) {
+  const broken = brokenHooks(c);
+  if (!broken.length) return null;
+  const files = [...new Set(broken.map((b) => tilde(c, b.file)))].join(' and ');
+  const n = broken.length;
+  const fix = plugin ? '`suiko uninstall --only claude --apply` (the plugin has its own hooks)' : '`suiko install --only claude --apply`, which points them at this CLI';
+  return `${n === 1 ? 'a Suiko hook' : `${n} Suiko hooks`} in ${files} cannot run: ${describeBrokenHooks(broken)}. ` +
+    `Claude Code reports a hook error each time ${n === 1 ? 'it runs' : 'one runs'} until you run ${fix}.`;
 }
 
 /**
@@ -519,13 +608,21 @@ const claude = {
     // already in the settings file (an earlier opt-in) is kept and re-pointed at this CLI like the other hooks.
     const planGate = Boolean(c.planGate) || installedHooks(claudeSettings(c)).planGate;
     const entries = hookEntries({ execPath: c.execPath, binPath: c.binPath, planGate, hooks: true });
-    p.add(() =>
-      jsonAction(claudeSettings(c), (s) => mergeHooks(s, entries), {
+    p.add(() => {
+      const file = claudeSettings(c);
+      const there = installedHooks(file);
+      const a = jsonAction(file, (s) => mergeHooks(s, entries), {
         note: `hooks: ${describeHookEntries(entries)}; other settings kept`,
         detail: JSON.stringify({ hooks: entries }, null, 2),
         fix: 'add the hooks shown above under "hooks" by hand',
-      }),
-    );
+      });
+      if (a?.action === 'update' && (there.hooks || there.planGate)) {
+        // say that Suiko hooks are being replaced, and why when they cannot run (a deleted clone, a removed node)
+        const broken = brokenHooks(c).filter((b) => b.file === file);
+        a.note = `hooks: ${describeHookEntries(entries)}; replaces the Suiko hooks already there${broken.length ? ` (${describeBrokenHooks(broken)})` : ''}; other settings kept`;
+      }
+      return a;
+    });
     if (planGate) p.note('Plan mode: when Claude calls ExitPlanMode, the plan opens in Suiko; approving it there approves the plan, and the terminal dialog stays usable.');
     if (c.scope === 'project') p.note('The hooks go to .claude/settings.local.json, Claude Code\'s personal project settings: keep it out of git.');
   },

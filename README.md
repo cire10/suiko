@@ -77,7 +77,7 @@ Coding agents are good at writing documents and bad at revising them. Feedback i
 
 ## Install
 
-Requirements: Node.js 20.19 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`suiko review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`Shift+B`, `suiko snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
+Requirements: Node.js 22.12 or later, and a current Chromium-based browser, Safari or Firefox. Claude Code is optional. Code reviews (`suiko review`) need git 2.32 or later, and PR reviews also need the GitHub CLI (`gh`), signed in. Screen snips (`Shift+B`, `suiko snip`) need macOS; everything else, including area snips (`b`), works in any of those browsers.
 
 ### Quick install
 
@@ -94,7 +94,7 @@ Or install it from npm instead of a clone: `npm install -g @cire10/suiko` (the c
 
 Then start a new session of each agent so it loads Suiko, and run `suiko doctor` to check the setup. To install a branch that is not merged yet, for example to try a pull request, clone it with `git clone -b <branch> …`, or run `git checkout <branch> && npm ci` in your clone; then `suiko install --apply`. To update later, run `git pull && npm ci` in the clone (or `npm install -g @cire10/suiko@latest`), then `suiko install --apply` again: it refreshes the copied skill, commands and instruction blocks, which an upgrade alone leaves as they were. Every file it writes says which Suiko version wrote it, and `suiko open` and `suiko doctor` tell you when those copies are older than the CLI, with the command that updates just those files. The review server restarts on its own.
 
-`install.sh` checks for Node.js 20.19+, runs `npm ci` (skipped when `node_modules` is already there), puts `suiko` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `suiko install`. Options after `--yes` go to `suiko install`, e.g. `./install.sh --yes --only claude,codex`.
+`install.sh` checks for Node.js 22.12+, runs `npm ci` (skipped when `node_modules` is already there), puts `suiko` on your `PATH` with `npm link` (or, when the global npm prefix needs sudo, with a small shim in `~/.local/bin`), and then runs `suiko install`. Options after `--yes` go to `suiko install`, e.g. `./install.sh --yes --only claude,codex`.
 
 Without a checkout, give it the repository's git URL (or install from npm, as above):
 
@@ -663,4 +663,4 @@ The access token appears in the browser's address bar; it is not sent as a refer
 
 ## License
 
-MIT
+MIT; see [LICENSE](LICENSE).
