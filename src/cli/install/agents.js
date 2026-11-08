@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PACKAGE_ROOT } from '../daemon-client.js';
-import { AGENTS_SNIPPET, claudeCopies, describeHookEntries, hookEntries, installedHooks, isOnPath, isOurHook, isPlanGateHook, mergeHooks, removeOurHooks } from '../install.js';
+import { AGENTS_SNIPPET, claudeCopies, describeHookEntries, hookEntries, installedHooks, isOnPath, isOurHook, isPlanGateHook, mergeHooks, planGateCommand, removeOurHooks } from '../install.js';
 import {
   GEMINI_COMMAND, OPENCODE_COMMAND, SKILL_NAME, SKILL_TEMPLATE, agentSkill, codexTomlBlock, geminiCommand, kiroSteering,
   opencodeCommand, protocolBlock,
@@ -552,9 +552,20 @@ export function brokenHooksLine(c, plugin) {
   if (!broken.length) return null;
   const files = [...new Set(broken.map((b) => tilde(c, b.file)))].join(' and ');
   const n = broken.length;
-  const fix = plugin ? '`suiko uninstall --only claude --apply` (the plugin has its own hooks)' : '`suiko install --only claude --apply`, which points them at this CLI';
+  let fix = 'run `suiko install --only claude --apply`, which points them at this CLI';
+  if (plugin) {
+    // the plugin brings the regular hooks but no plan-mode gate: uninstalling the settings hooks would delete a gate
+    // the user added, so a broken gate alone is re-pointed, and the uninstall advice says what it also removes
+    const isGate = (/** @type {string} */ command) => isPlanGateHook({ command });
+    const gateOnly = broken.every((b) => isGate(b.command));
+    const hasGate = settingsHooks(c, { gate: true }).some((f) => f.commands.some(isGate));
+    fix = gateOnly
+      ? `replace the gate's command with \`${planGateCommand({ execPath: c.execPath, binPath: c.binPath })}\` (the plugin has no plan-mode gate), or remove the gate`
+      : 'run `suiko uninstall --only claude --apply` (the plugin has its own hooks' +
+        (hasGate ? '; this also removes the plan-mode gate, which the plugin does not have: see "Plan-mode gate" in the README to add it back)' : ')');
+  }
   return `${n === 1 ? 'a Suiko hook' : `${n} Suiko hooks`} in ${files} cannot run: ${describeBrokenHooks(broken)}. ` +
-    `Claude Code reports a hook error each time ${n === 1 ? 'it runs' : 'one runs'} until you run ${fix}.`;
+    `Claude Code reports a hook error each time ${n === 1 ? 'it runs' : 'one runs'} until you ${fix}.`;
 }
 
 /**

@@ -229,7 +229,11 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     drafts: drafts?.length ?? 0,
     undelivered: deliver.length,
   };
-  const latest = deliver[deliver.length - 1] ?? null;
+  // a re-read with no new review: a summary-only request still waiting for its change is shown again (see
+  // pendingSummary), so the agent never loses it after `wait` delivered it
+  const pending = deliver.length === 0 && counts.actionable === 0 ? pendingSummary(snap, agent) : null;
+  const shown = pending ? [pending] : deliver;
+  const latest = shown[shown.length - 1] ?? null;
   const approval = approvalOf(doc, latest);
   // batched edits, per actionable thread (an APPLY item is edited now): the newest review that handed it over; not
   // for a plan (the plan gate wants the plan edited) nor a public web page (nothing to edit)
@@ -240,7 +244,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
   const replyOnly = approval.approved && approval.finalNow && counts.actionable > 0;
   // a review whose only feedback is its summary (no thread asks for anything): the summary is the request, so NEXT
   // says how to record the change it asks for instead of "nothing to act on"
-  const summaryOnly = counts.actionable === 0 && !approval.approved && deliver.some((r) => r.verdict !== 'approved' && String(r.body ?? '').trim() !== '');
+  const summaryOnly = counts.actionable === 0 && !approval.approved && shown.some((r) => r.verdict !== 'approved' && String(r.body ?? '').trim() !== '');
   // a batched round with nothing to edit now: the agent answers (planned / answered) and edits nothing yet
   const repliesNow = batched.length > 0 && batched.length === counts.actionable && !replyOnly && doc.state !== 'closed';
   // nothing to apply once the reviewer approved the final version: a suggestion that came with it gets a reply
@@ -271,7 +275,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
       title: doc.title,
       head: snap.head.v,
       working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
-      reviews: deliver.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
+      reviews: shown.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
       verdict: latest?.verdict ?? null,
       edits,
       final: doc.final ?? null,
@@ -308,7 +312,7 @@ export function buildPacket(snap, { agent, deliver, attachmentPath, allOpen = fa
     title: doc.title,
     head: snap.head.v,
     working: snap.working.missing ? 'missing' : snap.working.dirty ? 'dirty' : 'clean',
-    reviews: deliver.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
+    reviews: shown.map((r) => ({ id: r.id, version: r.version, verdict: r.verdict, body: r.body ?? '', by: r.by?.name ?? '', at: r.submittedAt })),
     verdict: latest?.verdict ?? null,
     edits,
     final: doc.final ?? null,
@@ -596,6 +600,23 @@ function byCodeOrder(a, b) {
 }
 
 /**
+ * The summary-only request still waiting for its change, else null: the newest review of the doc, when it was
+ * delivered to this agent, is not an approval, has a summary, handed over no thread (no new thread, reply, reopened
+ * thread or apply item; a thread stays listed by itself until it is answered) and no version was recorded since
+ * (it was made on the current head). A new review or a new version ends it.
+ * @param {Snapshot} snap
+ * @param {string} agent
+ * @returns {Review | null}
+ */
+function pendingSummary(snap, agent) {
+  if (snap.doc.state === 'closed' || !snap.reviews.length) return null;
+  const r = [...snap.reviews].sort((a, b) => compareIds(a.id, b.id)).at(-1);
+  if (!r || r.verdict === 'approved' || !String(r.body ?? '').trim() || !r.deliveredTo?.[agent]) return null;
+  const handedOver = (r.newThreads?.length ?? 0) + (r.replies?.length ?? 0) + (r.reopened?.length ?? 0) + (r.apply?.length ?? 0);
+  return handedOver === 0 && r.version === snap.head.v ? r : null;
+}
+
+/**
  * Whether the doc stands approved, and whether its final version is the current head (so `final` will succeed).
  * `latest` is the newest review being delivered; without one (`feedback` after the approved packet was delivered or
  * lost) the doc's own state decides. A later revise puts the doc back in review, so an older final is not current.
@@ -625,10 +646,19 @@ function nextStep(doc, { approved, finalNow }, actionable, summary = false) {
   if (approved && finalNow) {
     return `approved: answer each thread with suiko reply ${doc.id} <tid> -m <md> --status answered|declined (no edits, no new version) -> suiko final ${doc.id} --decisions   (then stop waiting)`;
   }
-  if (actionable === 0 && summary) return `${SUMMARY_LEAD}: edits it asks for, if any -> suiko revise ${doc.id} -m <what changed> -> suiko wait ${doc.id} (background)`;
+  // a file doc's guards refuse a cut no thread asked for unless an `other` entry explains it, and -m cannot carry
+  // one, so the change is recorded with replies JSON (snapshots and code rounds only warn: they keep -m)
+  if (actionable === 0 && summary) return `${SUMMARY_LEAD}: edits it asks for, if any -> suiko revise ${doc.id} --replies - ${SUMMARY_REPLIES} -> suiko wait ${doc.id} (background)`;
   if (actionable === 0) return `nothing to act on; suiko wait ${doc.id} (background)`;
   return `edits, if any -> suiko revise ${doc.id} --replies - -> suiko wait ${doc.id} (background)`;
 }
+
+/**
+ * The replies JSON of a change a reviewer summary asked for (no thread to answer): the version summary, plus an
+ * `other` entry explaining each change, so the unexplained-deletion guard accepts the cut the summary asked for.
+ */
+export const SUMMARY_REPLIES = '(JSON: {"summary": "<what changed>", "other": [{"at": "L<a>-<b>", "why": "the reviewer summary asked for it"}]}, '
+  + 'one "other" entry per change; a cut that leaves no lines: "at": "del:hN", from --dry-run)';
 
 /**
  * The NEXT line of a snapshot doc: it is revised by recording new text (`revise --source`), or, for a plan, by

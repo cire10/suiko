@@ -260,6 +260,25 @@ describe('suiko doctor', () => {
     r = await h.run(['doctor'], deps);
     assert.match(r.stdout, /^ERR {3}Claude Code: a Suiko hook in ~\/\.claude\/settings\.json cannot run: it runs `specreview`, which is not on PATH here\. Claude Code reports a hook error each time it runs until /m);
   });
+
+  test('next to the plugin, a broken plan-mode gate is re-pointed (the plugin has none), never uninstalled', async () => {
+    const h = makeHome();
+    const gone = path.join(h.home, 'dev', 'suiko', 'bin', 'suiko.js');
+    const gate = { type: 'command', command: `${JSON.stringify(process.execPath)} ${JSON.stringify(gone)} plan-gate`, timeout: 345600 };
+    const prompt = { type: 'command', command: `${JSON.stringify(process.execPath)} ${JSON.stringify(gone)} hook prompt`, timeout: 5 };
+    fs.mkdirSync(h.p('.claude/plugins'), { recursive: true });
+    fs.writeFileSync(h.p('.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'suiko@local': [{ scope: 'user', installPath: '/x' }] } }));
+    const settings = h.p('.claude/settings.json');
+    fs.writeFileSync(settings, JSON.stringify({ hooks: { PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [gate] }] } }, null, 2));
+    const deps = { daemonStatus: async () => ({ running: false }) };
+    let r = await h.run(['doctor'], deps);
+    assert.match(r.stdout, /^ERR {3}Claude Code: a Suiko hook in ~\/\.claude\/settings\.json cannot run: it runs .*suiko\.js, which is missing\. Claude Code reports a hook error each time it runs until you replace the gate's command with `".*" ".*bin\/suiko\.js" plan-gate` \(the plugin has no plan-mode gate\), or remove the gate\.$/m);
+    assert.doesNotMatch(r.stdout, /suiko uninstall/);
+    // a broken regular hook too: uninstalling stays the fix, and it says it takes the gate with it
+    fs.writeFileSync(settings, JSON.stringify({ hooks: { PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [gate] }], UserPromptSubmit: [{ hooks: [prompt] }] } }, null, 2));
+    r = await h.run(['doctor'], deps);
+    assert.match(r.stdout, /^ERR {3}Claude Code: 2 Suiko hooks in ~\/\.claude\/settings\.json cannot run: .* until you run `suiko uninstall --only claude --apply` \(the plugin has its own hooks; this also removes the plan-mode gate, which the plugin does not have: see "Plan-mode gate" in the README to add it back\)\.$/m);
+  });
 });
 
 describe('versions and the line', () => {
