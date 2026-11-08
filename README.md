@@ -499,10 +499,10 @@ Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `
 ```text
 ~/.specreview/
   daemon.json (0600)  workspaces.json  daemon.log  config.json (optional: your own settings, see Configuration)
-  ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/
+  ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/  origins/
 ```
 
-That includes your unsent drafts, presence heartbeats, the change feed, render caches and staged edits.
+That includes your unsent drafts, presence heartbeats, the change feed, render caches and staged edits. It also holds where each plan or message came from (session id, plan file path, working directory); in `.specreview/`, plan and message docs keep only a hash of that. A `doc.json` written by 0.4.1 loses them at its next change; the version files it wrote keep theirs.
 
 - **Workspace root:** the nearest ancestor of the document that contains `.specreview/`, else the git top level, else the document's directory. `open --workspace <dir>` overrides it.
 - **Git:** the files are small, sorted JSON and plain source copies with sequential names, so they diff and merge well. Recommended `.gitattributes` (printed by `open` the first time; it does not write them):

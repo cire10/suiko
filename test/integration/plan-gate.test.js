@@ -18,6 +18,7 @@ import * as ops from '../../src/core/review/index.js';
 import { main } from '../../src/cli/main.js';
 import { memorySink } from '../../src/cli/io.js';
 import { planText } from '../../src/cli/commands/plan-gate.js';
+import { committedKey } from '../../src/core/store/snapshot.js';
 import { engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/suiko.js');
@@ -130,6 +131,26 @@ function spawnCli(argv, input) {
   return { child, done, stderr: () => stderr };
 }
 
+/**
+ * Every file below `dir` whose bytes contain `needle`.
+ * @param {string} dir
+ * @param {string} needle
+ * @returns {string[]}
+ */
+function filesContaining(dir, needle) {
+  /** @type {string[]} */
+  const hits = [];
+  const walk = (/** @type {string} */ d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return hits;
+}
+
 /** @param {() => boolean | Promise<boolean>} cond */
 async function until(cond, ms = 20000, what = 'condition') {
   const end = Date.now() + ms;
@@ -185,10 +206,11 @@ describe('plan-gate', () => {
     assert.equal(doc.kind, 'snapshot');
     assert.equal(doc.path, `plans/${doc.id}.md`);
     assert.equal(doc.id, 'plan-token-refresh');
-    assert.deepEqual(
-      { ...doc.origin, transcript: undefined },
-      { type: 'plan', key: KEY(), session: SESSION, planFilePath: planFile, cwd: ws.root, transcript: undefined },
-    );
+    // in memory the doc has its details; doc.json (committed) has only a hash of the key
+    const transcript = path.join(path.dirname(ws.root), 'claude', 'projects', 'p', `${SESSION}.jsonl`);
+    assert.deepEqual(doc.origin, { type: 'plan', key: committedKey('plan', KEY()), session: SESSION, planFilePath: planFile, cwd: ws.root, transcript });
+    const docJson = path.join(ws.root, '.specreview', 'docs', doc.id, 'doc.json');
+    assert.deepEqual(JSON.parse(fs.readFileSync(docJson, 'utf8')).origin, { type: 'plan', key: committedKey('plan', KEY()) });
     assert.match(g1.stderr(), new RegExp(`suiko: review the plan \\(plan-token-refresh v1\\) at http://127\\.0\\.0\\.1:${port}/d/[0-9a-f]+/plan-token-refresh\\?k=`));
 
     await submit(doc.id, 'changes_requested', 'Keep a 30 s grace window.', 'Close, but not yet.');
@@ -228,7 +250,7 @@ describe('plan-gate', () => {
     assert.equal(d2.id, doc.id, 'the same doc');
     const { manifest } = await ctx.store.readVersion(doc.id, 2);
     assert.equal(manifest.capturedBy, 'snapshot');
-    assert.equal(manifest.origin.key, KEY());
+    assert.deepEqual(manifest.origin, { type: 'plan', key: committedKey('plan', KEY()) });
     assert.deepEqual(manifest.hunks.map((h) => h.threads), [['t1']], 'the change is attributed to t1');
     const t1 = await ctx.store.getThread(doc.id, 't1');
     assert.deepEqual(t1?.changes.map((c) => c.version), [2]);
@@ -253,6 +275,36 @@ describe('plan-gate', () => {
     assert.equal(r3.stdout, '');
     assert.match(r3.stderr, /plan gate ended without a review/);
     assert.equal((await ctx.store.requireDoc(doc.id)).head, 2, 'identical plan: no new version');
+
+    // nothing that names this machine reached the committed store: not the session, the plan file, the transcript
+    // or the directory that stands in for the home directory here
+    const storeDir = path.join(ws.root, '.specreview');
+    for (const needle of [SESSION, planFile, path.basename(planFile), transcript, path.dirname(ws.root)]) {
+      assert.deepEqual(filesContaining(storeDir, needle), [], `no committed file contains ${needle}`);
+    }
+  });
+
+  test('a plan doc recorded by 0.4.1 (raw key and details in doc.json): the next ExitPlanMode records v2 of it', async () => {
+    const file = path.join(path.dirname(planFile), 'legacy-plan.md');
+    fs.writeFileSync(file, '# Legacy plan\n\nOld step.\n');
+    const session = 'legacy-session';
+    const key = `claude-plan:${session}:${file}`;
+    const { doc } = await ops.openSnapshot(ctx, { source: '# Legacy plan\n\nOld step.\n', origin: { type: 'plan', key, session, planFilePath: file, cwd: ws.root } });
+    // what 0.4.1 left on disk: everything in doc.json, nothing in local state
+    const docJson = path.join(ws.root, '.specreview', 'docs', doc.id, 'doc.json');
+    const legacy = { ...JSON.parse(fs.readFileSync(docJson, 'utf8')), origin: { type: 'plan', key, session, planFilePath: file, cwd: ws.root } };
+    fs.writeFileSync(docJson, JSON.stringify(legacy, null, 2));
+    fs.rmSync(ctx.store.localOriginFile(doc.id));
+
+    fs.writeFileSync(file, '# Legacy plan\n\nNew step.\n');
+    const g = gate(hookInput({ plan: '', planFilePath: file }, { session_id: session }));
+    const d2 = await gateWaiting(key, 2, g.stderr);
+    assert.equal(d2.id, doc.id, 'the same doc');
+    await submit(doc.id, 'changes_requested', 'New step.');
+    const r = await g.done;
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(JSON.parse(r.stdout).hookSpecificOutput.decision.message, new RegExp(`^Plan file: ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `, 'm'));
+    assert.deepEqual(JSON.parse(fs.readFileSync(docJson, 'utf8')).origin, { type: 'plan', key: committedKey('plan', key) }, 'doc.json no longer holds the details');
   });
 
   test('an inline plan (no plan file) gets its own doc and a feedback without a plan file', async () => {

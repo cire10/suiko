@@ -606,7 +606,9 @@ For a file, SpecReview looks for the workspace root in this order:
       locks/                              proper-lockfile dirs
 ~/.specreview/   (SPECREVIEW_HOME)
   daemon.json  (0600)   workspaces.json   daemon.log
+  ws/<wsId>/origins/<doc>.json  (0600)  a plan's or message's session id, plan file path, cwd, transcript path
 ```
+(Shipped: the runtime state lives under `SPECREVIEW_HOME/ws/<wsId>/`, BUILD_AMENDMENTS 2.1.) Snapshot origins that name this machine are never committed: doc.json and the version manifests keep `{type, key}` with the key hashed, and the details stay in `origins/`.
 The first time it runs, `open` prints the recommended `.gitattributes` lines. It does not write them.
 ```
 .specreview/assets/** binary

@@ -50,7 +50,13 @@ Everything volatile lives in `SPECREVIEW_HOME` (default `~/.specreview`):
 ~/.specreview/ws/<wsId>/cache/render/<docId>/...    render cache
 ~/.specreview/ws/<wsId>/drafts/<docId>.json         reviewer drafts
 ~/.specreview/ws/<wsId>/pending/<docId>.jsonl       tagged edits since head (apply/edit/override)
+~/.specreview/ws/<wsId>/origins/<docId>.json        a plan's or message's local origin details (0600)
 ```
+A plan or message snapshot commits only `{type, key}` with the key hashed (`claude-plan:<32 hex>`); its session id,
+plan file path, message id, cwd and transcript path go to `origins/<docId>.json` (store/snapshot.js "Local origin
+details"), and the Store merges them back into `doc.origin` when it reads the doc. doc.json files written by 0.4.1 or
+earlier (raw key, details inline) are still found by the raw key and lose the details at their next write; version
+manifests are never rewritten.
 `Store` exposes `runtimeDir(...parts)` for these.
 
 ### 2.2 Lock (no proper-lockfile)

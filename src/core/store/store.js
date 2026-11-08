@@ -6,7 +6,9 @@
 //   docs/<docId>/{doc.json, versions/NNNN.<ext>, versions/NNNN.json, threads/tN.json, reviews/rvN.json,
 //                 locks/LN.json, attachments/aN.png}
 // Volatile state lives under `<SPECREVIEW_HOME>/ws/<wsId>/` (runtimeDir): events/<docId>.jsonl,
-// waiters/<docId>/<pid>.json, locks/<docId>/ (mkdir lock), cache/, drafts/<docId>.json, pending/<docId>.jsonl.
+// waiters/<docId>/<pid>.json, locks/<docId>/ (mkdir lock), cache/, drafts/<docId>.json, pending/<docId>.jsonl,
+// origins/<docId>.json (a snapshot's local origin details: never committed, see snapshot.js "Local origin details";
+// saveDoc / writeJournal / commitVersion split them off, getDoc / listDocs merge them back).
 //
 // Concurrency: every mutating op (WP3 ops.js) wraps its work in `withDocLock(docId, fn)`. Methods that must be
 // atomic on their own (commitVersion, appendEvent) take the doc lock themselves; the lock is re-entrant within one
@@ -32,7 +34,22 @@ import { countLines, decodeText, encodeText, roundTrips, stableRead } from '../u
 import { nowIso } from '../util/time.js';
 import { pidAlive } from '../util/proc.js';
 import { createLogger } from '../util/log.js';
-import { CODE_KIND, codeEditRefusal, codePath, docKind, isCode, isVirtual, normalizeOrigin, snapshotPath, snapshotRefusal, SNAPSHOT_KIND } from './snapshot.js';
+import {
+  CODE_KIND,
+  codeEditRefusal,
+  codePath,
+  committedKey,
+  docKind,
+  isCode,
+  isVirtual,
+  localOriginFields,
+  normalizeOrigin,
+  originHasKey,
+  snapshotPath,
+  snapshotRefusal,
+  splitOrigin,
+  SNAPSHOT_KIND,
+} from './snapshot.js';
 import { DOC_KINDS } from '../../shared/protocol.js';
 
 const log = createLogger('store');
@@ -222,6 +239,17 @@ export class Store {
   }
 
   /**
+   * Local origin details of a snapshot doc (see snapshot.js): `<SPECREVIEW_HOME>/ws/<wsId>/origins/<docId>.json`.
+   * Not created here (reads must not create directories).
+   * @param {string} docId
+   * @returns {string}
+   */
+  localOriginFile(docId) {
+    assertDocId(docId);
+    return path.join(homeDir(), 'ws', this.wsId, 'origins', `${docId}.json`);
+  }
+
+  /**
    * Absolute path of a doc's working copy. RefusedError when doc.path (e.g. a hand-edited or malicious doc.json)
    * would resolve outside the workspace root, and for a snapshot or code doc (its path is synthetic: there is no
    * file).
@@ -307,7 +335,7 @@ export class Store {
           warnOnce(`${dir}/${name}`, `skipping doc ${name}: ${newerKindMessage(name, kind)}`);
           continue;
         }
-        docs.push(withDirId(doc, name));
+        docs.push(await this.#withLocalOrigin(withDirId(doc, name)));
       } catch (err) {
         log.warn(`skipping doc ${name}`, err);
       }
@@ -326,7 +354,49 @@ export class Store {
     if (!doc) return null;
     const kind = unknownDocKind(doc);
     if (kind) throw new RefusedError(newerKindMessage(docId, kind), { details: { doc: docId, kind } });
-    return withDirId(doc, docId);
+    return this.#withLocalOrigin(withDirId(doc, docId));
+  }
+
+  /**
+   * Merges a snapshot's local origin details (localOriginFile) into `doc.origin`; only the fields its origin type
+   * keeps locally are taken, and they win over what an older doc.json still holds. An unreadable file is ignored
+   * (the doc works without them: NEXT lines then name no plan file).
+   * @param {Doc} doc
+   * @returns {Promise<Doc>}
+   */
+  async #withLocalOrigin(doc) {
+    const d = /** @type {any} */ (doc);
+    if (!isVirtual(d) || !d.origin || typeof d.origin !== 'object') return doc;
+    const fields = localOriginFields(d.origin.type);
+    if (!fields.length) return doc;
+    let local = null;
+    const file = this.localOriginFile(d.id);
+    try {
+      local = await readJson(file);
+    } catch (err) {
+      warnOnce(file, `ignoring unreadable local origin details of ${d.id}: ${/** @type {Error} */ (err).message}`);
+    }
+    if (!local || typeof local !== 'object' || Array.isArray(local)) return doc;
+    /** @type {Record<string, unknown>} */
+    const picked = {};
+    for (const f of fields) if (local[f] !== undefined && local[f] !== null) picked[f] = local[f];
+    if (Object.keys(picked).length) d.origin = { ...d.origin, ...picked };
+    return doc;
+  }
+
+  /**
+   * The doc as it is written to doc.json (and the redo journal): its origin without the local details, with the
+   * committed key (snapshot.js splitOrigin). The local details are written to localOriginFile first, so a doc.json
+   * written by an older Suiko keeps its plan file when this write drops it.
+   * @param {Doc} doc
+   * @returns {Promise<Doc>}
+   */
+  async #committedDoc(doc) {
+    const d = /** @type {any} */ (doc);
+    if (!isVirtual(d) || !d.origin || typeof d.origin !== 'object') return doc;
+    const { committed, local } = splitOrigin(d.origin);
+    if (local) await writeJson(this.localOriginFile(d.id), { schema: 1, ...local }, { mode: 0o600 });
+    return /** @type {Doc} */ ({ ...d, origin: committed });
   }
 
   /**
@@ -439,13 +509,14 @@ export class Store {
   }
 
   /**
-   * The snapshot or code doc with this origin key, or null (see snapshot.js).
+   * The snapshot or code doc with this origin key, or null (see snapshot.js). The raw key and its committed (hashed)
+   * form both match, so docs recorded by older versions (raw key in doc.json) are found too.
    * @param {string} key
    * @returns {Promise<Doc | null>}
    */
   async findDocByOrigin(key) {
     if (typeof key !== 'string' || !key) return null;
-    return (await this.listDocs()).find((d) => isVirtual(d) && /** @type {any} */ (d).origin?.key === key) ?? null;
+    return (await this.listDocs()).find((d) => isVirtual(d) && originHasKey(/** @type {any} */ (d).origin, key)) ?? null;
   }
 
   /**
@@ -497,7 +568,8 @@ export class Store {
         schema: 1,
         id,
         kind,
-        origin: o,
+        // in memory as getDoc returns it: the committed key, the local details merged in (saveDoc splits them off)
+        origin: { ...o, key: committedKey(o.type, o.key) },
         ...(isCodeDoc ? { code: { ...code }, ephemeral: true } : {}),
         path: isCodeDoc ? codePath(id) : snapshotPath(o.type, id, /** @type {'markdown' | 'html'} */ (format)),
         format,
@@ -517,10 +589,12 @@ export class Store {
   }
 
   /**
+   * Writes doc.json. A snapshot's local origin details go to localOriginFile instead (see #committedDoc).
    * @param {Doc} doc
    */
   async saveDoc(doc) {
-    await writeJson(path.join(this.docDir(doc.id), 'doc.json'), { schema: 1, ...doc });
+    const out = await this.#committedDoc(doc);
+    await writeJson(path.join(this.docDir(doc.id), 'doc.json'), { schema: 1, ...out });
   }
 
   /**
@@ -662,6 +736,8 @@ export class Store {
         createdAt: manifest.createdAt ?? nowIso(),
         assets: sortKeys(assets),
       });
+      // a snapshot's origin as it may be committed: no local details, the committed key (snapshot.js splitOrigin)
+      if (final.origin) final.origin = splitOrigin(final.origin).committed;
       // (2b) the caller's pre-commit work (e.g. the redo journal of everything that changes with this version)
       if (beforeCommit) await beforeCommit(final);
       await writeJson(path.join(dir, `${pad(v)}.json`), final);
@@ -917,7 +993,9 @@ export class Store {
    */
   async writeJournal(docId, journal) {
     if (!journal || (journal.version == null) === (journal.review == null)) throw new UsageError('writeJournal: exactly one of version / review is required');
-    await writeJson(this.journalFile(docId), { schema: 1, ...journal, createdAt: nowIso() });
+    // the journal sits in the doc's (committed) directory while the commit is in flight: the doc as doc.json has it
+    const doc = journal.doc ? await this.#committedDoc(journal.doc) : journal.doc;
+    await writeJson(this.journalFile(docId), { schema: 1, ...journal, ...(journal.doc !== undefined ? { doc } : {}), createdAt: nowIso() });
   }
 
   /**

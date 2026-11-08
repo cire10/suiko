@@ -191,7 +191,7 @@ Origin keys:
 
 | type | key | Owner |
 |---|---|---|
-| plan | `claude-plan:<session>:<planFilePath\|inline>` (shipped) | shipped |
+| plan | `claude-plan:<session>:<planFilePath\|inline>` (shipped; committed as `claude-plan:<32 hex>`, details in local state) | shipped |
 | message | `claude-msg:<session>:<message.id>` (shipped) | shipped |
 | stdin | `stdin:<name>` with `--name`, otherwise `null` (shipped) | shipped |
 | url | `url:<normalized url>`. Normalisation lowercases the scheme and host, drops default ports and the fragment, and keeps the query. | WP2 |

@@ -12,7 +12,7 @@ import path from 'node:path';
 import * as ops from '../../src/core/review/index.js';
 import { formatPacket, formatPlanFeedback } from '../../src/core/review/packet.js';
 import { NotFoundError, RefusedError, UsageError } from '../../src/core/store/errors.js';
-import { docRefFor, isScratchRoot, normalizeOrigin, scratchBase, snapshotPath } from '../../src/core/store/snapshot.js';
+import { committedKey, docRefFor, isScratchRoot, normalizeOrigin, planFileOf, scratchBase, snapshotPath, splitOrigin } from '../../src/core/store/snapshot.js';
 import { engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
 
 /** @type {Awaited<ReturnType<typeof makeWorkspace>>} */
@@ -53,12 +53,14 @@ describe('snapshot store', () => {
     assert.equal(created, true);
     assert.equal(doc.id, 'my-plan');
     assert.equal(doc.kind, 'snapshot');
-    assert.deepEqual(doc.origin, { type: 'plan', key: 'claude-plan:s1:inline', session: 's1' });
+    const KEY = committedKey('plan', 'claude-plan:s1:inline');
+    assert.match(String(KEY), /^claude-plan:[0-9a-f]{32}$/);
+    assert.deepEqual(doc.origin, { type: 'plan', key: KEY, session: 's1' });
     assert.equal(doc.path, 'plans/my-plan.md');
     assert.equal(doc.head, 0);
     const onDisk = JSON.parse(fs.readFileSync(path.join(ws.root, '.specreview', 'docs', 'my-plan', 'doc.json'), 'utf8'));
     assert.equal(onDisk.kind, 'snapshot');
-    assert.equal(onDisk.origin.key, 'claude-plan:s1:inline');
+    assert.deepEqual(onDisk.origin, { type: 'plan', key: KEY }, 'the session is a local detail');
     assert.equal(fs.existsSync(path.join(ws.root, 'plans')), false, 'nothing is written at the synthetic path');
 
     assert.equal(snapshotPath('message', 'x', 'markdown'), 'messages/x.md');
@@ -138,7 +140,8 @@ describe('snapshot ops', () => {
     assert.equal(first.doc.id, 'plan-token-refresh');
     assert.equal(first.version.v, 1);
     assert.equal(first.version.capturedBy, 'open');
-    assert.deepEqual(first.version.origin, origin);
+    assert.deepEqual(first.version.origin, { type: 'plan', key: committedKey('plan', origin.key) }, 'the committed form: no session, the key hashed');
+    assert.equal(first.doc.origin.session, 's');
     const again = await ops.openSnapshot(ctx, { source: 'other text', origin });
     assert.equal(again.created, false);
     assert.equal(again.doc.head, 1, 'openSnapshot never records a second version');
@@ -163,7 +166,8 @@ describe('snapshot ops', () => {
     assert.equal(r.respondsTo, 'rv1');
     const { manifest } = await ctx.store.readVersion(doc.id, 2);
     assert.equal(manifest.capturedBy, 'snapshot');
-    assert.equal(manifest.origin.messageId, 'm2');
+    // the version's origin as it may be committed: the message id is a local detail
+    assert.deepEqual(manifest.origin, { type: 'message', key: committedKey('message', 'claude-msg:s:m1') });
     assert.deepEqual(manifest.hunks.map((h) => h.threads), [['t1']]);
     const t1 = await ctx.store.getThread(doc.id, 't1');
     assert.deepEqual(t1?.changes.map((c) => [c.version, c.hunk]), [[2, 'h1']]);
@@ -382,5 +386,148 @@ describe('wait minVersion (plan gate)', () => {
     assert.equal(r.status, 'delivered');
     assert.deepEqual(written[0].reviews.map((x) => x.id), ['rv1', 'rv2'], 'the older review comes along');
     assert.equal(written[0].verdict, 'changes_requested');
+  });
+});
+
+/**
+ * Every file below `dir` whose bytes contain `needle`.
+ * @param {string} dir
+ * @param {string} needle
+ * @returns {string[]}
+ */
+function filesContaining(dir, needle) {
+  /** @type {string[]} */
+  const hits = [];
+  const walk = (/** @type {string} */ d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return hits;
+}
+
+describe('local origin details (never in committed files)', () => {
+  const SESSION = 'f00dfeed-0000-4000-8000-00000000abcd';
+  /** A plan origin as the plan gate builds it, on a machine whose user is "jdoe". */
+  function planOrigin() {
+    const home = path.join(path.dirname(ws.root), 'Users', 'jdoe');
+    const planFile = path.join(home, '.claude', 'plans', 'gentle-otter.md');
+    return {
+      type: 'plan',
+      key: `claude-plan:${SESSION}:${planFile}`,
+      session: SESSION,
+      planFilePath: planFile,
+      cwd: path.join(home, 'proj'),
+      transcript: path.join(home, '.claude', 'projects', '-Users-jdoe-proj', `${SESSION}.jsonl`),
+    };
+  }
+
+  test('a plan: the session, plan file, cwd and transcript stay in local state; only a hash of the key is committed', async () => {
+    const ctx = await engineCtx(ws.root);
+    const origin = planOrigin();
+    const first = await ops.takeSnapshot(ctx, { source: PLAN, origin, autoAddress: true });
+    await reviewOn(ctx, first.doc.id, 'Keep a 30 s grace window.');
+    const second = await ops.takeSnapshot(ctx, { source: PLAN.replace('30 s', '60 s'), origin, autoAddress: true });
+    assert.equal(second.doc.id, first.doc.id, 'the same plan file again: the same doc');
+    assert.equal(second.doc.head, 2);
+
+    const KEY = committedKey('plan', origin.key);
+    const { type: _t, key: _k, ...local } = origin;
+    const doc = await ctx.store.requireDoc(first.doc.id);
+    assert.deepEqual(doc.origin, { type: 'plan', key: KEY, ...local }, 'in memory the doc has its details');
+    assert.equal(planFileOf(doc), origin.planFilePath);
+    assert.equal(planFileOf((await ctx.store.listDocs()).find((d) => d.id === doc.id)), origin.planFilePath);
+    assert.equal((await ctx.store.findDocByOrigin(origin.key))?.id, doc.id, 'found by the raw key');
+    assert.equal((await ctx.store.findDocByOrigin(String(KEY)))?.id, doc.id, 'and by the committed key');
+
+    const storeDir = path.join(ws.root, '.specreview');
+    for (const needle of [SESSION, 'jdoe', 'gentle-otter', '.claude']) {
+      assert.deepEqual(filesContaining(storeDir, needle), [], `no committed file contains ${needle}`);
+    }
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(storeDir, 'docs', doc.id, 'doc.json'), 'utf8')).origin, { type: 'plan', key: KEY });
+    for (const v of [1, 2]) assert.deepEqual((await ctx.store.readVersion(doc.id, v)).manifest.origin, { type: 'plan', key: KEY });
+
+    const localFile = ctx.store.localOriginFile(doc.id);
+    assert.equal(localFile, path.join(ws.home, 'ws', ctx.store.wsId, 'origins', `${doc.id}.json`));
+    assert.equal(fs.statSync(localFile).mode & 0o777, 0o600);
+    assert.deepEqual(JSON.parse(fs.readFileSync(localFile, 'utf8')), { schema: 1, ...local });
+
+    const packet = await ops.feedback(ctx, doc.id, { peek: true });
+    assert.equal(packet.file, origin.planFilePath, 'packets still name the plan file');
+    assert.match(String(packet.next), /gentle-otter\.md/);
+  });
+
+  test('a plan doc recorded by 0.4.1 (raw key and details in doc.json) keeps working; its next write cleans doc.json', async () => {
+    const ctx = await engineCtx(ws.root);
+    const origin = planOrigin();
+    const { doc } = await ops.openSnapshot(ctx, { source: PLAN, origin });
+    // what 0.4.1 wrote: the raw key and every detail in doc.json and in the manifest, no local state
+    const dir = path.join(ws.root, '.specreview', 'docs', doc.id);
+    const rewrite = (/** @type {string} */ file) => {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      fs.writeFileSync(file, JSON.stringify({ ...j, origin }, null, 2));
+    };
+    rewrite(path.join(dir, 'doc.json'));
+    rewrite(path.join(dir, 'versions', '0001.json'));
+    fs.rmSync(ctx.store.localOriginFile(doc.id));
+
+    const old = await ctx.store.findDocByOrigin(origin.key);
+    assert.equal(old?.id, doc.id, 'found by its raw key');
+    assert.equal(planFileOf(old), origin.planFilePath, 'its plan file comes from doc.json');
+    assert.equal((await ctx.store.findDocByOrigin(String(committedKey('plan', origin.key))))?.id, doc.id);
+
+    // the next ExitPlanMode of the same plan: v2 of the same doc
+    const again = await ops.takeSnapshot(ctx, { source: PLAN.replace('30 s', '60 s'), origin, autoAddress: true });
+    assert.equal(again.doc.id, doc.id);
+    assert.equal(again.doc.head, 2);
+    const committed = { type: 'plan', key: committedKey('plan', origin.key) };
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'doc.json'), 'utf8')).origin, committed, 'doc.json was rewritten without the details');
+    assert.deepEqual((await ctx.store.readVersion(doc.id, 2)).manifest.origin, committed);
+    assert.equal(planFileOf(await ctx.store.requireDoc(doc.id)), origin.planFilePath, 'the details moved to local state');
+    assert.equal(JSON.parse(fs.readFileSync(ctx.store.localOriginFile(doc.id), 'utf8')).planFilePath, origin.planFilePath);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'versions', '0001.json'), 'utf8')).origin.planFilePath, origin.planFilePath, 'old manifests are history: never rewritten');
+  });
+
+  test('any write of an old doc.json moves its details to local state; the redo journal never holds them', async () => {
+    const ctx = await engineCtx(ws.root);
+    const origin = planOrigin();
+    const { doc } = await ops.openSnapshot(ctx, { source: PLAN, origin });
+    const docJson = path.join(ws.root, '.specreview', 'docs', doc.id, 'doc.json');
+    fs.writeFileSync(docJson, JSON.stringify({ ...JSON.parse(fs.readFileSync(docJson, 'utf8')), origin }, null, 2));
+    fs.rmSync(ctx.store.localOriginFile(doc.id));
+
+    await ctx.store.writeJournal(doc.id, { review: 'rv9', doc: await ctx.store.requireDoc(doc.id) });
+    const journal = JSON.parse(fs.readFileSync(ctx.store.journalFile(doc.id), 'utf8'));
+    assert.deepEqual(journal.doc.origin, { type: 'plan', key: committedKey('plan', origin.key) });
+    assert.equal(planFileOf(await ctx.store.requireDoc(doc.id)), origin.planFilePath, 'kept in local state before the journal dropped it');
+    fs.rmSync(ctx.store.journalFile(doc.id));
+
+    // a review (state, counters: saveDoc) of an old doc
+    fs.writeFileSync(docJson, JSON.stringify({ ...JSON.parse(fs.readFileSync(docJson, 'utf8')), origin }, null, 2));
+    fs.rmSync(ctx.store.localOriginFile(doc.id));
+    await reviewOn(ctx, doc.id, 'Ship behind a flag.');
+    assert.deepEqual(JSON.parse(fs.readFileSync(docJson, 'utf8')).origin, { type: 'plan', key: committedKey('plan', origin.key) });
+    assert.equal(planFileOf(await ctx.store.requireDoc(doc.id)), origin.planFilePath);
+  });
+
+  test('committedKey hashes plan and message keys only: stable, idempotent, distinct', () => {
+    const raw = 'claude-plan:s:/Users/jdoe/.claude/plans/p.md';
+    const k = String(committedKey('plan', raw));
+    assert.match(k, /^claude-plan:[0-9a-f]{32}$/);
+    assert.equal(committedKey('plan', raw), k);
+    assert.equal(committedKey('plan', k), k, 'a committed key stays as it is');
+    assert.notEqual(committedKey('plan', 'claude-plan:s:inline'), k);
+    assert.match(String(committedKey('message', 'claude-msg:s:m1')), /^claude-msg:[0-9a-f]{32}$/);
+    assert.equal(committedKey('stdin', 'stdin:notes'), 'stdin:notes');
+    assert.equal(committedKey('url', 'url:https://example.com/'), 'url:https://example.com/');
+    assert.equal(committedKey('plan', null), null);
+    assert.deepEqual(splitOrigin({ type: 'stdin', key: 'stdin:x', name: 'x' }), { committed: { type: 'stdin', key: 'stdin:x', name: 'x' }, local: null });
+    assert.deepEqual(splitOrigin({ type: 'message', key: 'claude-msg:s:m1', session: 's', messageId: 'm1', transcript: '/t.jsonl' }), {
+      committed: { type: 'message', key: committedKey('message', 'claude-msg:s:m1') },
+      local: { session: 's', messageId: 'm1', transcript: '/t.jsonl' },
+    });
   });
 });
