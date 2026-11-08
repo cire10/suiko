@@ -67,7 +67,7 @@ Per thread, **change only what it asks for**:
 
 **Order:** do all Edit-tool edits first, then `suiko apply <doc> t3 t5` for the suggestions in a file you edit directly (`apply` rewrites the file, so re-Read before any later Edit). If Edit says the file changed since it was read, re-Read and retry. If `apply` reports a conflict, treat that thread as a normal comment.
 
-**Summary only:** a packet with a `Reviewer summary:` and no thread to act on (`NEXT: act on the reviewer summary …`) is a request too: change what the summary asks for, then record it as `NEXT` says (`suiko revise <doc> -m <what changed>`).
+**Summary only:** a packet with a `Reviewer summary:` and no thread to act on (`NEXT: act on the reviewer summary …`) is a request too: change what the summary asks for, then record it as `NEXT` says: `suiko revise <doc> --replies -` with the version `summary` and an `other` entry (`at`, `why`) for each change, since no thread explains it.
 
 **Never:**
 - Rewrite, restyle or reformat parts no thread asked about. (A rebuild that changes only what the threads asked for is fine.)

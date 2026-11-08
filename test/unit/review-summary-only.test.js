@@ -1,7 +1,7 @@
 // @ts-check
 // A review whose only feedback is its summary (no thread, not an approval): the summary is the request, so the NEXT
 // line says how to record the change it asks for (the steps of a round, with `-m <what changed>` instead of thread
-// replies) instead of "nothing to act on". Per kind: a file doc, a code review, a text snapshot, a page built from
+// replies; for a file doc, replies JSON with an `other` entry) instead of "nothing to act on". Per kind: a file doc, a code review, a text snapshot, a page built from
 // sources, a public page. An approval with a summary, and a later packet without a new review, are unchanged.
 // (Release check of 0.4.0, 2026-11-08: a comment review with only "Please tighten the wording..." said NEXT: nothing
 // to act on.)
@@ -10,6 +10,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as ops from '../../src/core/review/index.js';
 import { codeNextStep } from '../../src/core/code/packet.js';
+import { SUMMARY_REPLIES } from '../../src/core/review/packet-data.js';
 import { setClock } from '../../src/core/util/time.js';
 import { editFile, engineCtx, makeWorkspace } from '../helpers/engine.js';
 
@@ -47,8 +48,8 @@ test('a file doc: the summary is the request; following NEXT records the change,
   const w = await wait(ctx, DOC);
   assert.match(w.text, new RegExp(`^Reviewer summary: ${ASK}$`, 'm'));
   assert.match(w.text, /^0 threads need action/m);
-  assert.equal(w.packets[0].next, 'act on the reviewer summary (no thread asks for anything): edits it asks for, if any -> suiko revise kitchen-sink -m <what changed> -> suiko wait kitchen-sink (background)');
-  assert.match(w.text, /^NEXT: act on the reviewer summary \(no thread asks for anything\): edits it asks for, if any -> suiko revise kitchen-sink -m <what changed> -> suiko wait kitchen-sink \(background\)$/m);
+  assert.equal(w.packets[0].next, `act on the reviewer summary (no thread asks for anything): edits it asks for, if any -> suiko revise kitchen-sink --replies - ${SUMMARY_REPLIES} -> suiko wait kitchen-sink (background)`);
+  assert.ok(w.text.split('\n').includes(`NEXT: ${w.packets[0].next}`), w.text);
   assert.doesNotMatch(w.text, /nothing to act on|JSON, one entry per thread/);
   // follow it: edit, revise with a summary (no replies needed)
   editFile(ws.file('docs/kitchen-sink.md'), 'Prototype the issuer.', 'Prototype the issuer first.');
@@ -61,6 +62,48 @@ test('a file doc: the summary is the request; following NEXT records the change,
   // "Needs changes" with only a summary is the same request
   await ops.submitReview(ctx, DOC, { verdict: 'changes_requested', body: 'Shorter, please.' });
   assert.match((await wait(ctx, DOC)).packets[0].next, /^act on the reviewer summary \(no thread asks for anything\): /);
+});
+
+test('a cut the summary asks for: -m alone is refused (nothing explains it); NEXT\'s `other` entry records it', async () => {
+  const ctx = await engineCtx(ws.root);
+  await ops.openDoc(ctx, { path: 'docs/kitchen-sink.md' });
+  await ops.submitReview(ctx, DOC, { verdict: 'comment', body: 'Drop the milestones list; it is out of date.' });
+  assert.match((await wait(ctx, DOC)).packets[0].next, /--replies - \(JSON: \{"summary": "<what changed>", "other": \[/);
+  editFile(ws.file('docs/kitchen-sink.md'), '1. Prototype the issuer.\n2. Ship rotation behind a flag.\n3. Remove the legacy session store.\n', '');
+  const bare = await ops.revise(ctx, DOC, { summary: 'dropped the milestones' });
+  assert.equal(bare.refused, true, 'what `-m` records: no thread and no other entry explain the cut');
+  const r = await ops.revise(ctx, DOC, { summary: 'dropped the milestones', other: [{ at: 'del:h1', why: 'the reviewer summary asked for it' }] });
+  assert.equal(r.refused, false);
+  assert.equal(r.version, 2);
+});
+
+test('a summary-only review sent as batched is stored and delivered as act-now (nothing to plan)', async () => {
+  const ctx = await engineCtx(ws.root);
+  await ops.openDoc(ctx, { path: 'docs/kitchen-sink.md' });
+  const rv = await ops.submitReview(ctx, DOC, { verdict: 'comment', body: ASK, edits: 'batch' });
+  assert.equal(rv.edits, 'now', 'no thread handed over: never batched');
+  const w = await wait(ctx, DOC);
+  assert.equal(w.packets[0].edits, 'now');
+  assert.doesNotMatch(w.text, /^EDITS:/m);
+  assert.match(w.packets[0].next, /^act on the reviewer summary \(no thread asks for anything\): edits it asks for, if any -> suiko revise kitchen-sink --replies - /);
+});
+
+test('a delivered summary-only request survives re-reads until a version answers it', async () => {
+  const ctx = await engineCtx(ws.root);
+  await ops.openDoc(ctx, { path: 'docs/kitchen-sink.md' });
+  await ops.submitReview(ctx, DOC, { verdict: 'comment', body: ASK });
+  await wait(ctx, DOC);
+  let text = '';
+  const peek = await ops.feedback(ctx, DOC, { peek: true, write: (t) => { text = t; } });
+  assert.match(text, new RegExp(`^Reviewer summary: ${ASK}$`, 'm'));
+  assert.match(peek.next, /^act on the reviewer summary \(no thread asks for anything\): /);
+  const again = await ops.feedback(ctx, DOC, {});
+  assert.deepEqual([again.reviews.length, again.counts.undelivered], [1, 0], 'shown again, not delivered again');
+  assert.match(again.next, /^act on the reviewer summary /);
+  editFile(ws.file('docs/kitchen-sink.md'), 'Prototype the issuer.', 'Prototype the issuer first.');
+  assert.equal((await ops.revise(ctx, DOC, { summary: 'tightened the wording' })).refused, false);
+  const after = await ops.feedback(ctx, DOC, { peek: true });
+  assert.deepEqual([after.reviews.length, after.next], [0, 'nothing to act on; suiko wait kitchen-sink (background)']);
 });
 
 test('an approval with a summary keeps its usual NEXT; a review with neither threads nor a summary is never sent', async () => {

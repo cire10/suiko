@@ -393,7 +393,7 @@ Every edit to a long document costs Claude context: it reads the part again, cha
 - **Right away:** Claude edits the document for each comment you send.
 - **Batched:** always plan first; you apply the planned changes together.
 
-Batched, Claude still answers every comment right away: a question gets its answer, and a change it agrees to make becomes **Will change**, with exactly what it will change. Nothing in the document changes yet. When you are ready, **Apply** them: Claude makes every planned change in one pass and records one version, and those threads come back to you to check. Apply is in four places, and all of them apply the same planned changes:
+Batched, Claude still answers every comment right away: a question gets its answer, and a change it agrees to make becomes **Will change**, with exactly what it will change. Nothing in the document changes yet. (A review with only a summary, and no comments, is never batched: there is nothing to plan, so Claude acts on it right away.) When you are ready, **Apply** them: Claude makes every planned change in one pass and records one version, and those threads come back to you to check. Apply is in four places, and all of them apply the same planned changes:
 
 - **Apply 2** under **Planned changes** in the Claude filter (or **Apply this now** in a planned card's **⋯**, for that one);
 - the turn pill: **Apply 2 planned** when nothing else is left for you (its popover has it also while it is your turn);

@@ -25,7 +25,8 @@
 // reviewing the version, so its changes stay new until a review from the Send dialog, an approval, or the reviewer
 // accepting them (acceptRevisions). An approval is never instant.
 // Batched edits ("talk now, edit later"):
-// - `edits` ('now' | 'batch', protocol.js REVIEW_EDITS; default 'now', always 'now' on an approval) is stored on
+// - `edits` ('now' | 'batch', protocol.js REVIEW_EDITS; default 'now', always 'now' on an approval and on a review
+//   that hands over no thread: a summary alone has nothing to plan and no APPLY round to wait for) is stored on
 //   the review; a packet that delivers a 'batch' review asks the agent to answer every thread now and to reply
 //   `planned` for a change it agrees to make, instead of editing.
 // - `apply` (thread ids) applies planned changes: each must be `planned` (else ConflictError, HTTP 409; unknown:
@@ -228,6 +229,8 @@ export async function submitReview(ctx, ref, input = {}) {
 
     for (const t of created) await ctx.store.saveThread(doc.id, t);
 
+    // nothing handed over (only a summary, or only resolutions): nothing to plan, so the summary is acted on now
+    const handsOver = created.length + replies.length + reopened.length + apply.length > 0;
     /** @type {Review} */
     const review = {
       schema: 1,
@@ -237,7 +240,7 @@ export async function submitReview(ctx, ref, input = {}) {
       verdict,
       body,
       markFinal,
-      edits,
+      edits: handsOver ? edits : 'now',
       ...(instant ? { instant: true } : {}),
       newThreads: created.map((t) => t.id),
       replies,

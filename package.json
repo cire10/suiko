@@ -1,6 +1,6 @@
 {
   "name": "@cire10/suiko",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Iterative, commentable, versioned review loop for AI-written HTML and Markdown documents",
   "keywords": [
     "review",
@@ -36,6 +36,7 @@
     "docs/agent-protocol.md",
     "docs/design.md",
     "docs/BUILD_AMENDMENTS.md",
+    "docs/development.md",
     "docs/img"
   ],
   "scripts": {

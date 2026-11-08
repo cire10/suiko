@@ -34,7 +34,6 @@ Select text and press `c` (or use the toolbar above the selection) to comment. T
 - [Security model](#security-model)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
-- [Development](#development)
 - [Documentation](#documentation)
 
 ## Why
@@ -231,40 +230,9 @@ suiko feedback report                          # after you send your comments: p
 
 ## Keyboard shortcuts
 
-Press `Cmd+/` (or `?`) in the UI to see this list. On Windows and Linux, use `Ctrl` where it says `Cmd`. The two comment keys follow **Send comments** in Settings: the first key is for Right away (the default), the one in brackets for When I click Send.
+Press `Cmd+/` (or `?`) in the UI to see every shortcut. On Windows and Linux, use `Ctrl` where it says `Cmd`. The ones you will use most: select text and press `c` to comment (`s` suggests, `q` asks a question), `b` snips an area, `j` and `k` step through the threads, `x` marks the focused thread done, `f` opens the Send dialog (a verdict, or Approve), and `Cmd+K` opens the command palette. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) lists them all and says which keys act only while the focus is in the Suiko UI, so that scripts in a reviewed document cannot trigger them.
 
-| | Key | Does |
-|---|---|---|
-| **Comment** | `c` `s` `q` `a` | Comment, suggest, question, or mark agreed on the selected text |
-| | `b` | Snip an area of the document: drag a box over text, images or diagrams, then comment (Esc cancels) |
-| | `Shift+B` | Snip anywhere on your screen (macOS picker), then comment on the screenshot |
-| | `e` | Pick an image, diagram, table or code block ([ ] parent / child, Shift-drag a region, Esc exits) |
-| | `Cmd+Shift+Enter` (`Cmd+Enter`) | Save the comment as a draft / Add to review (in the composer) |
-| | `Cmd+Enter` (`Cmd+Shift+Enter`) | Send the comment now, on its own (in the composer) |
-| | `Cmd+B` `Cmd+Shift+8` `Cmd+Shift+7` | Bold / bulleted list / numbered list (while writing) |
-| **Review** | `f` `Cmd+Shift+Enter` | Send dialog: your drafts and a verdict, or Approve (the second key while no comment is open) |
-| | `r` | Reply to the focused thread |
-| | `x` | Mark the focused thread done (Looks good / Done) |
-| | `o` | Reopen the focused thread |
-| | `y` | Agree when Claude didn't change it |
-| | `Shift+X` | Accept all: every thread Claude changed or answered (Undo in the toast) |
-| | `v` | Show your turn (what waits for you) |
-| **Navigate** | `j` `k` | Next / previous thread |
-| | `n` `p` | Next / previous change |
-| | `0` `1` `2` `3` `4` | Read / Review / Changes / Source / History |
-| | `[` `]` | Previous / next version |
-| | `d` | Toggle the base: your last review / previous version |
-| **View** | `h` | Hide all annotations (clean read) |
-| | `\` | Toggle the thread panel |
-| | `t` | Cycle theme (system, light, dark) |
-| **App** | `Cmd+K` | Command palette: run anything by name |
-| | `Cmd+,` | Settings |
-| | `Cmd+/` `?` | Keyboard shortcuts (this list) |
-| | `Esc` | Close or cancel |
-
-Keys typed in the document reach Suiko too, unless the document has keyboard shortcuts of its own: then it keeps its single-letter keys (Suiko says so once), and the tool dock and "select text, then `c`" still work. Keys that mark threads done or reopen them (`x`, `o`, `y`, `Shift+X`) and the keys that send or save a comment act only when focus is in the Suiko UI, so scripts in a reviewed document cannot trigger them. `Cmd+K`, `Cmd+,` and `Cmd+/` work everywhere, even while you type a comment (it is kept). On a Mac, `Ctrl+K`, `Ctrl+,` and `Ctrl+/` work too, because Safari and the Claude desktop app may keep `Cmd+,` or `Cmd+K` for themselves. The [reviewer guide](docs/user-guide.md#keyboard-shortcuts) has the details.
-
-**Command palette** (`Cmd+K`, or the search icon in the top bar): type a few letters of what you want and press `Enter`. It lists every action above, plus some that have no key: go to a thread, section or version; compare two versions, inline or side by side; show the threads with Claude, done or all; send with a verdict; apply planned changes; accept all revisions; copy the review link or the prompt for Claude; open another document; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
+**Command palette** (`Cmd+K`, or the search icon in the top bar): type a few letters of what you want and press `Enter`. It lists every action that has a key, plus some that have none: go to a thread, section or version; compare two versions, inline or side by side; show the threads with Claude, done or all; send with a verdict; apply planned changes; accept all revisions; copy the review link or the prompt for Claude; open another document; close the session; set the theme; turn single-letter shortcuts on or off. See [Command palette](docs/user-guide.md#command-palette).
 
 **Settings** (`Cmd+,`, or **⋯** in the top bar): General (theme, single-letter shortcuts), Reading (what a document opens in, what happens when Claude records a new version, the outline rail, whether the thread panel starts open), Sending (each comment right away, the default, or when you click Send; Ask before sending; what the Send dialog starts on) and Claude & context (**Doc edits**: Auto, Right away or Batched). See [Settings](docs/user-guide.md#settings).
 
@@ -646,13 +614,6 @@ The access token appears in the browser's address bar; it is not sent as a refer
 
 **Can the agent answer with a picture?** Yes. On any thread it can attach an image or a small self-contained HTML file (a chart, a mockup), you iterate on it there, and **Use in doc** asks the agent to put it into the document at that place.
 
-## Development
-
-- Plain Node.js ESM with JSDoc types and `// @ts-check`; no build step. The UI is Preact + htm, loaded from vendored files.
-- Layout: `bin/suiko.js` (CLI entry), `src/cli` and `src/mcp` (agent surfaces), `src/core` (store, render, text, diff, anchoring, review operations), `src/daemon` (local server), `src/guest` (script injected into documents), `src/ui` (review UI), `integrations/` (Claude Code plugin and AGENTS.md snippet).
-- Tests: `npm test` (unit and integration, `node --test`), `npm run test:guest`, `npm run test:ui` (UI model tests, then Playwright e2e with your system Chrome; `npm run e2e` runs only the Playwright part). Tests use a temporary `SPECREVIEW_HOME` and never the default ports. Screen-snip tests set `SPECREVIEW_SCREENCAPTURE` to a fake capture command, so they never open the real picker.
-- Validate the plugin: `claude plugin validate .` and `claude plugin validate ./integrations/claude-code`.
-
 ## Documentation
 
 - [Reviewer guide](docs/user-guide.md): the screen, commenting and snipping, sending, whose turn it is, threads, the agent's pictures and mockups, batched edits, new versions and what changed, locks, approving, keyboard shortcuts, the command palette and settings.
@@ -660,6 +621,7 @@ The access token appears in the browser's address bar; it is not sent as a refer
 - [Claude Code skill](integrations/claude-code/skills/spec-review/SKILL.md) and its [reference](integrations/claude-code/skills/spec-review/reference.md).
 - [AGENTS.md snippet](integrations/agents-md/AGENTS.snippet.md) for other agents.
 - [Design](docs/design.md) and [build amendments](docs/BUILD_AMENDMENTS.md).
+- [Developing Suiko](docs/development.md): the code layout, the tests and validating the plugin.
 
 ## License
 
