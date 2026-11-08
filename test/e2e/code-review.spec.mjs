@@ -70,6 +70,9 @@ test('the file tree lists the files with status letters, counts and stub badges;
   await expect(treeRow(page, 'src/new-name.js').locator('.cd-status')).toHaveText('R');
   await expect(treeRow(page, 'data/fixtures.json').locator('.cd-stub-badge')).toBeVisible();
   await expect(tree).toContainText('1 file not in the review');
+  // which file was left out, and why
+  await expect(tree.locator('.cd-tree-skipped')).toHaveAttribute('title', '.env.local (excluded: looks like an environment file)');
+  await expect(page.locator('.code-skipped')).toContainText('Not in the review: .env.local (excluded: looks like an environment file)');
   // one card per file, the binary and the too-large file as placeholders (never fetched)
   await expect(page.getByTestId(CODE_TESTID.fileDiff)).toHaveCount(files.length);
   await expect(card(page, 'assets/logo.png').getByTestId(CODE_TESTID.stub)).toContainText('Binary file not shown.');

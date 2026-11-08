@@ -191,7 +191,7 @@ Origin keys:
 
 | type | key | Owner |
 |---|---|---|
-| plan | `claude-plan:<session>:<planFilePath\|inline>` (shipped) | shipped |
+| plan | `claude-plan:<session>:<planFilePath\|inline>` (shipped; committed as `claude-plan:<32 hex>`, details in local state) | shipped |
 | message | `claude-msg:<session>:<message.id>` (shipped) | shipped |
 | stdin | `stdin:<name>` with `--name`, otherwise `null` (shipped) | shipped |
 | url | `url:<normalized url>`. Normalisation lowercases the scheme and host, drops default ports and the fragment, and keeps the query. | WP2 |
@@ -1022,9 +1022,10 @@ newTree = GIT_INDEX_FILE=dir/index git write-tree
 **Untracked files**, before `add -A`. Run `git ls-files -z --others --exclude-standard -- <pathspecs>`, then `lstat`
 each file:
 - **Over `codeFileMaxBytes`:** excluded and listed as `{status: 'A', tooLarge: {side: 'new', bytes}}`.
-- **Matching the key-file patterns of `isDeniedPath`** (`.env*`, `*.pem`, `id_rsa*`, `*.key` and so on; not its
-  dot-dir rule): excluded and listed as `skipped: {reason: 'excluded'}`. The round report names them. No object is
-  written for them.
+- **Matching the credential and key-file rules of `isDeniedPath`** (`src/core/util/secret-files.js`, by name and by
+  path: `.env*`, `*.pem`, `id_rsa*`, `*.key`, keystores, `.npmrc`, `.netrc`, `.aws/credentials`, `credentials.json`
+  and so on; not its dot-dir rule): excluded and listed as `skipped: {reason: 'excluded', detail: 'npm credentials'}`.
+  The round report, the CLI report and the packet name each one and why. No object is written for them.
 - **More than `untrackedExcludeMax` exclusions:** exit 3, "add these to .gitignore".
 
 **File names.** A path is skipped as `{reason: 'unsupported-name'}`, and shown as a stub, when it:
@@ -1092,7 +1093,7 @@ missing), then run `git merge-base --end-of-options <baseCommit> HEAD`.
  * @property {'commit' | 'worktree' | 'index'} newSide   (fixed-endpoint reviews switch to 'worktree' after v1, 4.6)
  * @property {{ from: string, to: string } | null} baseMoved
  * @property {CodeFile[]} files            sorted by path
- * @property {Array<{ path, reason: 'binary'|'too-large'|'submodule'|'excluded'|'unsupported-name' }>} skipped
+ * @property {Array<{ path, reason: 'binary'|'too-large'|'submodule'|'excluded'|'unsupported-name', detail? }>} skipped
  * @property {Record<string, { size: number, mtimeMs: number }>} stat   worktree new-side stat cache (4.13)
  * @typedef {object} CodeFile
  * @property {string} path      (the old path for 'D')

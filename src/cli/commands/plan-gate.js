@@ -9,6 +9,9 @@
 //    "inline">`: v1 the first time, vN+1 when Claude calls ExitPlanMode again for the same plan (the reviewer sees
 //    the diff). Open threads the new version's changes are linked to get the agent reply "Changed in vN."
 //    (addressed): Claude has no reply channel here, and a handled thread must not come back as still open.
+//    The committed files (.specreview/docs/<doc>/) get only a hash of that key: the session id, the plan file path,
+//    the cwd and the transcript path stay in local state under SPECREVIEW_HOME (store/snapshot.js "Local origin
+//    details"); plan docs recorded by 0.4.1 and earlier (raw key in doc.json) are still found by the same key.
 //    Workspace: discovered from $CLAUDE_PROJECT_DIR (it stays at the project root while the hook's cwd follows `cd`),
 //    else the hook's cwd; when discovery is refused, the scratch workspace (cli/snapshot.js).
 // 3. Makes sure the daemon runs, opens the review UI in the system browser (unless --browser none or
@@ -250,7 +253,9 @@ export function decisionFor(engine, packet, toolInput, plan) {
   if (packet?.verdict === 'approved') {
     return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedInput: { ...toolInput, plan: plan.text } } } };
   }
-  const message = formatWith(engine, 'formatPlanFeedback', packet, () => engine.format.formatPacket(packet)).replace(/\n+$/, '');
+  // the plan file comes from local state (planFileOf); the hook input names it too, should that state be gone
+  const p = packet && !packet.file && plan.file ? { ...packet, file: plan.file } : packet;
+  const message = formatWith(engine, 'formatPlanFeedback', p, () => engine.format.formatPacket(p)).replace(/\n+$/, '');
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } };
 }
 

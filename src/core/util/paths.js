@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { secretFileKind } from './secret-files.js';
 
 const MAX_SLUG = 64;
 
@@ -53,8 +54,10 @@ export function isWithin(parent, child) {
 /**
  * The content-origin deny rule for workspace-relative POSIX paths. Denied:
  * - empty paths and paths containing NUL;
- * - any segment starting with '.' (dot-segments, dotfiles, `.git`, `.specreview`, `.env`...);
- * - private-key material: `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*` (also `id_dsa*`, `id_ecdsa*`, `id_ed25519*`).
+ * - any segment starting with '.' (dot-segments, dotfiles, `.git`, `.specreview`, `.env`, `.npmrc`, `.aws/`...);
+ * - credential and key files (util/secret-files.js, the rules a code review leaves untracked files out by):
+ *   `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, keystores (`*.keystore`, `*.jks`...), `credentials.json`,
+ *   service account keys, `kubeconfig`, `*.tfstate`...
  * Matching is case-insensitive. Leading '/' and repeated '/' are tolerated.
  * @param {string} relPosix
  * @returns {boolean}
@@ -64,10 +67,7 @@ export function isDeniedPath(relPosix) {
   const segments = toPosix(relPosix).split('/').filter((s) => s !== '');
   if (segments.length === 0) return true;
   if (segments.some((s) => s.startsWith('.'))) return true;
-  const base = segments[segments.length - 1].toLowerCase();
-  if (/\.(pem|key|p12|pfx)$/.test(base)) return true;
-  if (/^id_(rsa|dsa|ecdsa|ed25519)/.test(base)) return true;
-  return false;
+  return secretFileKind(segments.join('/')) !== null;
 }
 
 /**

@@ -14,6 +14,7 @@ import { main } from '../../src/cli/main.js';
 import { memorySink } from '../../src/cli/io.js';
 import { expandPaths } from '../../src/cli/commands/open.js';
 import { scratchRootFor } from '../../src/cli/snapshot.js';
+import { committedKey } from '../../src/core/store/snapshot.js';
 import { engineCtx, makeWorkspace, textCapture } from '../helpers/engine.js';
 
 const DAEMON = { pid: 1, uiPort: 5873, contentPort: 5874, token: 'tok', secret: 's', version: '0.1.0', startedAt: '' };
@@ -366,7 +367,14 @@ describe('last', () => {
     );
     const ctx = await engineCtx(ws.root);
     const doc = await ctx.store.requireDoc('token-refresh');
-    assert.deepEqual([doc.kind, doc.origin.type, doc.origin.key, doc.origin.messageId], ['snapshot', 'message', `claude-msg:${SID}:msg_01`, 'msg_01']);
+    assert.deepEqual([doc.kind, doc.origin.type, doc.origin.key, doc.origin.messageId], ['snapshot', 'message', committedKey('message', `claude-msg:${SID}:msg_01`), 'msg_01']);
+    // the session, the message id and the transcript path (under the user's home) stay out of the committed store
+    const docDir = path.join(ws.root, '.specreview', 'docs', doc.id);
+    for (const f of ['doc.json', 'versions/0001.json']) {
+      const text = fs.readFileSync(path.join(docDir, f), 'utf8');
+      for (const needle of [SID, 'msg_01', claude]) assert.equal(text.includes(needle), false, `${f} names ${needle}`);
+    }
+    assert.equal(doc.origin.transcript, path.join(claude, 'projects', '-some-project', `${SID}.jsonl`), 'kept in local state');
     // stored with a final newline, as `show` prints it
     assert.equal((await ctx.store.readVersion(doc.id, 1)).source, '## Token refresh\n\nRotate on every use.\n\nGrace window: 30 s.\n');
 

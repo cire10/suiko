@@ -13,7 +13,7 @@ import { setMode, switchVersion } from '../../actions.js';
 import { actorLabel, agentTitle, isAgent, numericVersion, relTime, versionNumbers } from '../../model.js';
 import { store, useStore } from '../../state.js';
 import { Icon } from '../common.js';
-import { buildTree, fileStatus, matchesFilter, openCounts, outsideReview } from './code-model.js';
+import { buildTree, fileStatus, matchesFilter, openCounts, outsideReview, skipText } from './code-model.js';
 import { listKeyOf, loadList, revealFile, setFilter, useCode } from './code-state.js';
 
 /** @param {{ ds: any }} props */
@@ -100,7 +100,7 @@ export function FileTree({ ds }) {
       ${c.list?.status === 'ok' && !files.length ? html`<p class="small muted">${changes ? 'No files changed between these versions.' : 'No changed files.'}</p>` : null}
       ${c.list?.status === 'ok' && files.length && !shown.length ? html`<p class="small muted">No file matches.</p>` : null}
       ${tree.length ? html`<ul class="cd-tree" role="tree" aria-label="Files">${renderNodes(tree, 0)}</ul>` : null}
-      ${skipped.length ? html`<p class="small muted cd-tree-skipped" title=${skipped.map((/** @type {any} */ k) => `${k.path} (${k.reason})`).join('\n')}>
+      ${skipped.length ? html`<p class="small muted cd-tree-skipped" title=${skipped.map((/** @type {any} */ k) => `${k.path} (${skipText(k)})`).join('\n')}>
         ${skipped.length} file${skipped.length === 1 ? '' : 's'} not in the review</p>` : null}
     </section>
     <${Rounds} ds=${ds} version=${s.version} />

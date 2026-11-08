@@ -21,6 +21,7 @@
 import { LIMITS } from '../../shared/protocol.js';
 import { linesLabel, sectionLeaf, truncate } from './labels.js';
 import { originInfo } from '../store/snapshot.js';
+import { skipLabel } from '../code/diff-text.js';
 
 /**
  * @typedef {import('./packet-data.js').Packet} Packet
@@ -231,6 +232,8 @@ function formatCodePacket(p, maxChars) {
   const head = [packetHeader(p)];
   const items = p.threads;
   if (items.length) head.push(...(p.basis ?? []));
+  const left = notReviewedLine(p.code?.notReviewed);
+  if (left) head.push(left);
   for (const r of p.reviews) {
     if (!r.body?.trim()) continue;
     const tag = p.reviews.length > 1 ? ` (${r.id})` : '';
@@ -255,6 +258,22 @@ function formatCodePacket(p, maxChars) {
   if (!p.replyOnly && !approvedDone && p.counts.actionable > 0) footer.push(REPLIES);
   footer.push(`NEXT: ${nextText(p)}`);
   return assemble(head, items, footer, maxChars, p.ref ?? p.doc, itemOptions(p));
+}
+
+/** Files named on the "Not in the review" line of a code packet before the rest are counted. */
+const NOT_REVIEWED_SHOWN = 20;
+
+/**
+ * The line naming the files a code review left out, with why, or null when there are none: the reviewer never saw
+ * them, so the verdict does not cover them.
+ * @param {Array<{ path: string, reason: string, detail?: string }> | undefined} files
+ * @returns {string | null}
+ */
+function notReviewedLine(files) {
+  if (!files?.length) return null;
+  const shown = files.slice(0, NOT_REVIEWED_SHOWN).map((s) => `${s.path} (${skipLabel(s)})`);
+  const more = files.length > NOT_REVIEWED_SHOWN ? ` and ${files.length - NOT_REVIEWED_SHOWN} more` : '';
+  return `Not in the review (the reviewer never saw ${files.length === 1 ? 'it' : 'them'}; the verdict does not cover ${files.length === 1 ? 'it' : 'them'}): ${shown.join(', ')}${more}`;
 }
 
 /**

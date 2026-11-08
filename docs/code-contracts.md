@@ -144,7 +144,7 @@ The store checks only the shape. WP3 validates the refs.
   newSide: 'commit'|'worktree'|'index',
   baseMoved: { from, to } | null,
   files: CodeFile[],
-  skipped: Array<{ path, reason: 'binary'|'too-large'|'submodule'|'excluded'|'unsupported-name' }>,
+  skipped: Array<{ path, reason: 'binary'|'too-large'|'submodule'|'excluded'|'unsupported-name', detail? }>,   // detail: an excluded file's kind ('npm credentials')
   stat: Record<string, { size: number, mtimeMs: number }> }   // worktree new-side stat cache
 ```
 

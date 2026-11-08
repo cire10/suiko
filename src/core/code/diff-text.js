@@ -34,12 +34,26 @@ export const SKIP_LABEL = /** @type {Record<string, string>} */ ({
 });
 
 /**
- * 'assets/logo.png (binary), .env (excluded: looks like a secret)'.
- * @param {CodeManifest['skipped']} skipped
+ * Why a file was skipped, in words: 'binary', 'excluded: looks like npm credentials' (an excluded file names its
+ * kind; rounds recorded by 0.4.1 have none: 'excluded: looks like a secret').
+ * @param {{ reason: string, detail?: string }} s
  * @returns {string}
  */
-export function skippedText(skipped) {
-  return skipped.map((s) => `${s.path} (${SKIP_LABEL[s.reason] ?? s.reason})`).join(', ');
+export function skipLabel(s) {
+  if (s.reason === 'excluded' && typeof s.detail === 'string' && s.detail) return `excluded: looks like ${s.detail}`;
+  return SKIP_LABEL[s.reason] ?? s.reason;
+}
+
+/**
+ * 'assets/logo.png (binary), .npmrc (excluded: looks like npm credentials)'. `canonical`: the generic labels only
+ * ('excluded: looks like a secret'), as the canonical text has them: its bytes decide whether a round changed, so
+ * they stay what 0.4.1 wrote for the same files.
+ * @param {CodeManifest['skipped']} skipped
+ * @param {{ canonical?: boolean }} [opts]
+ * @returns {string}
+ */
+export function skippedText(skipped, { canonical = false } = {}) {
+  return skipped.map((s) => `${s.path} (${canonical ? (SKIP_LABEL[s.reason] ?? s.reason) : skipLabel(s)})`).join(', ');
 }
 
 /**
@@ -64,7 +78,7 @@ export function codeStats(files) {
 export function canonicalText(spec, code, textOf) {
   const st = codeStats(code.files);
   const head = [`suiko code review · ${specLabel(spec, code, { abbrev: 12 })}`];
-  head.push(`files: ${st.files} · +${st.added} -${st.removed}${code.skipped.length ? ` · skipped: ${skippedText(code.skipped)}` : ''}`);
+  head.push(`files: ${st.files} · +${st.added} -${st.removed}${code.skipped.length ? ` · skipped: ${skippedText(code.skipped, { canonical: true })}` : ''}`);
   const blocks = [head.join('\n')];
   const files = [...code.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   for (const f of files) blocks.push(fileBlock(f, spec.context, textOf, code.skipped));

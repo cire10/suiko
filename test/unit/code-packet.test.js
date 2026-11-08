@@ -74,7 +74,8 @@ describe('code packet', () => {
       // the JSON packet (design 4.10)
       const p = /** @type {any} */ (packet);
       assert.equal(p.kind, 'code');
-      assert.deepEqual(Object.keys(p.code).sort(), ['baseSha', 'label', 'newSha', 'root', 'worktree']);
+      assert.deepEqual(Object.keys(p.code).sort(), ['baseSha', 'label', 'newSha', 'notReviewed', 'root', 'worktree']);
+      assert.deepEqual(p.code.notReviewed, [], 'every file of the round is in the review');
       assert.equal(p.code.baseSha, r.mergeBase);
       assert.equal(p.code.worktree, true);
       assert.equal(p.code.root, r.root);

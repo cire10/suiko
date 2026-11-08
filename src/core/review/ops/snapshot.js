@@ -3,8 +3,9 @@
 //   openSnapshot(ctx, { source, format, title, origin, slug, render })  -> { doc, version, created, lines, externals }
 //     creates the doc (or finds it by origin key) and records v1; an existing doc is reported as is (a closed
 //     session is reopened), like openDoc. `render` ({ network }) is the doc's render override (a web page blocks
-//     remote assets); taking an existing doc again updates it, and for origin types that refresh (a web page) the
-//     origin fields too. An existing doc of another format is refused (the format is part of what was tracked).
+//     remote assets); taking an existing doc again updates it, its local origin details (store/snapshot.js: kept
+//     out of committed files) and, for origin types that refresh (a web page), the origin fields too. An existing
+//     doc of another format is refused (the format is part of what was tracked).
 //   recordSnapshot(ctx, doc, { source, origin, summary, replies, other, breakLocks, dryRun, autoAddress })
 //     -> ReviseReport
 //     records vN+1 from the bytes: the usual attribution, re-anchoring and replies of `revise`, with the snapshot
@@ -19,7 +20,7 @@
 
 import { SSE } from '../../../shared/protocol.js';
 import { UsageError } from '../../store/errors.js';
-import { isSnapshot, normalizeOrigin, originInfo, snapshotPath } from '../../store/snapshot.js';
+import { committedKey, isSnapshot, localOriginFields, normalizeOrigin, originInfo, snapshotPath, splitOrigin } from '../../store/snapshot.js';
 import { renderSource, textCharsOf } from '../../render/index.js';
 import { lineIndex } from '../../text/index.js';
 import { decodeText } from '../../util/stable-read.js';
@@ -99,8 +100,10 @@ export async function openSnapshot(ctx, { source, format = 'markdown', title = n
 }
 
 /**
- * Applies what a re-take may change on an existing doc: the render override, and (origin types that refresh) the
- * origin's fields other than its type and key. Mutates `d`; true when something changed.
+ * Applies what a re-take may change on an existing doc: the render override, (origin types that refresh) the
+ * origin's fields other than its type and key, and the take's local origin details (store/snapshot.js: the plan file,
+ * the cwd...; saveDoc keeps them in local state). A doc.json an older Suiko wrote (raw origin key, local details in
+ * it) counts as changed, so saving it rewrites it in the committed form. Mutates `d`; true when something changed.
  * @param {Doc} d
  * @param {{ type: string, key: string | null } & Record<string, unknown>} o
  * @param {{ network?: 'allow' | 'block' } | undefined} renderOpt
@@ -116,6 +119,15 @@ function refreshDoc(d, o, renderOpt) {
   if (originInfo(o.type).refresh && doc.origin?.type === o.type) {
     const next = { ...doc.origin, ...o, type: doc.origin.type, key: doc.origin.key };
     if (JSON.stringify(next) !== JSON.stringify(doc.origin)) {
+      doc.origin = next;
+      changed = true;
+    }
+  }
+  if (doc.origin?.type === o.type && localOriginFields(o.type).length) {
+    const { local } = splitOrigin(o);
+    const next = local ? { ...doc.origin, ...local } : doc.origin;
+    const legacyKey = typeof doc.origin.key === 'string' && committedKey(doc.origin.type, doc.origin.key) !== doc.origin.key;
+    if (legacyKey || JSON.stringify(next) !== JSON.stringify(doc.origin)) {
       doc.origin = next;
       changed = true;
     }

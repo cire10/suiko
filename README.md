@@ -405,7 +405,7 @@ suiko review --pr 123           # a GitHub PR, through gh
   - The agent edits the real files and applies your suggestions with `suiko apply`. It records the next round with `suiko revise <doc> --replies -`.
   - `wait` refuses (exit 3) while the reviewed files have edits that are not recorded yet.
 - **Rounds follow the working tree.** Running the same `suiko review` again records a new round when the files changed, and reopens a closed review.
-  - Untracked files are included, except ones that look like secrets (`.env*`, keys) and very large ones.
+  - Untracked files are included, except very large ones and ones that look like credentials or keys (`.env*`, keys and keystores, `.npmrc`, `.netrc`, `.aws/credentials`, `credentials.json` and more). The report names each file left out and why.
   - Binary and very large files are listed, without a diff.
   - Your index, branches and commits are never changed.
 - **PR mode** (`--pr <n|url>`) needs the GitHub CLI, signed in (`gh auth login`).
@@ -499,10 +499,10 @@ Volatile state lives **outside the repository**, in `SPECREVIEW_HOME` (default `
 ```text
 ~/.specreview/
   daemon.json (0600)  workspaces.json  daemon.log  config.json (optional: your own settings, see Configuration)
-  ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/
+  ws/<wsId>/events/  waiters/  locks/  cache/  drafts/  pending/  origins/
 ```
 
-That includes your unsent drafts, presence heartbeats, the change feed, render caches and staged edits.
+That includes your unsent drafts, presence heartbeats, the change feed, render caches and staged edits. It also holds where each plan or message came from (session id, plan file path, working directory); in `.specreview/`, plan and message docs keep only a hash of that. A `doc.json` written by 0.4.1 loses them at its next change; the version files it wrote keep theirs.
 
 - **Workspace root:** the nearest ancestor of the document that contains `.specreview/`, else the git top level, else the document's directory. `open --workspace <dir>` overrides it.
 - **Git:** the files are small, sorted JSON and plain source copies with sequential names, so they diff and merge well. Recommended `.gitattributes` (printed by `open` the first time; it does not write them):
@@ -556,7 +556,7 @@ Two settings belong to you rather than to a project, so they live in `~/.specrev
 
 - **Local only.** Both servers bind to `127.0.0.1`. A `Host` allowlist blocks DNS rebinding. The UI API requires a random 128-bit token (from `~/.specreview/daemon.json`, mode 0600, or the `?k=` in the URL), state-changing requests must come from the UI's own origin, and no CORS headers are ever sent.
 - **Isolated documents.** Specs, including their scripts, run on a separate origin (port 4778) in a sandboxed iframe without top-navigation rights. That origin has no API and no state-changing routes, and each document is served under an unguessable per-document path, so other websites cannot probe your files.
-- **Path safety.** Only files inside the workspace are served, or copied into `.specreview/assets/` when a version is recorded; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and key files (`*.pem`, `*.key`, `*.p12`, `id_rsa*`) are refused, even when a spec links to them.
+- **Path safety.** Only files inside the workspace are served, or copied into `.specreview/assets/` when a version is recorded; symlink escapes, dot-files and dot-directories (`.env`, `.git`, `.ssh`, `.specreview`) and credential or key files (`*.pem`, `*.key`, `id_rsa*`, keystores, `credentials.json`...) are refused, even when a spec links to them.
 - **Observe-only overlay.** Messages from the document can at most open the composer; nothing is sent, marked done or written without a click in the UI. Comment bodies are sanitised before rendering.
 - **The channel stays Suiko's.** The overlay script runs before anything a document contains, and the UI connects only to the page it loaded (a one-time nonce in the frame's URL), so a document's own scripts cannot take the review channel over. No service worker can be registered on the document origin.
 - **Screen snips are interactive.** A screen snip from the UI (`Shift+B`) and `suiko snip` (unless given `--file`) always show macOS's own region picker; nothing is captured until you drag a box or click a window, and `Esc` cancels. The image is stored with the doc's other attachments and never leaves your machine. The UI loads attachment thumbnails from the document origin, under the doc's unguessable path, and only image files are served there.

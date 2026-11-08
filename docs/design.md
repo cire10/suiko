@@ -606,7 +606,9 @@ For a file, SpecReview looks for the workspace root in this order:
       locks/                              proper-lockfile dirs
 ~/.specreview/   (SPECREVIEW_HOME)
   daemon.json  (0600)   workspaces.json   daemon.log
+  ws/<wsId>/origins/<doc>.json  (0600)  a plan's or message's session id, plan file path, cwd, transcript path
 ```
+(Shipped: the runtime state lives under `SPECREVIEW_HOME/ws/<wsId>/`, BUILD_AMENDMENTS 2.1.) Snapshot origins that name this machine are never committed: doc.json and the version manifests keep `{type, key}` with the key hashed, and the details stay in `origins/`.
 The first time it runs, `open` prints the recommended `.gitattributes` lines. It does not write them.
 ```
 .specreview/assets/** binary
@@ -1688,7 +1690,7 @@ After submit, a status chip moves through "Submitted, then Delivered to claude 1
    - Content URLs carry a random per-daemon `secret` path segment, so other websites cannot probe or script-include workspace files.
 3. **Path safety:**
    - `realpathWithin(workspaceRoot)`, which blocks symlink escapes.
-   - Any path segment that starts with `.` is denied (`.env`, `.git`, `.specreview`, `.ssh`), as are `*.pem`, `*.key`, `*.p12` and `id_rsa*`.
+   - Any path segment that starts with `.` is denied (`.env`, `.git`, `.specreview`, `.ssh`), as are credential and key files by name (`*.pem`, `*.key`, `*.p12`, `id_rsa*`, keystores, `credentials.json`, service account keys, `kubeconfig`, `*.tfstate`: `src/core/util/secret-files.js`). Code reviews leave untracked files matching the same rules out, and say why.
    - Files are capped at 200 MB.
 4. **UI hardening:**
    - CSP:

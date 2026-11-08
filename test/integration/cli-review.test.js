@@ -61,6 +61,30 @@ async function reviewJson(args, o = {}) {
   return JSON.parse(res.stdout);
 }
 
+describe('suiko review: files left out', () => {
+  test('the report names each untracked credential file it left out, and why; the JSON has the reason too', async () => {
+    r.write('src/a.js', lines(21));
+    r.write('.npmrc', '//registry.npmjs.org/:_authToken=npm_secret\n');
+    r.write('.aws/credentials', '[default]\naws_secret_access_key=secret\n');
+    r.write('android/release.keystore', 'keystore');
+    const res = await cli(['review', '--uncommitted']);
+    assert.equal(res.code, 0, res.stderr);
+    const lines2 = res.stdout.split('\n');
+    assert.equal(
+      lines2[1],
+      '  1 file · +1 -0 · skipped: .aws/credentials (excluded: looks like AWS credentials), .npmrc (excluded: looks like npm credentials), ' +
+        'android/release.keystore (excluded: looks like a keystore)',
+    );
+    const j = await reviewJson(['--uncommitted']);
+    assert.deepEqual(j.skipped, [
+      { path: '.aws/credentials', reason: 'excluded', detail: 'AWS credentials' },
+      { path: '.npmrc', reason: 'excluded', detail: 'npm credentials' },
+      { path: 'android/release.keystore', reason: 'excluded', detail: 'a keystore' },
+    ]);
+    assert.doesNotMatch(res.stdout + JSON.stringify(j), /npm_secret|aws_secret_access_key/);
+  });
+});
+
 describe('suiko review: modes', () => {
   test('default on a feature branch: since-base against main; the JSON of design 4.2; the file kinds', async () => {
     const base = r.git('rev-parse', 'HEAD');
@@ -86,7 +110,7 @@ describe('suiko review: modes', () => {
       { path: 'src/a.js', status: 'M', added: 1, removed: 1 },
       { path: 'src/new.js', oldPath: 'src/old.js', status: 'R', added: 1, removed: 1 },
     ]);
-    assert.deepEqual(j.skipped, [{ path: '.env', reason: 'excluded' }, { path: 'logo.png', reason: 'binary' }]);
+    assert.deepEqual(j.skipped, [{ path: '.env', reason: 'excluded', detail: 'an environment file' }, { path: 'logo.png', reason: 'binary' }]);
     assert.deepEqual(j.stats, { files: 5, added: 3, removed: 3 });
     assert.equal(j.url, `http://127.0.0.1:5873/d/${j.wsId}/cr-feat-token-refresh?k=tok`);
     assert.equal(j.ref, 'cr-feat-token-refresh');

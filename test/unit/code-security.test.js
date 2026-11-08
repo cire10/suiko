@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as ops from '../../src/core/review/ops.js';
 import { takeCodeSnapshot } from '../../src/core/code/snapshot.js';
+import { skipLabel, skippedText } from '../../src/core/code/diff-text.js';
 import { lineDraft, lines, makeRepo, packetOf, submit } from '../helpers/git-repo.js';
 
 /** @type {Awaited<ReturnType<typeof makeRepo>>} */
@@ -60,6 +61,53 @@ describe('secrets', () => {
     assert.deepEqual(filesContaining(r.home, SECRET), []);
     const id = r.git('hash-object', '.env');
     assert.throws(() => r.git('cat-file', '-e', id), 'no blob object was written for the secret');
+  });
+
+  test('untracked credential files (.npmrc, .aws/credentials, keystores...) are excluded too, each with why; look-alike source files stay', async () => {
+    const SECRET = 'TOKEN=another-secret-value-456';
+    /** @type {Record<string, string>} what each one looks like */
+    const creds = {
+      '.npmrc': 'npm credentials',
+      '.pypirc': 'PyPI credentials',
+      '.netrc': 'login credentials (netrc)',
+      '.git-credentials': 'git credentials',
+      '.aws/credentials': 'AWS credentials',
+      '.docker/config.json': 'Docker credentials',
+      'credentials.json': 'a credentials file',
+      'gcp-service-account.json': 'a service account key',
+      'android/release.keystore': 'a keystore',
+      'android/app.jks': 'a keystore',
+      '.htpasswd': 'a password file',
+      '.pgpass': 'PostgreSQL passwords',
+    };
+    for (const p of Object.keys(creds)) r.write(p, `${SECRET}\n`);
+    const ordinary = ['.nvmrc', 'docker/config.json', 'src/credentials.js'];
+    for (const p of ordinary) r.write(p, 'ordinary\n');
+    const ctx = await r.ctx();
+    const res = await ops.openCodeReview(ctx, { input: { mode: 'uncommitted' } });
+    assert.deepEqual(res.code.files.map((f) => f.path), ordinary);
+    const byPath = (/** @type {{ path: string }} */ a, /** @type {{ path: string }} */ b) => (a.path < b.path ? -1 : 1);
+    assert.deepEqual(
+      res.code.skipped,
+      Object.entries(creds).map(([p, detail]) => ({ path: p, reason: 'excluded', detail })).sort(byPath),
+    );
+    assert.deepEqual(filesContaining(path.join(r.root, '.specreview'), SECRET), []);
+    assert.deepEqual(filesContaining(r.home, SECRET), []);
+    for (const p of Object.keys(creds)) assert.throws(() => r.git('cat-file', '-e', r.git('hash-object', p)), `no blob object for ${p}`);
+
+    // every report names each left-out file and why: the packet (an approval does not cover them) and the texts
+    await submit(ctx, res.doc.id, { verdict: 'approved' });
+    const { text, packet } = await packetOf(ctx, res.doc.id);
+    assert.deepEqual(packet.code.notReviewed.map((/** @type {any} */ s) => s.path), Object.keys(creds).sort());
+    assert.match(text, /^Not in the review \(the reviewer never saw them; the verdict does not cover them\): \.aws\/credentials \(excluded: looks like AWS credentials\), \.docker\/config\.json \(excluded: looks like Docker credentials\), .*\.npmrc \(excluded: looks like npm credentials\), .*android\/release\.keystore \(excluded: looks like a keystore\), credentials\.json \(excluded: looks like a credentials file\), gcp-service-account\.json \(excluded: looks like a service account key\)$/m);
+    assert.match(skippedText(res.code.skipped), /^\.aws\/credentials \(excluded: looks like AWS credentials\), /);
+    // the canonical diff text (whose bytes decide whether a round changed) keeps the generic label
+    assert.match(String((await ctx.store.readVersion(res.doc.id, 1)).source), /skipped: \.aws\/credentials \(excluded: looks like a secret\)/);
+  });
+
+  test('a round recorded by 0.4.1 (excluded files without a reason) still reads: the generic reason', () => {
+    assert.equal(skipLabel({ reason: 'excluded' }), 'excluded: looks like a secret');
+    assert.equal(skippedText([{ path: '.env', reason: 'excluded' }, { path: 'a.png', reason: 'binary' }]), '.env (excluded: looks like a secret), a.png (binary)');
   });
 });
 

@@ -99,7 +99,9 @@ export {};
  * Provenance of a snapshot doc (doc.json) or of one of its versions (manifest): `type` 'plan' | 'message' |
  * 'stdin' | 'url' | ... and `key`, the identity re-snapshots are recorded under (null = a new doc each time), plus
  * type-specific fields (session, planFilePath, messageId, transcript, name, cwd...; a web page: url, finalUrl,
- * private, fetchedAt, and on each version's manifest also status, contentType, etag, reader, removed).
+ * private, fetchedAt, and on each version's manifest also status, contentType, etag, reader, removed). Plan and
+ * message origins commit only a hash of their key; their session, planFilePath, messageId, cwd and transcript live
+ * in local state, merged in when the Store reads the doc (store/snapshot.js "Local origin details").
  * @typedef {{ type: string, key: string | null } & Record<string, unknown>} DocOrigin
  */
 
@@ -190,7 +192,8 @@ export {};
  * @property {'commit' | 'worktree' | 'index'} newSide
  * @property {{ from: string, to: string } | null} baseMoved
  * @property {CodeFile[]} files sorted by path
- * @property {Array<{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name' }>} skipped
+ * @property {Array<{ path: string, reason: 'binary' | 'too-large' | 'submodule' | 'excluded' | 'unsupported-name', detail?: string }>} skipped
+ *   detail: what an excluded (untracked credential or key) file looks like, 'npm credentials' (absent before 0.4.2)
  * @property {Record<string, { size: number, mtimeMs: number }>} stat worktree new-side stat cache
  */
 

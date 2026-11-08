@@ -12,6 +12,16 @@
 // shadow a real file; findDocByOrigin(key) is the identity used to record re-snapshots as vN+1 of the same doc.
 // Versions are recorded from bytes (ops/snapshot.js openSnapshot / recordSnapshot), never from the workspace.
 //
+// Local origin details: doc.json and the version manifests are committed, so the origin fields that describe this
+// machine (ORIGIN_TYPES `local`: a Claude Code session id, the plan file under ~/.claude/plans, the cwd, the
+// transcript path) never go there. The Store writes them to `<SPECREVIEW_HOME>/ws/<wsId>/origins/<docId>.json`
+// (0600) and merges them back into `doc.origin` when it reads a doc, so in memory a doc looks as before. A type with
+// `hashKey` commits only a hash of its key ('claude-plan:<32 hex>', committedKey), still a stable identity:
+// findDocByOrigin compares committed keys, so the raw key callers build ('claude-plan:<session>:<file>') finds both
+// a new doc and one recorded by Suiko 0.4.1 or earlier (raw key and details in doc.json). Such an old doc.json loses
+// its raw key and details at its next write (its details move to local state); version manifests are never
+// rewritten.
+//
 // Code docs (doc.json `kind: "code"`, origin type 'diff', format 'text', path 'code/<id>.diff') are the other
 // VIRTUAL kind: they share every no-working-file rule above (isVirtual), but are reviewed and revised through the
 // code engine (src/core/code/*, dispatched by src/core/review/kinds.js), never through the snapshot ops.
@@ -20,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import { homeDir } from './home.js';
+import { sha256 } from '../util/hash.js';
 import { isWithin } from '../util/paths.js';
 
 export const SNAPSHOT_KIND = 'snapshot';
@@ -37,12 +48,14 @@ export const CODE_KIND = 'code';
  *   an explicit `wait <doc>`: never by `wait --all` or a doc-less default
  * @property {boolean} [refresh] taking the snapshot again updates the doc's origin fields (a web page: its final URL
  *   and fetch time) besides recording the new text
+ * @property {readonly string[]} [local] origin fields kept in local state, never in committed files (see the header)
+ * @property {boolean} [hashKey] the key names local things (a session id, a path): only its hash is committed
  */
 
 /** @type {Record<string, OriginInfo>} */
 const ORIGIN_TYPES = {
-  plan: { dir: 'plans', label: 'Claude Code plan', noun: 'plan', rerecord: true, gated: true },
-  message: { dir: 'messages', label: 'agent message', noun: 'message', rerecord: false, gated: false },
+  plan: { dir: 'plans', label: 'Claude Code plan', noun: 'plan', rerecord: true, gated: true, local: ['session', 'planFilePath', 'cwd', 'transcript'], hashKey: true },
+  message: { dir: 'messages', label: 'agent message', noun: 'message', rerecord: false, gated: false, local: ['session', 'messageId', 'transcript'], hashKey: true },
   stdin: { dir: 'text', label: 'piped text', noun: 'text', rerecord: true, gated: false },
   url: { dir: 'web', label: 'web page', noun: 'page', rerecord: true, gated: false, refresh: true },
 };
@@ -163,6 +176,70 @@ export function normalizeOrigin(origin) {
   return { ...o, type: o.type, key };
 }
 
+/** A committed hashed key: '<prefix>:<32 hex>' (a raw key always has a second colon, or no 32-hex tail). */
+const HASHED_KEY_RE = /^[a-z][a-z0-9-]*:[0-9a-f]{32}$/;
+
+/**
+ * The form of an origin key that may be committed: for a type with `hashKey`, '<prefix>:' + the first 32 hex of
+ * sha256(raw key), where prefix is the raw key up to its first colon ('claude-plan:f00dfeed-…:/Users/…/plan.md' ->
+ * 'claude-plan:3c1f…'); a key already in that form, a null key and other types are returned as they are.
+ * @param {unknown} type the origin type
+ * @param {string | null | undefined} key
+ * @returns {string | null}
+ */
+export function committedKey(type, key) {
+  if (typeof key !== 'string' || !key) return key ?? null;
+  if (!originInfo(typeof type === 'string' ? type : '').hashKey || HASHED_KEY_RE.test(key)) return key;
+  const prefix = /^([a-z][a-z0-9-]*):/.exec(key)?.[1] ?? String(type);
+  return `${prefix}:${sha256(key).slice(0, 32)}`;
+}
+
+/**
+ * Whether a doc's origin has the key `key` (raw or committed form): what findDocByOrigin matches on. A doc recorded
+ * by an older Suiko keeps its raw key in doc.json until its next write; both forms compare equal.
+ * @param {unknown} origin the doc's origin
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function originHasKey(origin, key) {
+  const o = /** @type {any} */ (origin);
+  if (!o || typeof o.key !== 'string' || typeof key !== 'string' || !key) return false;
+  return o.key === key || committedKey(o.type, o.key) === committedKey(o.type, key);
+}
+
+/**
+ * Splits an origin into what is committed (doc.json, version manifests) and the local details (see the header):
+ * `committed` drops the type's `local` fields and has the committed key; `local` holds those fields (null when there
+ * are none). A non-object origin is returned as `committed` unchanged.
+ * @param {unknown} origin
+ * @returns {{ committed: any, local: Record<string, unknown> | null }}
+ */
+export function splitOrigin(origin) {
+  if (!origin || typeof origin !== 'object' || Array.isArray(origin)) return { committed: origin, local: null };
+  const o = /** @type {Record<string, unknown>} */ (origin);
+  const fields = originInfo(typeof o.type === 'string' ? o.type : '').local ?? [];
+  /** @type {Record<string, unknown>} */
+  const committed = {};
+  /** @type {Record<string, unknown>} */
+  const local = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (fields.includes(k)) {
+      if (v !== undefined) local[k] = v;
+    } else committed[k] = v;
+  }
+  if ('key' in committed) committed.key = committedKey(o.type, /** @type {string | null} */ (committed.key));
+  return { committed, local: Object.keys(local).length ? local : null };
+}
+
+/**
+ * The origin fields of a type kept in local state ([] for types that keep none).
+ * @param {unknown} type
+ * @returns {readonly string[]}
+ */
+export function localOriginFields(type) {
+  return originInfo(typeof type === 'string' ? type : '').local ?? [];
+}
+
 /**
  * Synthetic workspace-relative path of a snapshot doc: '<dir>/<slug>.md' (or .html). No leading dot segment, and it
  * carries the extension that drives the version file name and the renderer's format fallback.
@@ -229,7 +306,9 @@ export function docRefFor(docId, root) {
 }
 
 /**
- * The plan file of a plan snapshot (absolute path from the origin), or null.
+ * The plan file of a plan snapshot (absolute path from the origin), or null. The path is a local detail: the Store
+ * merges it in from local state when it reads the doc (doc.json keeps it only when an older Suiko wrote it), so a
+ * clone of the repo on another machine has none.
  * @param {unknown} doc
  * @returns {string | null}
  */
