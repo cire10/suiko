@@ -161,7 +161,7 @@ function BaseFrame() {
     loaded.current = src;
     baseGuest.attach(frame, origin);
     baseFrameNavigating();
-    frame.src = src;
+    baseGuest.load(src); // with the handshake nonce (frame.js)
   }, [src, origin]);
 
   return html`<div class="frame-wrap compare-base" data-guest=${connected ? 'ready' : 'loading'}

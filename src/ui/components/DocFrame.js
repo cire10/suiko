@@ -1,10 +1,12 @@
 // @ts-check
-// The doc iframe (content origin, sandboxed, no referrer). The guest bridge is attached BEFORE src is assigned,
+// The doc iframe (content origin, sandboxed, no referrer). The guest bridge is attached BEFORE it loads anything,
 // so the guest's `hello` is never missed. A new src (version switch) or a nonce bump (live preview reload) navigates
-// the frame. The bridge then reconnects on the next hello, and the app re-sends init.
-// Every page the frame loads should say hello (the guest runs first in its <head>). When an iframe `load` comes with
-// no hello since the previous one, and none follows within LOST_AFTER_MS, the doc navigated away to a page without
-// the guest: frameLost() marks it disconnected and a banner offers the way back.
+// the frame through guest.load(), which adds the handshake nonce (frame.js); the bridge connects to the hello with
+// that nonce, and the app re-sends init.
+// Every page the frame loads should say hello (the guest runs before anything the author wrote). When an iframe
+// `load` comes with no answered hello since the previous one, and none follows within LOST_AFTER_MS, the doc
+// navigated away to a page without the guest (or replaced itself): frameLost() marks it disconnected and a banner
+// offers the way back.
 
 import { html, useEffect, useRef } from 'preact-htm';
 import { TESTID } from 'protocol';
@@ -44,9 +46,8 @@ export function DocFrame() {
     loaded.current = key;
     clearTimeout(lostTimer.current);
     guest.attach(frame, origin);
-    guest.reset();
     frameNavigating();
-    frame.src = src;
+    guest.load(src);
   }, [src, nonce, origin]);
 
   const onLoad = () => {

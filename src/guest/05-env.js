@@ -1,14 +1,117 @@
 // Suiko guest, part 05: environment, small utilities and the early handshake listener.
 //
-// This part runs synchronously while the <script> tag is being executed (the daemon inserts the tag right after
-// <head>), i.e. before any of the document's own scripts. It:
+// This part runs synchronously while the <script> tag is being executed (the daemon inserts the tag before anything
+// the author wrote: right after the doctype, html.js), i.e. before any of the document's own scripts. It:
+//   - captures the built-ins the channel relies on (Intrinsics) before a page script can replace them;
+//   - takes the handshake nonce out of the frame's URL (HELLO_NONCE, sent back in the hello by 20-channel.js);
 //   - reads the UI origin allowlist (data-sr-ui) and the target id (data-sr-target) from document.currentScript;
-//   - installs the capture-phase window 'message' listener that accepts exactly one {sr:1,type:'connect'} message
-//     carrying a MessagePort from window.parent at an allowed origin, then stops its propagation. After that
-//     handshake every window message is ignored: all traffic uses the MessagePort (see 20-channel.js);
+//   - installs the capture-phase window 'message' listener that takes every valid {sr:1,type:'connect'} message (a
+//     trusted event carrying a MessagePort from window.parent at an allowed origin) and stops its propagation, so
+//     the page's own listeners never see one; the newest connect is the UI's current channel (see 20-channel.js);
 //   - starts the srid index (SridIndex: srid -> the parser-inserted element, so copies made by page scripts never
 //     shadow the stamped original);
 //   - defines helpers shared by later parts (guard, debounce, srid lookups, rect serialisation).
+//
+// The page's scripts share this realm: they can replace any prototype method or getter, and a replaced one is called
+// with the guest's objects (`this`, its arguments). On the channel's path the guest therefore only calls the copies
+// taken here, never Function.prototype.apply / call, and loops over its own arrays by index (a replaced
+// Array.prototype[Symbol.iterator] would be handed them): no page script can be handed the MessagePort, an event that
+// carries it, or a function that would attach the guest to another port.
+
+/**
+ * The built-ins the channel uses, as they were when the bundle started (see the header). A missing one (an older
+ * browser) falls back to a plain property read or call.
+ */
+const Intrinsics = (() => {
+  /** @param {any} proto @param {string} name @param {'get'|'set'|'value'} kind @returns {any} */
+  const take = (proto, name, kind) => {
+    try {
+      const d = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
+      return (d && typeof d[kind] === 'function' && d[kind]) || null;
+    } catch {
+      return null;
+    }
+  };
+  const ME = typeof MessageEvent === 'function' ? MessageEvent.prototype : null;
+  const MP = typeof MessagePort === 'function' ? MessagePort.prototype : null;
+  const EV = typeof Event === 'function' ? Event.prototype : null;
+  const PT = typeof PageTransitionEvent === 'function' ? PageTransitionEvent.prototype : null;
+  return Object.freeze({
+    apply: Reflect.apply,
+    assign: Object.assign,
+    create: Object.create,
+    shift: Array.prototype.shift,
+    data: take(ME, 'data', 'get'),
+    origin: take(ME, 'origin', 'get'),
+    source: take(ME, 'source', 'get'),
+    ports: take(ME, 'ports', 'get'),
+    stopImmediatePropagation: take(EV, 'stopImmediatePropagation', 'value'),
+    persisted: take(PT, 'persisted', 'get'),
+    postMessage: take(MP, 'postMessage', 'value'),
+    close: take(MP, 'close', 'value'),
+    setOnMessage: take(MP, 'onmessage', 'set'),
+  });
+})();
+
+/** Reflect.apply as it was: a call that never goes through Function.prototype.apply / call. */
+const ReflectApply = Intrinsics.apply;
+
+/** A MessageEvent's data, origin, source and ports, read with the original getters. */
+const MessageEvents = Object.freeze({
+  /** @param {MessageEvent} ev @returns {any} */
+  data: (ev) => (Intrinsics.data ? ReflectApply(Intrinsics.data, ev, []) : ev.data),
+  /** @param {MessageEvent} ev @returns {string} */
+  origin: (ev) => (Intrinsics.origin ? ReflectApply(Intrinsics.origin, ev, []) : ev.origin),
+  /** @param {MessageEvent} ev @returns {any} */
+  source: (ev) => (Intrinsics.source ? ReflectApply(Intrinsics.source, ev, []) : ev.source),
+  /** @param {MessageEvent} ev @returns {ReadonlyArray<MessagePort>} */
+  ports: (ev) => (Intrinsics.ports ? ReflectApply(Intrinsics.ports, ev, []) : ev.ports),
+});
+
+/** MessagePort methods and the onmessage setter, as they were. */
+const Ports = Object.freeze({
+  /** @param {MessagePort} port @param {any} msg */
+  post(port, msg) {
+    if (Intrinsics.postMessage) ReflectApply(Intrinsics.postMessage, port, [msg]);
+    else port.postMessage(msg);
+  },
+  /** @param {MessagePort} port @param {((ev: MessageEvent) => void)|null} fn */
+  onMessage(port, fn) {
+    if (Intrinsics.setOnMessage) ReflectApply(Intrinsics.setOnMessage, port, [fn]);
+    else port.onmessage = fn;
+  },
+  /** @param {MessagePort} port */
+  close(port) {
+    if (Intrinsics.close) ReflectApply(Intrinsics.close, port, []);
+    else port.close();
+  },
+});
+
+/**
+ * The handshake nonce on the frame's URL (`?sr-nonce=<32 hex>`, protocol.js HELLO_NONCE_PARAM), or ''. It is taken out
+ * of the address right away (history.replaceState), before any script of the page runs: the page sees its URL
+ * without it, and only the guest's hello carries it. The UI answers only a hello with the nonce of the frame's latest
+ * load, once, so a page that loads without the guest (a `javascript:` URL, a page next to the doc, a page the frame
+ * reloaded by itself) can never take the guest's place: it cannot know a nonce the guest has not already used.
+ */
+const HELLO_NONCE = (() => {
+  try {
+    const raw = location.search.slice(1);
+    if (!raw) return '';
+    const parts = raw.split('&');
+    const key = HELLO_NONCE_PARAM + '=';
+    const rest = parts.filter((p) => !p.startsWith(key));
+    if (rest.length === parts.length) return '';
+    const value = parts.find((p) => p.startsWith(key)).slice(key.length);
+    const href = location.href.replace(/[?#].*$/, '') + (rest.length ? '?' + rest.join('&') : '') + location.hash;
+    try {
+      history.replaceState(history.state, '', href);
+    } catch { /* the nonce stays in the address; it is used up by the hello all the same */ }
+    return /^[0-9a-f]{32}$/.test(value) ? value : '';
+  } catch {
+    return '';
+  }
+})();
 
 const SCRIPT_EL = /** @type {HTMLScriptElement|null} */ (document.currentScript);
 
@@ -43,16 +146,17 @@ const guestErrors = [];
 
 /**
  * Wraps a callback so an exception inside the guest never escapes into the page (it would otherwise be counted as
- * a page error and could break the author's handlers).
+ * a page error and could break the author's handlers). Calls through the original Reflect.apply: a page script that
+ * replaced Function.prototype.apply would otherwise be handed every guest callback.
  * @template {Function} F
  * @param {F} fn
  * @param {string} label
  * @returns {F}
  */
 function guard(fn, label) {
-  return /** @type {any} */ (function guarded(...args) {
+  return /** @type {any} */ (function guarded(/** @type {any[]} */ ...args) {
     try {
-      return fn.apply(this, args);
+      return ReflectApply(fn, this, args);
     } catch (err) {
       recordGuestError(label, err);
       return undefined;
@@ -62,8 +166,8 @@ function guard(fn, label) {
 
 /** @param {string} label @param {unknown} err */
 function recordGuestError(label, err) {
-  guestErrors.push({ label, message: String((err && /** @type {any} */ (err).stack) || err) });
-  if (guestErrors.length > 50) guestErrors.shift();
+  guestErrors[guestErrors.length] = { label, message: String((err && /** @type {any} */ (err).stack) || err) };
+  if (guestErrors.length > 50) ReflectApply(Intrinsics.shift, guestErrors, []);
 }
 
 /**
@@ -131,7 +235,7 @@ function closestSridEl(node) {
  * A document script can copy stamped elements (a TOC built with `h.cloneNode(true)`, a carousel duplicating its
  * slides), and a copy keeps the data-srid of its original. When the copy comes first in document order,
  * document.querySelector would return it, and highlights, scroll-to and the outline would go to the copy. So, from the
- * moment the guest runs (at the start of <head>, before any of the document's own scripts) until DOMContentLoaded, a
+ * moment the guest runs (first in the page, before any of the document's own scripts) until DOMContentLoaded, a
  * MutationObserver records the first element seen with each srid. Records arrive in insertion order and the parser
  * delivers them (microtask checkpoint) before every parser-inserted script runs, so the parser's element is always
  * seen before any copy a script makes of it. Only the added nodes themselves are recorded (never their subtrees):
@@ -258,21 +362,38 @@ function deepActiveElement() {
 }
 
 /**
- * Handshake state. The first valid 'connect' message wins; later window messages are ignored entirely.
+ * Handshake state: the port of the newest valid 'connect' (the UI's current channel) and the code to run on one.
  * @type {{port: MessagePort|null, origin: string|null, listeners: Array<(port: MessagePort, origin: string) => void>}}
  */
 const Handshake = { port: null, origin: null, listeners: [] };
 
+/** Whether an origin is in the UI allowlist (a loop by index: a page script may replace Array.prototype.includes). */
+function isAllowedOrigin(/** @type {unknown} */ origin) {
+  const list = ENV.allowedOrigins;
+  for (let i = 0; i < list.length; i++) if (list[i] === origin) return true;
+  return false;
+}
+
+// Every valid connect is taken and stopped here, the first window 'message' listener of the page (capture phase, at
+// the target: it runs before every listener and onmessage handler the page adds), so a connect never reaches the
+// page, even when the UI connects more than once (each connect is the UI's newest channel: the guest moves to it).
+// A connect is valid when the browser itself delivered it (isTrusted: an event a page script made and dispatched can
+// claim any source, origin and port), from window.parent as it was before the page's scripts ran, at an allowed UI
+// origin, with a port.
 window.addEventListener('message', guard((/** @type {MessageEvent} */ ev) => {
-  if (Handshake.port) return; // after the handshake: window messages are never trusted
-  const d = ev.data;
+  if (!ev.isTrusted || !ENV.framed) return;
+  const d = MessageEvents.data(ev);
   if (!d || typeof d !== 'object' || d.sr !== 1 || d.type !== MSG.CONNECT) return;
-  if (!ENV.framed || ev.source !== ENV.parent) return;
-  if (!ENV.allowedOrigins.includes(ev.origin)) return;
-  const port = ev.ports && ev.ports[0];
+  if (MessageEvents.source(ev) !== ENV.parent) return;
+  const origin = MessageEvents.origin(ev);
+  if (!isAllowedOrigin(origin)) return;
+  const ports = MessageEvents.ports(ev);
+  const port = ports && ports[0];
   if (!port) return;
-  ev.stopImmediatePropagation();
+  if (Intrinsics.stopImmediatePropagation) ReflectApply(Intrinsics.stopImmediatePropagation, ev, []);
+  else ev.stopImmediatePropagation();
   Handshake.port = port;
-  Handshake.origin = ev.origin;
-  for (const fn of Handshake.listeners) guard(fn, 'handshake')(port, ev.origin);
+  Handshake.origin = origin;
+  const fns = Handshake.listeners;
+  for (let i = 0; i < fns.length; i++) guard(fns[i], 'handshake')(port, origin);
 }, 'message'), true);

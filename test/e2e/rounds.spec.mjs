@@ -258,6 +258,41 @@ test('delivery and presence follow the event stream', async ({ page, ui, mock })
   await expect(presence).toHaveText(/Claude is listening/);
 });
 
+test('presence and working-copy events that arrive while a refresh is out are not undone by its older answer', async ({ page, ui, mock }) => {
+  // Hold the answer of the second doc-state request (the catch-up refresh when the event stream opens): it is
+  // computed before the events below, so it says nobody listens and the working copy is clean.
+  let requests = 0;
+  /** @type {() => void} */
+  let release = () => {};
+  const gate = new Promise((/** @type {(v?: any) => void} */ r) => { release = r; });
+  /** @type {() => void} */
+  let heldNow = () => {};
+  const held = new Promise((/** @type {(v?: any) => void} */ r) => { heldNow = r; });
+  await page.route(/\/api\/docs\/[^/]+\/kitchen-sink$/, async (route) => {
+    requests++;
+    if (requests !== 2) return route.continue();
+    const response = await route.fetch();
+    heldNow();
+    await gate;
+    return route.fulfill({ response });
+  });
+  await ui.open('kitchen-sink');
+  await held;
+  const d = mock.doc('kitchen-sink');
+  const presence = page.getByTestId(TESTID.turnPill).getByTestId(TESTID.presence);
+  d.setWaiters([{ agent: 'claude' }]);
+  await expect(presence).toHaveAttribute('data-presence', 'listening');
+  d.setWorking(`${d.source(2)}\nA new paragraph.\n`);
+  await expect(presence).toHaveAttribute('data-presence', 'editing');
+  release();
+  await page.waitForTimeout(400);
+  await expect(presence).toHaveAttribute('data-presence', 'editing');
+  await expect(page.locator('.banner-warn')).toContainText('Unrecorded changes on disk');
+  d.setWorking(null);
+  await expect(presence).toHaveAttribute('data-presence', 'listening');
+  expect(ui.errors).toEqual([]);
+});
+
 test('a new version never switches the view while a comment is being written', async ({ page, ui, mock }) => {
   await ui.open('kitchen-sink');
   await modeTab(page, 'review').click();

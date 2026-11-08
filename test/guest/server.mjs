@@ -3,9 +3,11 @@
 //   UI origin      (http://127.0.0.1:<uiPort>):      /parent.html?doc=<name>  - embeds the doc iframe and speaks the
 //                  protocol: answers the guest's `hello` with a MessageChannel `connect`, records every message on
 //                  window.__msgs (hello from the window, everything else from the port) and exposes
-//                  window.__send(type, payload) to talk to the guest over the port.
+//                  window.__send(type, payload) to talk to the guest over the port. Only the first hello gets a port
+//                  (it is the guest's: the guest says hello before any script of the page runs).
 //   content origin (http://127.0.0.1:<contentPort>): /doc/<name>.html - a fixture from test/guest/fixtures with the
-//                  guest <script> tag inserted right after <head> (as the daemon does); /__sr/<RV>/guest.js - the
+//                  guest <script> tag inserted where the daemon inserts it (html.js guestInsertAt: right after the
+//                  doctype); /__sr/<RV>/guest.js - the
 //                  bundle from buildGuestBundle(); /__sr/<RV>/vendor/<path> - vendored doc libraries through
 //                  VENDOR_DOC (the snip rasteriser, modern-screenshot, is imported from there, like on the daemon);
 //                  /img/*.png - PNGs generated in memory (plain zlib, no deps); /raw/<name>.html - the same fixture
@@ -19,6 +21,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { buildGuestBundle } from '../../src/guest/build.js';
+import { renderHtml } from '../../src/core/render/html.js';
 import { RENDERER_VERSION } from '../../src/shared/protocol.js';
 import { VENDOR_DOC, resolveVendor } from '../../src/shared/vendor.js';
 
@@ -131,9 +134,9 @@ export async function startHarness(opts = {}) {
       const src = readFileSync(join(FIXTURES, m[1] + '.html'), 'utf8');
       const tag = `<script src="${origins.content}/__sr/${RENDERER_VERSION}/guest.js" data-sr-ui="${origins.ui} http://localhost:${new URL(origins.ui).port}" ` +
         `data-sr-target="ws1/${m[1]}/v1" data-sr-ignore></script>`;
-      const at = src.search(/<head[^>]*>/i);
-      const html = at < 0 ? tag + src : src.replace(/<head[^>]*>/i, (h) => h + tag);
-      return send(200, 'text/html; charset=utf-8', html);
+      // the daemon's rule (the fixtures carry their data-srid attributes already: nothing else is spliced in)
+      const at = renderHtml(src, { stamp: false }).guestInsertAt;
+      return send(200, 'text/html; charset=utf-8', src.slice(0, at) + tag + src.slice(at));
     }
     return send(404, 'text/plain', 'not found');
   });

@@ -8,7 +8,12 @@
 // Insertion point: before the final '>'; for '/>' endings before the '/', unless the last attribute is unquoted
 // and ends right before the '/' (the slash is part of its value): then before '>' for HTML elements, and foreign
 // (SVG/MathML) elements are left unstamped. Removing every inserted attribute yields the original string.
-// guestInsertAt: after the <head> start tag, else after <html>, else after the doctype, else 0 (after a BOM).
+// guestInsertAt: right after the doctype, else 0 (after a BOM). Nothing the author wrote can come before it: a
+// <script>, an <img onerror> or a CSP <meta> placed ahead of <head> would otherwise run or apply before the guest
+// (which must capture the built-ins it relies on before any page script can replace them). The browser then
+// creates <html> and <head> itself; the author's <html> attributes still apply (the parser merges them into the
+// root), only attributes on the author's <head> start tag are dropped. Never before the doctype: the page would
+// lose its standards mode.
 // The srcmap uses each element's full outer range (startOffset..endOffset); the text stream covers <body> only
 // and applies TEXT_EXCLUDE. pre.mermaid/div.mermaid elements are kind 'mermaid' (text excluded); when the doc
 // has them, loads no mermaid of its own (no script or link mentions mermaid) and has no module scripts (a module
@@ -226,22 +231,36 @@ function contentRange(source, b, el, lower) {
 }
 
 /**
- * Guest insertion point and the end of the body content (both in source offsets).
+ * Guest insertion point (see the header) and the end of the body content (both in source offsets).
  * @param {P5Node} doc @param {string} source
  */
 function landmarks(doc, source) {
   const htmlEl = (doc.childNodes ?? []).find((n) => n.tagName === 'html');
-  const head = htmlEl?.childNodes?.find((n) => n.tagName === 'head');
   const body = htmlEl?.childNodes?.find((n) => n.tagName === 'body');
-  const doctype = (doc.childNodes ?? []).find((n) => n.nodeName === '#documentType');
-  let guestAt = source.charCodeAt(0) === 0xfeff ? 1 : 0;
-  if (head?.sourceCodeLocation?.startTag) guestAt = head.sourceCodeLocation.startTag.endOffset;
-  else if (htmlEl?.sourceCodeLocation?.startTag) guestAt = htmlEl.sourceCodeLocation.startTag.endOffset;
-  else if (doctype?.sourceCodeLocation) guestAt = doctype.sourceCodeLocation.endOffset;
+  const bom = source.charCodeAt(0) === 0xfeff;
+  let end = doctypeEnd(doc);
+  if (end == null && bom) {
+    // where the doctype ends for the browser, which drops the BOM before parsing (see doctypeEnd)
+    const rest = doctypeEnd(/** @type {P5Node} */ (/** @type {unknown} */ (parse(source.slice(1), { sourceCodeLocationInfo: true }))));
+    if (rest != null) end = rest + 1;
+  }
+  const guestAt = end ?? (bom ? 1 : 0);
   let bodyEnd = source.length;
   if (body?.sourceCodeLocation?.endTag) bodyEnd = body.sourceCodeLocation.endTag.startOffset;
   else if (htmlEl?.sourceCodeLocation?.endTag) bodyEnd = htmlEl.sourceCodeLocation.endTag.startOffset;
   return { guestAt, bodyEnd };
+}
+
+/**
+ * Where the doctype the parser kept ends (the document's first token apart from comments and spaces), or null.
+ * A source that starts with a BOM needs a second look (landmarks): the browser takes the BOM as the encoding's
+ * signature and drops it before parsing, while parse5 reads it as text and so ignores a doctype after it.
+ * @param {P5Node} doc
+ * @returns {number|null}
+ */
+function doctypeEnd(doc) {
+  const doctype = (doc.childNodes ?? []).find((n) => n.nodeName === '#documentType');
+  return doctype?.sourceCodeLocation ? doctype.sourceCodeLocation.endOffset : null;
 }
 
 /**

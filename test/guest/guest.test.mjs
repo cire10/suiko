@@ -44,13 +44,16 @@ describe('handshake', () => {
       const hello = await waitMsg(d.page, 'hello');
       assert.equal(hello.sr, 1);
       assert.equal(hello.target, 'ws1/prose/v1');
-      assert.equal(hello.title, 'Token Service Spec');
       assert.equal(hello.href, harness.docUrl('prose'));
       assert.equal(hello.highlightApi, true);
+      assert.equal(hello.guestVersion, 2);
+      assert.equal(hello.nonce, '', 'this frame URL carries no nonce');
+      assert.equal(hello.title, undefined, 'the hello goes out before <title> is parsed: the title comes with ready');
       const hellos = await msgsOf(d.page, 'hello');
       assert.equal(hellos.length, 1, 'exactly one hello reaches the real parent origin');
 
       const ready = await waitMsg(d.page, 'ready');
+      assert.equal(ready.title, 'Token Service Spec');
       assert.deepEqual(ready.outline, [
         { srid: 2, level: 1, text: 'Token Service', id: 'title' },
         { srid: 8, level: 2, text: 'Rollout plan', id: 'rollout' },
@@ -1039,7 +1042,7 @@ describe('changes overlay', () => {
 });
 
 describe('security and fidelity', () => {
-  test('forged window messages after the handshake are ignored; only the port is trusted', async () => {
+  test('window messages are never commands; a second connect from the UI moves the guest to its newest port', async () => {
     const d = await openDoc(browser, harness, 'prose');
     try {
       // From the parent window, as a window message (not via the port).
@@ -1053,26 +1056,31 @@ describe('security and fidelity', () => {
         window.postMessage({ sr: 1, type: 'setHidden', hidden: true }, '*');
         window.postMessage({ sr: 1, type: 'setTool', tool: 'pick' }, '*');
       });
-      // A second 'connect' with a fresh port from the real parent.
-      await d.page.evaluate((origin) => {
-        const ch = new MessageChannel();
-        /** @type {any} */ (window).__forged = ch.port1;
-        /** @type {any} */ (window).__forgedMsgs = [];
-        ch.port1.onmessage = (e) => /** @type {any} */ (window).__forgedMsgs.push(e.data);
-        /** @type {HTMLIFrameElement} */ (document.getElementById('doc')).contentWindow?.postMessage({ sr: 1, type: 'connect' }, origin, [ch.port2]);
-      }, harness.contentOrigin);
-      await settle(d.frame, 100);
-      await d.page.evaluate(() => /** @type {any} */ (window).__forged.postMessage({ sr: 1, type: 'setHidden', hidden: true }));
       await settle(d.frame, 100);
       let ins = await inspect(d.frame);
       assert.equal(ins.hidden, false);
       assert.equal(ins.glass, false);
-      assert.deepEqual(await d.page.evaluate(() => /** @type {any} */ (window).__forgedMsgs), []);
-      // The genuine port still works.
-      await send(d.page, 'setHidden', { hidden: true });
-      await settle(d.frame);
+
+      // A second 'connect' with a fresh port from the real parent (the UI re-handshakes after it reloaded or reset the
+      // frame): the guest takes it, the page never sees it, and the old port goes quiet.
+      await d.page.evaluate((origin) => {
+        const ch = new MessageChannel();
+        /** @type {any} */ (window).__second = ch.port1;
+        /** @type {any} */ (window).__secondMsgs = [];
+        ch.port1.onmessage = (e) => /** @type {any} */ (window).__secondMsgs.push(e.data);
+        /** @type {HTMLIFrameElement} */ (document.getElementById('doc')).contentWindow?.postMessage({ sr: 1, type: 'connect' }, origin, [ch.port2]);
+      }, harness.contentOrigin);
+      await d.page.waitForFunction(() => /** @type {any} */ (window).__secondMsgs.some((/** @type {any} */ m) => m.type === 'ready'));
+      const authorMsgs = await d.frame.evaluate(() => /** @type {any} */ (window).__authorMessages);
+      assert.ok(!authorMsgs.some((/** @type {any} */ m) => m && m.type === 'connect'), 'the page never sees a connect');
+      await send(d.page, 'setHidden', { hidden: true }); // the first port: closed by the guest
+      await settle(d.frame, 100);
+      assert.equal((await inspect(d.frame)).hidden, false);
+      await d.page.evaluate(() => /** @type {any} */ (window).__second.postMessage({ sr: 1, type: 'setHidden', hidden: true }));
+      await settle(d.frame, 100);
       ins = await inspect(d.frame);
       assert.equal(ins.hidden, true);
+      assert.deepEqual(await d.frame.evaluate(() => /** @type {any} */ (window).__suikoGuest.errors()), []);
     } finally {
       await d.close();
     }

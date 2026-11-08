@@ -20,7 +20,8 @@ const NATIVE_ADD_LISTENER = typeof EventTarget === 'function' ? EventTarget.prot
  * @param {boolean|AddEventListenerOptions} [options]
  */
 function listenOwn(target, type, fn, options) {
-  if (NATIVE_ADD_LISTENER) NATIVE_ADD_LISTENER.call(target, type, /** @type {EventListener} */ (fn), options);
+  // Reflect.apply as it was (05-env.js): a page script that replaced Function.prototype.call would be handed fn
+  if (NATIVE_ADD_LISTENER) ReflectApply(NATIVE_ADD_LISTENER, target, [type, fn, options]);
   else target.addEventListener(type, /** @type {EventListener} */ (fn), options);
 }
 
@@ -54,7 +55,7 @@ const PageKeys = (() => {
       } catch (err) {
         recordGuestError('page-keys', err);
       }
-      return native.call(this, type, listener, options);
+      return ReflectApply(native, this, [type, listener, options]);
     };
     try {
       Object.defineProperty(EventTarget.prototype, 'addEventListener', {

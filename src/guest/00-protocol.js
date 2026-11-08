@@ -7,8 +7,14 @@
 // Every part of the guest is concatenated (in the order of parts.json) into one IIFE; top-level declarations in
 // one part are visible to all later parts.
 
-/** Version of the guest wire behaviour (bump when message payloads change shape). */
-const GUEST_VERSION = 1;
+/**
+ * Version of the guest wire behaviour (bump when message payloads change shape). 2: the hello carries the nonce of
+ * the frame's URL and is sent before any script of the page runs; the title moved to `ready`; `bye` on pagehide.
+ */
+const GUEST_VERSION = 2;
+
+/** Query parameter of the handshake nonce on the doc frame's URL (protocol.js HELLO_NONCE_PARAM). */
+const HELLO_NONCE_PARAM = 'sr-nonce';
 
 /** Characters of context captured on each side of a quote. */
 const CONTEXT_CHARS = 32;
@@ -39,6 +45,7 @@ const PICKABLE_TAGS = Object.freeze([
 const MSG = Object.freeze({
   HELLO: 'hello',
   READY: 'ready',
+  BYE: 'bye',
   SELECTION: 'selection',
   ACTION: 'action',
   POSITIONS: 'positions',

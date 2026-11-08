@@ -211,6 +211,32 @@ test.describe('fresh doc', () => {
     expect(await ui.inspect()).toBeTruthy();
     expect(ui.errors.filter((e) => !/404|Failed to load resource/.test(e))).toEqual([]);
   });
+
+  test('UIR-6b: a doc page that reloads itself is loaded again by the UI and connects', async ({ page, ui }) => {
+    await ui.open('kitchen-sink');
+    const first = await ui.frame();
+    // the page's own URL never shows the handshake nonce (the guest took it out before the page's scripts ran)
+    expect(await first.evaluate(() => location.search)).toBe('');
+    await first.evaluate(() => {
+      /** @type {any} */ (window).__beforeReload = true;
+      location.reload();
+    });
+    // The reloaded page has no nonce of its own, so it cannot connect: the UI loads the version again, with a fresh
+    // nonce (the navigation entry's URL still has it), and that page connects.
+    await expect.poll(async () => {
+      try {
+        const f = await ui.frame();
+        return await f.evaluate(() => !(/** @type {any} */ (window).__beforeReload)
+          && /** @type {any} */ (window).__suikoGuest?.connected === true
+          && String(performance.getEntriesByType('navigation')[0]?.name ?? '').includes('sr-nonce='));
+      } catch {
+        return false;
+      }
+    }, { timeout: 10000 }).toBe(true);
+    await expect(page.locator('[data-frame-lost]')).toHaveCount(0);
+    await ui.selectText('Ship rotation behind a flag.');
+    expect(ui.errors).toEqual([]);
+  });
 });
 
 test.describe('round 2', () => {

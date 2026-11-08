@@ -106,17 +106,38 @@ test('ineligible elements: head content, html/head/body, script/style/template/n
   assert.equal(unstamp(r.html), src);
 });
 
-test('guestInsertAt: after <head>, else <html>, else doctype, else 0 / after BOM', async () => {
+test('guestInsertAt: right after the doctype, else 0 / after a BOM', async () => {
   const cases = [
-    ['<!doctype html><html><head><title>x</title></head><body><p>a</p></body></html>', '<!doctype html><html><head>'],
-    ['<!doctype html><html lang="en"><body><p>a</p></body></html>', '<!doctype html><html lang="en">'],
+    ['<!doctype html><html><head><title>x</title></head><body><p>a</p></body></html>', '<!doctype html>'],
+    ['<!doctype html><html lang="en"><body><p>a</p></body></html>', '<!doctype html>'],
     ['<!DOCTYPE html>\n<p>a</p>', '<!DOCTYPE html>'],
+    ['<!-- built by x -->\n<!DOCTYPE html>\n<html><head></head></html>', '<!-- built by x -->\n<!DOCTYPE html>'],
+    ['\uFEFF<!doctype html><html><head></head></html>', '\uFEFF<!doctype html>'],
     ['<p>a</p>', ''],
     ['\uFEFF<p>a</p>', '\uFEFF'],
+    // a doctype after content is ignored by the parser (the page is in quirks mode either way): the very start
+    ['<p>a</p><!doctype html>', ''],
   ];
   for (const [src, before] of cases) {
     const r = await render(src);
     assert.equal(r.html.slice(0, r.guestInsertAt), before, JSON.stringify(src));
+  }
+});
+
+test('guestInsertAt: nothing the author wrote before <head> runs or applies ahead of the guest', async () => {
+  const cases = [
+    '<!doctype html><script>steal()</script><html><head><title>x</title></head><body><p>a</p></body></html>',
+    '<!doctype html><html><img src=x onerror="steal()"><head></head><body><p>a</p></body></html>',
+    '<!doctype html><html><meta http-equiv="Content-Security-Policy" content="script-src \'none\'"><head></head><body></body></html>',
+    '<!doctype html><html><head><script>steal()</script></head><body></body></html>',
+    // an unterminated comment swallows the rest of the page: the guest still comes first
+    '<!-- <script>steal()</script>',
+  ];
+  for (const src of cases) {
+    const r = await render(src);
+    const before = r.html.slice(0, r.guestInsertAt);
+    assert.doesNotMatch(before, /<script|<img|<meta/i, JSON.stringify(src));
+    assert.ok(/^(<!doctype html>)?$/i.test(before), `${JSON.stringify(src)} -> ${JSON.stringify(before)}`);
   }
 });
 

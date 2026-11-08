@@ -51,10 +51,11 @@ export { ASSET_BASE_PLACEHOLDER } from './shell.js';
 
 /**
  * Revision of the render rules that change what a render holds without a RENDERER_VERSION change (e.g. when an HTML
- * doc gets the vendored mermaid: 2 = never with module scripts or a mermaid of its own). A version render cached on
- * disk under other rules is recomputed, so a fixed rule reaches docs reviewed before the fix.
+ * doc gets the vendored mermaid: 2 = never with module scripts or a mermaid of its own; 3 = an HTML doc's guest goes
+ * right after the doctype, html.js). A version render cached on disk under other rules is recomputed, so a fixed rule
+ * reaches docs reviewed before the fix.
  */
-export const RENDER_RULES = 2;
+export const RENDER_RULES = 3;
 
 /**
  * Normalise a format name ('md' / 'markdown' / 'html' / 'htm' / 'text'); falls back to the doc path's extension.

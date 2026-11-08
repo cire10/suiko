@@ -544,14 +544,15 @@ describe('content origin', () => {
     assert.match(r.text, /data-srid="\d+"/);
   });
 
-  test('the guest tag is inserted right after <head> (HTML doc, version)', async () => {
+  test('the guest tag is inserted right after the doctype (HTML doc, version)', async () => {
     const k = docKey(store1.wsId, 'app');
     const r = await content(`/c/${k}/v1/docs/app.html`);
     assert.equal(r.status, 200);
-    const expected = '<!doctype html><html lang="en"><head><script src=';
-    assert.ok(r.text.startsWith(expected), r.text.slice(0, 120));
-    assert.ok(r.text.includes(`data-sr-target="${store1.wsId}/app/v1"`));
-    assert.ok(r.text.includes('<meta charset="utf-8"><title>App</title>'));
+    assert.ok(r.text.startsWith('<!doctype html><script src='), r.text.slice(0, 120));
+    const end = r.text.indexOf('</script>') + '</script>'.length;
+    assert.ok(r.text.slice(0, end).includes(`data-sr-target="${store1.wsId}/app/v1"`));
+    // everything the author wrote follows the guest, untouched
+    assert.ok(r.text.slice(end).startsWith('<html lang="en"><head><meta charset="utf-8"><title>App</title></head>'), r.text.slice(end, end + 120));
   });
 
   test('the Markdown shell asset base is replaced and its assets are served immutable', async () => {
