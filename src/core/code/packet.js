@@ -278,9 +278,11 @@ export function codeLineBasis(snap, threads) {
  * @param {string} ref the doc as follow-up commands name it
  * @param {{ approved: boolean, finalNow: boolean }} approval
  * @param {number} actionable
+ * @param {boolean} [summary] the reviewer's summary is the only feedback (no actionable thread, not approved): the
+ *   steps of a round, recorded with `-m <what changed>` instead of thread replies
  * @returns {string}
  */
-export function codeNextStep(doc, ref, { approved, finalNow }, actionable) {
+export function codeNextStep(doc, ref, { approved, finalNow }, actionable, summary = false) {
   if (doc.state === 'closed') return 'the review session is closed; stop waiting';
   if (approved && actionable === 0) {
     return finalNow ? `suiko final ${ref} --decisions   (then stop waiting)` : 'approved (no final version marked); stop waiting unless the reviewer asks for more';
@@ -288,11 +290,16 @@ export function codeNextStep(doc, ref, { approved, finalNow }, actionable) {
   if (approved && finalNow) {
     return `approved: answer each thread with suiko reply ${ref} <tid> -m <md> --status answered|declined (no edits, no new round) -> suiko final ${ref} --decisions   (then stop waiting)`;
   }
-  if (actionable === 0) return `nothing to act on; suiko wait ${ref} (background)`;
+  if (actionable === 0 && !summary) return `nothing to act on; suiko wait ${ref} (background)`;
+  const lead = summary ? `${SUMMARY_LEAD}: ` : '';
+  const record = summary ? '-m <what changed>' : '--replies -';
   const spec = /** @type {any} */ (doc.code ?? {});
-  if (spec.mode === 'staged') return `edit the files -> git add <files> -> suiko revise ${ref} --replies - -> suiko wait ${ref} (background)`;
+  if (spec.mode === 'staged') return `${lead}edit the files -> git add <files> -> suiko revise ${ref} ${record} -> suiko wait ${ref} (background)`;
   if ((spec.mode === 'branch' || spec.mode === 'range') && !isFixedEndpoint(spec)) {
-    return `edit -> commit -> suiko revise ${ref} --replies - -> suiko wait ${ref} (background)`;
+    return `${lead}edit -> commit -> suiko revise ${ref} ${record} -> suiko wait ${ref} (background)`;
   }
-  return `edit the files -> suiko revise ${ref} --replies - (records round v${(doc.head ?? 0) + 1} from your working tree) -> suiko wait ${ref} (background)`;
+  return `${lead}edit the files -> suiko revise ${ref} ${record} (records round v${(doc.head ?? 0) + 1} from your working tree) -> suiko wait ${ref} (background)`;
 }
+
+/** How a NEXT line starts when the reviewer's summary is the only feedback (also review/packet-data.js nextStep). */
+export const SUMMARY_LEAD = 'act on the reviewer summary (no thread asks for anything)';

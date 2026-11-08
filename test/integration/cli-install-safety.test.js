@@ -314,6 +314,27 @@ describe('backups and pre-existing files', () => {
     assert.equal(read(cmd), '# my own /review-spec\n');
   });
 
+  test('uninstall does not put back an older Suiko or SpecReview copy that install backed up', async () => {
+    // copies from before the install manifest (or the rename): install does not recognise them, so it backs them up
+    const oldSkill = '---\nname: spec-review\ndescription: Review loop (SpecReview).\n---\n\nRun `specreview open <file>`.\n';
+    const oldCmd = '---\ndescription: Open a spec in Suiko.\n---\n\nRun `suiko open $ARGUMENTS`.\n';
+    const h = makeHome({ files: { '.claude/skills/spec-review/SKILL.md': oldSkill, '.claude/commands/review-spec.md': oldCmd } });
+    const skill = h.p('.claude/skills/spec-review/SKILL.md');
+    const cmd = h.p('.claude/commands/review-spec.md');
+    assert.equal((await h.run(['install', '--only', 'claude', '--apply'])).code, 0);
+    assert.equal(read(`${skill}.specreview-backup`), oldSkill);
+    assert.equal(read(`${cmd}.specreview-backup`), oldCmd);
+    const un = await h.run(['uninstall', '--only', 'claude', '--apply']);
+    assert.equal(un.code, 0, un.stdout);
+    assert.match(un.stdout, /its backup SKILL\.md\.specreview-backup holds an older Suiko copy, so it is not put back/);
+    assert.match(un.stdout, /its backup review-spec\.md\.specreview-backup holds an older Suiko copy, so it is not put back/);
+    assert.doesNotMatch(un.stdout, /restores the file install replaced/);
+    assert.equal(fs.existsSync(skill), false, 'no stale skill left for Claude Code to load');
+    assert.equal(fs.existsSync(cmd), false);
+    assert.equal(read(`${skill}.specreview-backup`), oldSkill, 'the backups stay as they are');
+    assert.equal(read(`${cmd}.specreview-backup`), oldCmd);
+  });
+
   test('uninstall keeps a config file that existed before install, with its empty containers', async () => {
     const h = makeHome({ dirs: ['.claude'], files: { '.claude/settings.json': '{}\n', '.cursor/mcp.json': '{"mcpServers": {}}\n', '.config/opencode/opencode.json': '{\n  "mcp": {},\n  "theme": "x"\n}\n' } });
     assert.equal((await h.run(['install', '--only', 'claude,cursor,opencode', '--apply'])).code, 0);

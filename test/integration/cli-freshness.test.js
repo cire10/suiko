@@ -227,6 +227,39 @@ describe('suiko doctor', () => {
     assert.match(r.stdout, /^WARN {2}Codex CLI: Your Suiko instructions \(Codex CLI\) are from 0\.0\.2; run `suiko install --only codex --apply` to update them\.$/m);
     assert.match(r.stdout, /^ok {4}Claude Code: Suiko configured$/m);
   });
+
+  test('says when a Suiko hook runs a script that is gone; the install it names points the hooks at this CLI', async () => {
+    const esc = (/** @type {string} */ s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const h = makeHome();
+    await h.run(['install', '--apply', '--only', 'claude']);
+    const settings = h.p('.claude/settings.json');
+    // hooks an install from a clone that has since been deleted wrote: the same node, a script that no longer exists
+    const gone = path.join(h.home, 'dev', 'suiko', 'bin', 'suiko.js');
+    const s = JSON.parse(read(settings));
+    for (const groups of Object.values(s.hooks)) for (const g of groups) for (const hk of g.hooks) hk.command = hk.command.replace(/"[^"]*suiko\.js"/, JSON.stringify(gone));
+    fs.writeFileSync(settings, JSON.stringify(s, null, 2));
+    // ... while the skill is also older than the CLI: both are said
+    const skill = h.p('.claude/skills/spec-review/SKILL.md');
+    fs.writeFileSync(skill, remark(read(skill), '0.0.3'));
+    const deps = { daemonStatus: async () => ({ running: false }) };
+    let r = await h.run(['doctor'], deps);
+    assert.match(r.stdout, new RegExp(`^ERR {3}Claude Code: 2 Suiko hooks in ~/\\.claude/settings\\.json cannot run: they run ${esc(gone)}, which is missing\\. Claude Code reports a hook error each time one runs until you run \`suiko install --only claude --apply\`, which points them at this CLI\\.$`, 'm'));
+    assert.match(r.stdout, /^WARN {2}Claude Code: Your Suiko skill for Claude Code is from 0\.0\.3; /m);
+    assert.doesNotMatch(r.stdout, /incomplete or outdated/);
+    assert.equal(r.code, 1, 'an ERR');
+    const dry = await h.run(['install', '--only', 'claude']);
+    assert.match(dry.stdout, new RegExp(`hooks: .*; replaces the Suiko hooks already there \\(they run ${esc(gone)}, which is missing\\); other settings kept`));
+    await h.run(['install', '--apply', '--only', 'claude']);
+    r = await h.run(['doctor'], deps);
+    assert.match(r.stdout, /^ok {4}Claude Code: Suiko configured$/m);
+    assert.doesNotMatch(r.stdout, /cannot run/);
+    // a hook from before the rename, run by name: `specreview` is not on PATH
+    const t = JSON.parse(read(settings));
+    t.hooks.UserPromptSubmit[0].hooks[0].command = 'specreview hook prompt';
+    fs.writeFileSync(settings, JSON.stringify(t, null, 2));
+    r = await h.run(['doctor'], deps);
+    assert.match(r.stdout, /^ERR {3}Claude Code: a Suiko hook in ~\/\.claude\/settings\.json cannot run: it runs `specreview`, which is not on PATH here\. Claude Code reports a hook error each time it runs until /m);
+  });
 });
 
 describe('versions and the line', () => {

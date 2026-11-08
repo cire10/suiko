@@ -11,7 +11,8 @@
 //     only that entry changes, and a file that is not valid JSON is refused (InstallRefusal), never overwritten.
 //   - Whole files we copy (skills, commands): ours when the content is what we install now (the not-on-PATH note and
 //     the `installed by suiko <version>` mark aside), or what an earlier install wrote (sha256 in the install manifest,
-//     $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user edited and says so.
+//     $SPECREVIEW_HOME/install-manifest.json). Uninstall keeps a copy the user edited and says so, and puts back the
+//     file of the user's a copy replaced, never a backup that holds an older Suiko copy (namesSuiko).
 // A file we modify that existed before gets a one-time backup, <file>.specreview-backup (applyPlan with backups); a
 // file of the user's that a copy replaces is backed up every time it differs from the last backup.
 // Files are written through symlinks (the link stays, its target changes), and uninstall deletes a config file only
@@ -282,25 +283,43 @@ export function copyAction(file, content, o = {}) {
 }
 
 /**
- * The most recent backup copyAction made of a file it replaced (<file>.specreview-backup, or a timestamped one),
- * else null.
- * @param {string} file
- * @returns {{ path: string, text: string } | null}
+ * Whether a file's text names Suiko or SpecReview (its old name). Every whole file Suiko installs does, so a backup
+ * that does holds an older Suiko copy that an install did not recognise (no manifest hash, e.g. one written before
+ * the manifest existed), not a file of the user's.
+ * @param {string} text
+ * @returns {boolean}
  */
-function newestBackup(file) {
+export function namesSuiko(text) {
+  return /\b(?:suiko|specreview)\b/i.test(text);
+}
+
+/**
+ * The most recent backup copyAction made of a file of the user's that it replaced (<file>.specreview-backup, or a
+ * timestamped one), else null; `suiko`: the newer backups passed over because they hold older Suiko copies
+ * (namesSuiko), which uninstall never puts back.
+ * @param {string} file
+ * @returns {{ backup: { path: string, text: string } | null, suiko: string[] }}
+ */
+function userBackup(file) {
   const dir = path.dirname(file);
   const prefix = `${path.basename(file)}${BACKUP_SUFFIX}`;
   let names;
   try {
     names = fs.readdirSync(dir).filter((n) => n === prefix || n.startsWith(`${prefix}-`));
   } catch {
-    return null;
+    return { backup: null, suiko: [] };
   }
   // timestamped names sort by time; the plain one is the oldest
   names.sort((a, b) => (a === prefix ? -1 : b === prefix ? 1 : a < b ? -1 : a > b ? 1 : 0));
-  const newest = names.at(-1);
-  const text = newest ? readTextOrNull(path.join(dir, newest)) : null;
-  return newest && text !== null ? { path: path.join(dir, newest), text } : null;
+  /** @type {string[]} */
+  const suiko = [];
+  for (const name of names.reverse()) {
+    const text = readTextOrNull(path.join(dir, name));
+    if (text === null) continue;
+    if (!namesSuiko(text)) return { backup: { path: path.join(dir, name), text }, suiko };
+    suiko.push(name);
+  }
+  return { backup: null, suiko };
 }
 
 /**
@@ -326,12 +345,16 @@ export function removeCopyAction(file, content, o = {}) {
   const current = readExisting(file);
   if (current === null) return null;
   if (isOurCopy(file, current, content, o)) {
-    // install replaced a file of the user's (backing it up): put that back rather than leave it only as a backup
-    const backup = newestBackup(file);
+    // install replaced a file of the user's (backing it up): put that back rather than leave it only as a backup. A
+    // backup of an older Suiko copy is never put back (that would reinstall stale instructions); it stays on disk.
+    const { backup, suiko } = userBackup(file);
     if (backup) {
       return { path: file, action: 'update', content: backup.text, ...(o.share ? { share: o.share } : {}), note: `restores the file install replaced (from ${path.basename(backup.path)})` };
     }
-    return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: 'installed by Suiko' };
+    const passed = suiko.length === 1
+      ? `; its backup ${suiko[0]} holds an older Suiko copy, so it is not put back`
+      : suiko.length > 1 ? `; its backups (${suiko.join(', ')}) hold older Suiko copies, so they are not put back` : '';
+    return { path: file, action: 'delete', content: '', ...(o.rmdirs ? { rmdirs: o.rmdirs } : {}), ...(o.share ? { share: o.share } : {}), note: `installed by Suiko${passed}` };
   }
   return { path: file, action: 'unchanged', content: current, kept: true, note: 'kept: changed since Suiko installed it (delete it yourself if you no longer need it)' };
 }

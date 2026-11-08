@@ -2,7 +2,7 @@
   "name": "suiko",
   "description": "Suiko: an iterative, commentable, versioned review loop for the HTML and Markdown documents AI agents write.",
   "owner": {
-    "name": "Eric Tang"
+    "name": "cire10"
   },
   "plugins": [
     {

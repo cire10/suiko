@@ -24,7 +24,7 @@
     "suiko": "bin/suiko.js"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.12"
   },
   "files": [
     "bin",
@@ -32,7 +32,11 @@
     "integrations",
     ".claude-plugin",
     "README.md",
-    "docs"
+    "docs/user-guide.md",
+    "docs/agent-protocol.md",
+    "docs/design.md",
+    "docs/BUILD_AMENDMENTS.md",
+    "docs/img"
   ],
   "scripts": {
     "test": "node --test \"test/unit/**/*.test.js\" \"test/integration/**/*.test.js\"",

@@ -265,8 +265,8 @@ describe('install.sh', { skip }, () => {
     assert.deepEqual(s.npmCalls(), []);
   });
 
-  test('Node.js older than 20.19, or missing, is refused before anything is written', () => {
-    for (const [version, ok] of [['18.20.0', false], ['20.18.1', false], ['20.19.0', true], ['22.1.0', true]]) {
+  test('Node.js older than 22.12, or missing, is refused before anything is written', () => {
+    for (const [version, ok] of [['18.20.0', false], ['20.19.0', false], ['22.11.0', false], ['22.12.0', true], ['24.1.0', true]]) {
       const s = sandbox({ node: `#!/bin/sh\nif [ "$1" = -p ]; then echo ${version}; exit 0; fi\nexec "${process.execPath}" "$@"\n` });
       const src = stubCheckout();
       const r = s.run([], { script: path.join(src, 'install.sh') });
@@ -274,7 +274,7 @@ describe('install.sh', { skip }, () => {
         assert.equal(r.code, 0, `${version}: ${r.out}`);
       } else {
         assert.equal(r.code, 1, version);
-        assert.match(r.stderr, new RegExp(`Node\\.js 20\\.19 or newer is required; .* is ${version.replace(/\./g, '\\.')}`));
+        assert.match(r.stderr, new RegExp(`Node\\.js 22\\.12 or newer is required; .* is ${version.replace(/\./g, '\\.')}`));
         assert.deepEqual(s.npmCalls(), []);
         assert.equal(fs.existsSync(s.shim), false);
       }

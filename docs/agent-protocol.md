@@ -122,7 +122,7 @@ next: the URL was opened in the system browser; run `suiko wait funding-study` i
 - `wait --all` waits on every doc in the workspace, except Claude Code plans (their reviews go to the plan gate).
 - While it runs, the UI shows "**claude is listening**" (presence comes from a heartbeat file). On stderr it prints `suiko: waiting for a review of <doc> vN (as claude). Safe to interrupt; nothing is lost.`
 - Only one `wait` per doc and agent is live. Starting a new one makes the older one print `suiko: superseded by pid N (a newer wait is listening); ignore this.` and exit 6.
-- **Single comments.** The reviewer usually sends each comment as they write it (or with `suiko snip --send`). Each arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet; comments sent while you work are merged into your next packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again. On a long document the reviewer may batch the edits (section 7.1).
+- **Single comments.** The reviewer usually sends each comment as they write it (or with `suiko snip --send`). Each arrives as an ordinary review with verdict `comment` and one thread, so a running `wait` exits with a short packet; comments sent while you work are merged into your next packet. A `COMMENT` verdict still needs action: handle the thread, revise, and wait again. So does a review whose only feedback is its summary: change what it asks for and record it as `NEXT` says (`suiko revise <doc> -m <what changed>`). On a long document the reviewer may batch the edits (section 7.1).
 - **Delivery and acknowledgement.** A review is marked delivered only after the packet has been written to stdout, so a killed `wait` re-delivers next time. The agent's next command on that doc (`revise`, `reply`, `apply`, `edit`, `show`, `feedback`, `ask`, `reanchor`) acknowledges it. The UI shows "Delivered to claude 14:02", then "revising…".
 
 ## 6. The feedback packet
@@ -231,6 +231,7 @@ NEXT: suiko final funding-study --decisions   (then stop waiting)
 - **Conversation:** the last agent reply (`claude (v2): …`, `claude (v2, needs_input): …`) and every reviewer comment after it. Older comments collapse to `(+2 earlier, suiko show <doc> t2)`.
 - **Anchor notes:** `(outdated: text changed)`; `(orphaned: was "…" in §5 v1 L260; reanchor with suiko reanchor)`.
 - **Footer:** `LOCKED (agreed - do not modify): …`, `DECISIONS to keep true: …`, drafts (only with `--include-drafts`, labelled as not submitted), `PROTOCOL: …` (the first packet), `REPLIES: …` (every packet with threads to act on: replies go on the threads, where the reviewer reads them in Suiko), `NEXT: …`.
+- **Summary only:** a review whose only feedback is its summary (no thread to act on, not an approval) is a request too: `NEXT: act on the reviewer summary (no thread asks for anything): edits it asks for, if any -> suiko revise <doc> -m <what changed> -> suiko wait <doc> (background)`. A code review, a snapshot and a page you build get their round's own steps, recorded with `-m <what changed>` (`suiko snapshot` records the page as it is); a public page is not edited.
 - **Size cap:** 10,000 characters. Threads beyond the cap are listed one per line with `suiko show <doc> tN`.
 
 ### 6.4 JSON form (`--json`, MCP `structuredContent`)

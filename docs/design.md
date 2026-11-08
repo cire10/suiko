@@ -379,7 +379,7 @@ Runtime dependencies (pin exact versions; all verified on npm on 2026-10-10):
 {
   "name": "specreview", "version": "0.1.0", "type": "module",
   "bin": { "specreview": "bin/specreview.js" },
-  "engines": { "node": ">=20.19" },
+  "engines": { "node": ">=22.12" },
   "files": ["bin", "src", "integrations", ".claude-plugin", "README.md", "docs"],
   "scripts": {
     "test": "node --test test/unit/ test/integration/",

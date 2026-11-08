@@ -14,7 +14,7 @@ process.env.SPECREVIEW_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'sr-home-'
 
 const {
   InstallRefusal, MD_MARKERS, TOML_MARKERS, blockAction, checkMarkers, copyAction, deleteEntry, detectIndent, findBlock, isOurCopy, jsonAction,
-  loadManifest, removeBlock, removeBlockAction, removeCopyAction, setEntry, sha256, stringifyLike, updateManifest, upsertBlock, writeAtomic,
+  loadManifest, namesSuiko, removeBlock, removeBlockAction, removeCopyAction, setEntry, sha256, stringifyLike, updateManifest, upsertBlock, writeAtomic,
 } = await import('../../src/cli/install/files.js');
 /** @param {string[]} created @returns {import('../../src/cli/install/files.js').Manifest} */
 const manifestOf = (created) => ({ schema: 1, files: {}, created });
@@ -165,6 +165,28 @@ test('copies: recognised by content, template (any invocation note) or a manifes
   for (const b of fs.readdirSync(path.dirname(f)).filter((n) => n.startsWith(`${path.basename(f)}.specreview-backup`))) fs.rmSync(path.join(path.dirname(f), b));
   assert.equal(removeCopyAction(f, template, { template })?.action, 'delete');
   assert.equal(removeCopyAction(file('gone.md'), template, { template }), null);
+});
+
+test('uninstall never puts back a backup that holds an older Suiko or SpecReview copy', () => {
+  const template = '# Skill\n\nRun `suiko open`.\n';
+  const f = file('SKILL.md', template);
+  const plain = `${f}.specreview-backup`;
+  // install backed up an older copy it did not recognise (no manifest hash): from before the rename, then a later one
+  fs.writeFileSync(plain, '# Skill\n\nRun `specreview open`.\n');
+  const del = removeCopyAction(f, template, { template, rmdirs: [path.dirname(f)] });
+  assert.equal(del?.action, 'delete');
+  assert.deepEqual(del?.rmdirs, [path.dirname(f)]);
+  assert.equal(del?.note, `installed by Suiko; its backup ${path.basename(plain)} holds an older Suiko copy, so it is not put back`);
+  const stamped = `${f}.specreview-backup-20261020T120000Z`;
+  fs.writeFileSync(stamped, '# Skill\n\nRun `suiko open` (0.3.1).\n');
+  assert.match(String(removeCopyAction(f, template, { template })?.note), /its backups \(.*-20261020T120000Z, .*SKILL\.md\.specreview-backup\) hold older Suiko copies, so they are not put back$/);
+  // a file of the user's backed up before them still comes back, past the newer Suiko copies
+  fs.writeFileSync(plain, 'my own skill\n');
+  const restore = removeCopyAction(f, template, { template });
+  assert.deepEqual([restore?.action, restore?.content, restore?.note], ['update', 'my own skill\n', `restores the file install replaced (from ${path.basename(plain)})`]);
+  assert.equal(fs.readFileSync(stamped, 'utf8'), '# Skill\n\nRun `suiko open` (0.3.1).\n', 'the backups stay as they are');
+  assert.equal(namesSuiko('Run `SpecReview open`'), true);
+  assert.equal(namesSuiko('# my own /review-spec\nspec-review is mine\n'), false);
 });
 
 test('checkMarkers: one well-formed pair or none; anything else is refused', () => {
